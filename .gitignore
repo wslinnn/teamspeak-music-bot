@@ -4,4 +4,5 @@ dist/
 *.db
 .env
 config.json
+cookies/
 .superpowers/

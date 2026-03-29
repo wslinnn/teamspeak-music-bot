@@ -17,7 +17,7 @@ export function createCookieStore(cookieDir: string): CookieStore {
       fs.writeFileSync(
         filePath,
         JSON.stringify({ cookie, updatedAt: new Date().toISOString() }),
-        "utf-8"
+        { encoding: "utf-8", mode: 0o600 }
       );
     },
 
