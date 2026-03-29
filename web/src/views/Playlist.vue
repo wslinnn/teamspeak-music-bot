@@ -8,9 +8,9 @@
         <CoverArt :url="playlist.coverUrl" :size="200" :radius="14" :show-shadow="true" />
         <div class="playlist-meta">
           <h1 class="playlist-title">{{ playlist.name }}</h1>
-          <p class="playlist-desc">{{ playlist.description }}</p>
+          <p class="playlist-desc" v-if="playlist.description">{{ playlist.description }}</p>
           <div class="playlist-stats">
-            {{ playlist.songCount }} 首歌曲
+            {{ songs.length }} 首歌曲
           </div>
           <button class="play-all-btn" @click="playAll">
             <Icon icon="mdi:play" />
@@ -32,6 +32,8 @@
         />
       </div>
     </template>
+
+    <div v-else class="loading">歌单不存在或加载失败</div>
   </div>
 </template>
 
@@ -55,8 +57,18 @@ interface PlaylistDetail {
   songCount: number;
 }
 
+interface SongItem {
+  id: string;
+  name: string;
+  artist: string;
+  album: string;
+  duration: number;
+  coverUrl: string;
+  platform: string;
+}
+
 const playlist = ref<PlaylistDetail | null>(null);
-const songs = ref<Array<{ id: string; name: string; artist: string; album: string; duration: number; coverUrl: string; platform: string }>>([]);
+const songs = ref<SongItem[]>([]);
 const loading = ref(true);
 
 async function playAll() {
@@ -74,11 +86,12 @@ onMounted(async () => {
   const platform = (route.query.platform as string) || 'netease';
 
   try {
-    const res = await axios.get(`/api/music/playlist/${id}`, {
-      params: { platform },
-    });
-    playlist.value = res.data.playlist;
-    songs.value = res.data.songs;
+    const [detailRes, songsRes] = await Promise.all([
+      axios.get(`/api/music/playlist/${id}/detail`, { params: { platform } }),
+      axios.get(`/api/music/playlist/${id}`, { params: { platform } }),
+    ]);
+    playlist.value = detailRes.data.playlist;
+    songs.value = songsRes.data.songs;
   } catch {
     // Ignore if API not ready
   } finally {

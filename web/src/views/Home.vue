@@ -31,8 +31,40 @@
       </div>
     </section>
 
-    <!-- Recommended Playlists -->
+    <!-- 私人FM -->
     <section class="section">
+      <h2 class="section-title">私人FM</h2>
+      <div class="fm-card hover-scale" @click="playFm">
+        <div class="fm-icon-wrapper">
+          <Icon icon="mdi:radio" class="fm-icon" />
+        </div>
+        <div class="fm-info">
+          <div class="fm-title">开启私人FM</div>
+          <div class="fm-desc">根据你的口味推荐音乐</div>
+        </div>
+        <Icon icon="mdi:play-circle" class="fm-play-icon" />
+      </div>
+    </section>
+
+    <!-- 每日推荐 -->
+    <section class="section" v-if="dailySongs.length > 0">
+      <h2 class="section-title">每日推荐</h2>
+      <div class="daily-grid">
+        <div
+          v-for="song in dailySongs.slice(0, 12)"
+          :key="song.id"
+          class="daily-card hover-scale"
+          @click="store.play(song.name, song.platform)"
+        >
+          <CoverArt :url="song.coverUrl" :size="120" :radius="10" :show-shadow="true" />
+          <div class="daily-name">{{ song.name }}</div>
+          <div class="daily-artist">{{ song.artist }}</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 推荐歌单 -->
+    <section class="section" v-if="playlists.length > 0">
       <h2 class="section-title">推荐歌单</h2>
       <div class="playlist-grid">
         <div
@@ -43,6 +75,23 @@
         >
           <CoverArt :url="playlist.coverUrl" :size="160" :radius="10" :show-shadow="true" />
           <div class="playlist-name">{{ playlist.name }}</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 我的歌单 -->
+    <section class="section" v-if="userPlaylists.length > 0">
+      <h2 class="section-title">我的歌单</h2>
+      <div class="playlist-grid">
+        <div
+          v-for="pl in userPlaylists"
+          :key="pl.id"
+          class="playlist-card hover-scale"
+          @click="$router.push(`/playlist/${pl.id}?platform=${pl.platform}`)"
+        >
+          <CoverArt :url="pl.coverUrl" :size="160" :radius="10" :show-shadow="true" />
+          <div class="playlist-name">{{ pl.name }}</div>
+          <div class="playlist-count">{{ pl.songCount }} 首</div>
         </div>
       </div>
     </section>
@@ -58,21 +107,59 @@ import CoverArt from '../components/CoverArt.vue';
 
 const store = usePlayerStore();
 
-interface Playlist {
+interface PlaylistItem {
   id: string;
   name: string;
+  coverUrl: string;
+  songCount: number;
+  platform: string;
+}
+
+interface SongItem {
+  id: string;
+  name: string;
+  artist: string;
+  album: string;
+  duration: number;
   coverUrl: string;
   platform: string;
 }
 
-const playlists = ref<Playlist[]>([]);
+const playlists = ref<PlaylistItem[]>([]);
+const dailySongs = ref<SongItem[]>([]);
+const userPlaylists = ref<PlaylistItem[]>([]);
+
+async function playFm() {
+  try {
+    const res = await axios.get('/api/music/personal/fm');
+    const songs: SongItem[] = res.data.songs;
+    if (songs.length > 0) {
+      await store.play(songs[0].name, songs[0].platform);
+      for (let i = 1; i < songs.length; i++) {
+        await store.addToQueue(songs[i].name, songs[i].platform);
+      }
+    }
+  } catch {
+    // Ignore
+  }
+}
 
 onMounted(async () => {
-  try {
-    const res = await axios.get('/api/music/recommend/playlists');
-    playlists.value = res.data.playlists;
-  } catch {
-    // Ignore if API not ready
+  // Fetch all data in parallel
+  const [playlistRes, dailyRes, userRes] = await Promise.allSettled([
+    axios.get('/api/music/recommend/playlists'),
+    axios.get('/api/music/recommend/songs'),
+    axios.get('/api/music/user/playlists'),
+  ]);
+
+  if (playlistRes.status === 'fulfilled') {
+    playlists.value = playlistRes.value.data.playlists;
+  }
+  if (dailyRes.status === 'fulfilled') {
+    dailySongs.value = dailyRes.value.data.songs;
+  }
+  if (userRes.status === 'fulfilled') {
+    userPlaylists.value = userRes.value.data.playlists;
   }
 });
 </script>
@@ -134,6 +221,7 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 
+// Now Playing
 .now-playing {
   display: flex;
   align-items: center;
@@ -154,6 +242,96 @@ onMounted(async () => {
   color: var(--text-secondary);
 }
 
+// 私人FM
+.fm-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 20px 24px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+
+  &:hover {
+    background: var(--hover-bg);
+  }
+}
+
+.fm-icon-wrapper {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--color-primary), #6366f1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.fm-icon {
+  font-size: 28px;
+  color: white;
+}
+
+.fm-info {
+  flex: 1;
+}
+
+.fm-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.fm-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.fm-play-icon {
+  font-size: 36px;
+  color: var(--color-primary);
+  opacity: 0.8;
+  transition: opacity var(--transition-fast);
+
+  .fm-card:hover & {
+    opacity: 1;
+  }
+}
+
+// 每日推荐
+.daily-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 20px;
+
+  @media (max-width: 1200px) { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 900px) { grid-template-columns: repeat(3, 1fr); }
+}
+
+.daily-card {
+  cursor: pointer;
+}
+
+.daily-name {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.daily-artist {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// Playlists grid (shared for 推荐歌单 and 我的歌单)
 .playlist-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -175,5 +353,11 @@ onMounted(async () => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.playlist-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
 }
 </style>

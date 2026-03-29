@@ -283,4 +283,39 @@ export class NeteaseProvider implements MusicProvider {
       platform: "netease",
     }));
   }
+
+  async getDailyRecommendSongs(): Promise<Song[]> {
+    const res = await this.api.get("/recommend/songs", {
+      params: { ...this.cookieParams },
+    });
+    return (res.data?.data?.dailySongs ?? []).map((s: any) => ({
+      id: String(s.id),
+      name: s.name,
+      artist: (s.ar ?? []).map((a: any) => a.name).join(" / "),
+      album: s.al?.name ?? "",
+      duration: Math.round((s.dt ?? 0) / 1000),
+      coverUrl: s.al?.picUrl ?? "",
+      platform: "netease",
+    }));
+  }
+
+  async getUserPlaylists(): Promise<Playlist[]> {
+    // First get user ID from login status
+    const statusRes = await this.api.get("/login/status", {
+      params: { ...this.cookieParams },
+    });
+    const uid = statusRes.data?.data?.profile?.userId;
+    if (!uid) return [];
+
+    const res = await this.api.get("/user/playlist", {
+      params: { uid, ...this.cookieParams },
+    });
+    return (res.data?.playlist ?? []).map((p: any) => ({
+      id: String(p.id),
+      name: p.name,
+      coverUrl: p.coverImgUrl ?? "",
+      songCount: p.trackCount ?? 0,
+      platform: "netease",
+    }));
+  }
 }

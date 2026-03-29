@@ -86,5 +86,85 @@ export function createMusicRouter(
     }
   });
 
+  router.get("/recommend/songs", async (req, res) => {
+    try {
+      const provider = getProvider(req.query.platform as string);
+      if (!provider.getDailyRecommendSongs) {
+        res.status(501).json({ error: "Not supported by this provider" });
+        return;
+      }
+      const songs = await provider.getDailyRecommendSongs();
+      res.json({ songs });
+    } catch (err) {
+      logger.error({ err }, "Get daily recommend songs failed");
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get("/personal/fm", async (req, res) => {
+    try {
+      const provider = getProvider(req.query.platform as string);
+      if (!provider.getPersonalFm) {
+        res.status(501).json({ error: "Not supported by this provider" });
+        return;
+      }
+      const songs = await provider.getPersonalFm();
+      res.json({ songs });
+    } catch (err) {
+      logger.error({ err }, "Get personal FM failed");
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get("/user/playlists", async (req, res) => {
+    try {
+      const provider = getProvider(req.query.platform as string);
+      if (!provider.getUserPlaylists) {
+        res.status(501).json({ error: "Not supported by this provider" });
+        return;
+      }
+      const playlists = await provider.getUserPlaylists();
+      res.json({ playlists });
+    } catch (err) {
+      logger.error({ err }, "Get user playlists failed");
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  router.get("/playlist/:id/detail", async (req, res) => {
+    try {
+      const provider = getProvider(req.query.platform as string);
+      // Use the playlist songs endpoint to get basic info,
+      // but we also need detail info (name, cover, description).
+      // For netease, we access the underlying API directly.
+      const nProvider = provider as any;
+      if (nProvider.api) {
+        const cookieParams = nProvider.cookie
+          ? { cookie: nProvider.cookie }
+          : {};
+        const detailRes = await nProvider.api.get("/playlist/detail", {
+          params: { id: req.params.id, ...cookieParams },
+        });
+        const p = detailRes.data?.playlist;
+        if (p) {
+          res.json({
+            playlist: {
+              id: String(p.id),
+              name: p.name,
+              description: p.description ?? "",
+              coverUrl: p.coverImgUrl ?? "",
+              songCount: p.trackCount ?? 0,
+            },
+          });
+          return;
+        }
+      }
+      res.status(404).json({ error: "Playlist not found" });
+    } catch (err) {
+      logger.error({ err }, "Get playlist detail failed");
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   return router;
 }

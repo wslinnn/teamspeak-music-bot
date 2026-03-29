@@ -73,4 +73,6 @@ export interface MusicProvider {
   getCookie(): string;
   getAuthStatus(): Promise<AuthStatus>;
   getPersonalFm?(): Promise<Song[]>;
+  getDailyRecommendSongs?(): Promise<Song[]>;
+  getUserPlaylists?(): Promise<Playlist[]>;
 }
