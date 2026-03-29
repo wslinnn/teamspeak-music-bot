@@ -23,7 +23,7 @@ export function getDefaultConfig(): BotConfig {
     commandPrefix: "!",
     commandAliases: { p: "play", s: "skip", n: "next" },
     neteaseApiPort: 3001,
-    qqMusicApiPort: 3002,
+    qqMusicApiPort: 3200,
     adminPassword: "",
     adminGroups: [],
     autoReturnDelay: 300,

@@ -1,3 +1,4 @@
+import net from "node:net";
 import type { Logger } from "../logger.js";
 import type { Server } from "node:http";
 
@@ -11,6 +12,17 @@ export interface ApiServerManager {
   stop(): void;
   getNeteaseBaseUrl(): string;
   getQQMusicBaseUrl(): string;
+}
+
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, "127.0.0.1");
+  });
 }
 
 export function createApiServerManager(
@@ -28,11 +40,9 @@ export function createApiServerManager(
 
       // Start NetEase Cloud Music API
       try {
-        // NeteaseCloudMusicApi exports differ between CJS/ESM — use dynamic require
         const ncmModule = await import("NeteaseCloudMusicApi") as any;
         const serverObj = ncmModule.server ?? ncmModule.default?.server;
         const app = await serverObj.serveNcmApi({ port: options.neteasePort });
-        // serveNcmApi returns the express app; the server is already listening
         neteaseServer = app;
         logger.info(
           { port: options.neteasePort },
@@ -42,17 +52,25 @@ export function createApiServerManager(
         logger.error({ err }, "Failed to start NetEase Cloud Music API");
       }
 
-      // QQ Music API — auto-starts on port 3200 when imported
+      // Start QQ Music API (auto-starts on import)
       try {
-        await import("@sansenjian/qq-music-api");
-        logger.info(
-          { port: options.qqMusicPort },
-          "QQ Music API started"
-        );
+        const portFree = await isPortFree(options.qqMusicPort);
+        if (!portFree) {
+          logger.info(
+            { port: options.qqMusicPort },
+            "QQ Music API port already in use — reusing existing instance"
+          );
+        } else {
+          await import("@sansenjian/qq-music-api");
+          logger.info(
+            { port: options.qqMusicPort },
+            "QQ Music API started"
+          );
+        }
       } catch (err) {
-        logger.error(
+        logger.warn(
           { err },
-          "Failed to start QQ Music API"
+          "QQ Music API not available — QQ Music features may be limited"
         );
       }
     },
