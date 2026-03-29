@@ -1,5 +1,25 @@
 <template>
   <div class="player-bar frosted-glass" v-if="currentSong">
+    <!-- Progress bar -->
+    <div
+      class="progress-bar-container"
+      ref="progressBarRef"
+      @mousedown="onProgressMouseDown"
+      @mousemove="onProgressHover"
+      @mouseleave="progressTooltipVisible = false"
+    >
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" :style="{ width: progressPercent + '%' }" />
+      </div>
+      <div
+        v-if="progressTooltipVisible"
+        class="progress-tooltip"
+        :style="{ left: progressTooltipX + 'px' }"
+      >
+        {{ progressTooltipTime }}
+      </div>
+    </div>
+
     <div class="player-left">
       <CoverArt :url="currentSong.coverUrl" :size="40" />
       <div class="song-info">
@@ -9,6 +29,7 @@
     </div>
 
     <div class="player-center">
+      <span class="time-display time-current">{{ formatTime(currentElapsed) }}</span>
       <button class="control-btn" @click="store.prev()">
         <Icon icon="mdi:skip-previous" />
       </button>
@@ -22,6 +43,7 @@
         <Icon :icon="modeIcon" />
         <span class="mode-label">{{ modeLabel }}</span>
       </button>
+      <span class="time-display time-total">{{ formatTime(currentSong?.duration ?? 0) }}</span>
     </div>
 
     <div class="player-right">
@@ -34,7 +56,7 @@
         @input="onVolumeChange"
         class="volume-slider"
       />
-      <button class="control-btn" @click="showQueue = !showQueue">
+      <button class="control-btn" @click="toggleQueue">
         <Icon icon="mdi:playlist-music" />
       </button>
       <RouterLink to="/lyrics" class="control-btn lyrics-btn">
@@ -46,7 +68,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
@@ -57,6 +79,65 @@ const showQueue = ref(false);
 const store = usePlayerStore();
 const activeBot = computed(() => store.activeBot);
 const currentSong = computed(() => store.currentSong);
+
+// Progress bar state
+const progressBarRef = ref<HTMLElement | null>(null);
+const currentElapsed = ref(0);
+const progressPercent = ref(0);
+const progressTooltipVisible = ref(false);
+const progressTooltipX = ref(0);
+const progressTooltipTime = ref('0:00');
+let rafId: number | null = null;
+
+function formatTime(seconds: number): string {
+  if (!seconds || seconds < 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function updateProgress() {
+  const elapsed = store.elapsed;
+  const duration = currentSong.value?.duration ?? 0;
+  currentElapsed.value = elapsed;
+  progressPercent.value = duration > 0 ? Math.min((elapsed / duration) * 100, 100) : 0;
+  rafId = requestAnimationFrame(updateProgress);
+}
+
+function onProgressMouseDown(e: MouseEvent) {
+  const bar = progressBarRef.value;
+  if (!bar) return;
+  const rect = bar.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const duration = currentSong.value?.duration ?? 0;
+  // Visual-only seek (server-side seeking not supported)
+  progressPercent.value = ratio * 100;
+  progressTooltipTime.value = formatTime(ratio * duration);
+}
+
+function onProgressHover(e: MouseEvent) {
+  const bar = progressBarRef.value;
+  if (!bar) return;
+  const rect = bar.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  const duration = currentSong.value?.duration ?? 0;
+  progressTooltipVisible.value = true;
+  progressTooltipX.value = e.clientX - rect.left;
+  progressTooltipTime.value = formatTime(ratio * duration);
+}
+
+onMounted(() => {
+  rafId = requestAnimationFrame(updateProgress);
+});
+
+onUnmounted(() => {
+  if (rafId !== null) cancelAnimationFrame(rafId);
+});
+
+function toggleQueue() {
+  showQueue.value = !showQueue.value;
+  console.log('Queue panel toggled:', showQueue.value);
+}
 
 function togglePlay() {
   if (store.isPlaying) {
@@ -109,6 +190,65 @@ function cycleMode() {
   z-index: 100;
   border-top: 1px solid var(--border-color);
 }
+
+.progress-bar-container {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  cursor: pointer;
+  z-index: 101;
+  display: flex;
+  align-items: flex-end;
+
+  &:hover {
+    .progress-bar-bg { height: 4px; }
+    .progress-bar-fill { height: 4px; }
+  }
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 2px;
+  background: var(--border-color);
+  transition: height 0.15s ease;
+  position: relative;
+}
+
+.progress-bar-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 0 1px 1px 0;
+  transition: height 0.15s ease;
+}
+
+.progress-tooltip {
+  position: absolute;
+  top: -28px;
+  transform: translateX(-50%);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.time-display {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+}
+
+.time-current { text-align: right; }
+.time-total { text-align: left; }
 
 .player-left {
   display: flex;

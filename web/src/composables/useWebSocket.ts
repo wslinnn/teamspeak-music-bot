@@ -29,7 +29,12 @@ export function useWebSocket() {
           break;
         case 'stateChange':
           store.updateBotStatus(data.botId, data.status);
-          if (data.queue) store.setQueue(data.queue);
+          if (data.queue) {
+            store.setQueue(data.queue);
+          } else {
+            // Queue not included in event; refresh it
+            store.fetchQueue();
+          }
           break;
         case 'botConnected':
           store.updateBotStatus(data.botId, data.status);

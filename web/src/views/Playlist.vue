@@ -96,8 +96,10 @@ onMounted(async () => {
     ]);
     playlist.value = detailRes.data.playlist;
     songs.value = songsRes.data.songs;
-  } catch {
-    // Ignore if API not ready
+  } catch (err) {
+    console.error('Failed to load playlist:', err);
+    playlist.value = null;
+    songs.value = [];
   } finally {
     loading.value = false;
   }

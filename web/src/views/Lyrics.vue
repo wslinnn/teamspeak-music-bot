@@ -19,19 +19,21 @@
         <div v-if="loading" class="lyrics-loading">加载歌词中...</div>
         <div v-else-if="lines.length === 0" class="lyrics-empty">暂无歌词</div>
         <div v-else class="lyrics-scroll" ref="scrollContainer">
-          <div class="lyrics-spacer" />
-          <div
-            v-for="(line, i) in lines"
-            :key="i"
-            :ref="el => { if (el) lineRefs[i] = el as HTMLElement }"
-            class="lyrics-line"
-            :class="{ active: i === activeLine }"
-            @click="seekToLine(i)"
-          >
-            <div class="lyrics-text">{{ line.text }}</div>
-            <div v-if="line.translation" class="lyrics-translation">{{ line.translation }}</div>
+          <div class="lyrics-inner" :style="{ transform: `translateY(${scrollOffset}px)`, transition: 'transform 0.6s cubic-bezier(0.25, 0.1, 0.25, 1)' }">
+            <div class="lyrics-spacer" />
+            <div
+              v-for="(line, i) in lines"
+              :key="i"
+              :ref="el => { if (el) lineRefs[i] = el as HTMLElement }"
+              class="lyrics-line"
+              :class="{ active: i === activeLine }"
+              @click="seekToLine(i)"
+            >
+              <div class="lyrics-text">{{ line.text }}</div>
+              <div v-if="line.translation" class="lyrics-translation">{{ line.translation }}</div>
+            </div>
+            <div class="lyrics-spacer" />
           </div>
-          <div class="lyrics-spacer" />
         </div>
       </div>
     </div>
@@ -63,6 +65,7 @@ const activeLine = ref(-1);
 const loading = ref(false);
 const scrollContainer = ref<HTMLElement | null>(null);
 const lineRefs = ref<Record<number, HTMLElement>>({});
+const scrollOffset = ref(0);
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 
 const bgStyle = computed(() => {
@@ -113,23 +116,19 @@ function scrollToActiveLine(idx: number) {
   const container = scrollContainer.value;
   if (!el || !container) return;
 
-  // Calculate target scroll position to center the active line
+  // Use CSS transform for smooth, jank-free scrolling
   const containerHeight = container.clientHeight;
   const lineTop = el.offsetTop;
   const lineHeight = el.offsetHeight;
-  const targetScroll = lineTop - containerHeight / 2 + lineHeight / 2;
-
-  // Smooth scroll using CSS scroll-behavior or manual animation
-  container.scrollTo({
-    top: targetScroll,
-    behavior: 'smooth',
-  });
+  const targetOffset = -(lineTop - containerHeight / 2 + lineHeight / 2);
+  scrollOffset.value = targetOffset;
 }
 
 function syncLyrics() {
   if (!store.isPlaying || lines.value.length === 0) return;
   const elapsed = store.elapsed;
   const idx = findActiveLine(elapsed);
+  // Only update when the active line actually changes
   if (idx !== activeLine.value && idx >= 0) {
     activeLine.value = idx;
     scrollToActiveLine(idx);
@@ -139,11 +138,12 @@ function syncLyrics() {
 function seekToLine(index: number) {
   // Can't actually seek server-side playback, just highlight
   activeLine.value = index;
+  scrollToActiveLine(index);
 }
 
 function startSync() {
   stopSync();
-  syncTimer = setInterval(syncLyrics, 200);
+  syncTimer = setInterval(syncLyrics, 500);
 }
 
 function stopSync() {
@@ -260,9 +260,12 @@ onUnmounted(() => {
 
 .lyrics-scroll {
   height: 100%;
-  overflow-y: auto;
-  scrollbar-width: none;
-  &::-webkit-scrollbar { display: none; }
+  overflow: hidden;
+  position: relative;
+}
+
+.lyrics-inner {
+  will-change: transform;
 }
 
 .lyrics-spacer {
