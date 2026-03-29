@@ -338,7 +338,7 @@ export class BotInstance extends EventEmitter {
       rloop: PlayMode.RandomLoop,
     };
     const mode = modeMap[cmd.args];
-    if (!mode) return "Usage: !mode <seq|loop|random|rloop>";
+    if (mode === undefined) return "Usage: !mode <seq|loop|random|rloop>";
     this.queue.setMode(mode);
     this.emit("stateChange");
     return `Play mode set to: ${cmd.args}`;
