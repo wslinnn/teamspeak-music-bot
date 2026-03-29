@@ -1,9 +1,18 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createOpusEncoder, PCM_FRAME_BYTES, type Encoder } from "./encoder.js";
-import type pino from "pino";
+import type { Logger } from "../logger.js";
+
+export interface PlayerEvents {
+  frame: (opusFrame: Buffer) => void;
+  trackEnd: () => void;
+  error: (err: Error) => void;
+}
 
 export type PlayerState = "idle" | "playing" | "paused";
+
+// ~5 seconds of 48kHz stereo 16-bit audio
+const PCM_HIGH_WATER_MARK = PCM_FRAME_BYTES * 250;
 
 export class AudioPlayer extends EventEmitter {
   private ffmpeg: ChildProcess | null = null;
@@ -12,9 +21,9 @@ export class AudioPlayer extends EventEmitter {
   private volume = 75; // 0-100
   private frameTimer: ReturnType<typeof setInterval> | null = null;
   private pcmBuffer: Buffer = Buffer.alloc(0);
-  private logger: pino.Logger;
+  private logger: Logger;
 
-  constructor(logger: pino.Logger) {
+  constructor(logger: Logger) {
     super();
     this.encoder = createOpusEncoder();
     this.logger = logger;
@@ -43,6 +52,10 @@ export class AudioPlayer extends EventEmitter {
 
     this.ffmpeg.stdout!.on("data", (chunk: Buffer) => {
       this.pcmBuffer = Buffer.concat([this.pcmBuffer, chunk]);
+      // Backpressure: pause FFmpeg if buffer is too large
+      if (this.pcmBuffer.length > PCM_HIGH_WATER_MARK && this.ffmpeg?.stdout) {
+        this.ffmpeg.stdout.pause();
+      }
     });
 
     this.ffmpeg.on("close", (code) => {
@@ -72,6 +85,14 @@ export class AudioPlayer extends EventEmitter {
 
     const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
     this.pcmBuffer = this.pcmBuffer.subarray(PCM_FRAME_BYTES);
+
+    // Resume FFmpeg if buffer drained below threshold
+    if (
+      this.pcmBuffer.length < PCM_HIGH_WATER_MARK / 2 &&
+      this.ffmpeg?.stdout?.isPaused()
+    ) {
+      this.ffmpeg.stdout.resume();
+    }
 
     const opusFrame = this.encoder.encode(Buffer.from(pcmFrame));
     this.emit("frame", opusFrame);

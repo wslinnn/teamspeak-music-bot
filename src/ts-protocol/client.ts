@@ -7,7 +7,7 @@ import {
   exportIdentity,
   type TS3Identity,
 } from "./identity.js";
-import type pino from "pino";
+import type { Logger } from "../logger.js";
 
 export interface TS3ClientOptions {
   host: string;
@@ -33,9 +33,9 @@ export class TS3Client extends EventEmitter {
   private identity: TS3Identity;
   private clientId = 0;
   private keepAliveInterval: ReturnType<typeof setInterval> | null = null;
-  private logger: pino.Logger;
+  private logger: Logger;
 
-  constructor(private options: TS3ClientOptions, logger: pino.Logger) {
+  constructor(private options: TS3ClientOptions, logger: Logger) {
     super();
     this.logger = logger;
 

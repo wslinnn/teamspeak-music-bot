@@ -2,7 +2,9 @@ import pino from "pino";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-export function createLogger(logDir?: string): pino.Logger {
+export type Logger = pino.Logger;
+
+export function createLogger(logDir?: string): Logger {
   if (!logDir) {
     return pino({ level: "info" });
   }
