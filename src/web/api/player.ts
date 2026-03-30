@@ -142,6 +142,32 @@ export function createPlayerRouter(
     }
   });
 
+  // Jump to a specific index in the queue (without clearing it)
+  router.post("/:botId/play-at", async (req, res) => {
+    try {
+      const bot = (req as any).bot;
+      const { index } = req.body;
+      if (typeof index !== "number" || index < 0) {
+        res.status(400).json({ error: "index is required" });
+        return;
+      }
+      const queue = bot.getQueueManager();
+      const song = queue.playAt(index);
+      if (!song) {
+        res.status(400).json({ error: "Invalid queue index" });
+        return;
+      }
+      const ok = await bot.resolveAndPlay(song);
+      if (!ok) {
+        res.json({ message: `Cannot play: ${song.name}` });
+        return;
+      }
+      res.json({ message: `Now playing: ${song.name} - ${song.artist}` });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   router.post("/:botId/playlist", async (req, res) => {
     try {
       const bot = (req as any).bot;

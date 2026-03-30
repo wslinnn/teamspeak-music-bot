@@ -18,6 +18,7 @@
         :key="`${song.id}-${i}`"
         class="queue-item"
         :class="{ active: store.currentSong?.id === song.id }"
+        @dblclick="playAtIndex(i)"
       >
         <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
         <div class="queue-song-info">
@@ -53,6 +54,11 @@ const store = usePlayerStore();
 watch(() => props.open, (isOpen) => {
   if (isOpen) store.fetchQueue();
 });
+
+async function playAtIndex(index: number) {
+  await store.playAtIndex(index);
+  await store.fetchQueue();
+}
 
 async function removeSong(index: number) {
   if (!store.activeBotId) return;
@@ -130,6 +136,8 @@ async function removeSong(index: number) {
   padding: 8px;
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast);
+  cursor: pointer;
+  user-select: none;
 
   &:hover {
     background: var(--hover-bg);

@@ -172,6 +172,13 @@ export const usePlayerStore = defineStore('player', {
       setTimeout(() => this.syncElapsed(), 500);
     },
 
+    async playAtIndex(index: number) {
+      if (!this.activeBotId) return;
+      await axios.post(`/api/player/${this.activeBotId}/play-at`, { index });
+      this.serverElapsed = 0;
+      this._syncAfterAction();
+    },
+
     async play(query: string, platform = 'netease') {
       if (!this.activeBotId) return;
       await axios.post(`/api/player/${this.activeBotId}/play`, { query, platform });
