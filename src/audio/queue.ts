@@ -103,6 +103,8 @@ export class PlayQueue {
     if (this.songs.length === 0) return null;
     const prevIndex = this.currentIndex - 1;
     if (prevIndex < 0) {
+      // In Sequential mode, don't wrap around
+      if (this.mode === PlayMode.Sequential) return null;
       this.currentIndex = this.songs.length - 1;
     } else {
       this.currentIndex = prevIndex;

@@ -36,6 +36,10 @@ export class AudioPlayer extends EventEmitter {
   private currentUrl = "";
   private seekOffset = 0;
   private framesPlayed = 0; // ground truth: number of 20ms frames sent
+  private sessionId = 0;
+  private static readonly BUFFER_HIGH_WATER = 960 * 1024; // ~5s of PCM at 48kHz stereo
+  private static readonly BUFFER_LOW_WATER = 480 * 1024;  // ~2.5s
+  private ffmpegPaused = false;
 
   constructor(logger: Logger) {
     super();
@@ -45,9 +49,12 @@ export class AudioPlayer extends EventEmitter {
 
   play(url: string, seekSeconds = 0): void {
     this.stop();
+    this.sessionId++;
+    const playSessionId = this.sessionId;
     this.currentUrl = url;
     this.seekOffset = seekSeconds;
     this.framesPlayed = 0;
+    this.ffmpegPaused = false;
 
     this.logger.info({ url: url.slice(0, 80), seek: seekSeconds }, "Starting playback");
 
@@ -72,19 +79,30 @@ export class AudioPlayer extends EventEmitter {
     this.logger.debug({ ffmpeg: ffmpegBin }, "Using ffmpeg binary");
     this.ffmpeg = spawn(ffmpegBin, args, { stdio: ["ignore", "pipe", "pipe"] });
 
-    this.ffmpeg.stderr!.on("data", () => {});
+    this.ffmpeg.stderr!.on("data", (data: Buffer) => {
+      this.logger.debug({ stderr: data.toString().trimEnd() }, "FFmpeg stderr");
+    });
 
     this.ffmpeg.stdout!.on("data", (chunk: Buffer) => {
       this.pcmBuffer = Buffer.concat([this.pcmBuffer, chunk]);
+      // Backpressure: pause FFmpeg stdout when buffer is too large
+      if (this.pcmBuffer.length > AudioPlayer.BUFFER_HIGH_WATER && !this.ffmpegPaused && this.ffmpeg?.stdout) {
+        this.ffmpeg.stdout.pause();
+        this.ffmpegPaused = true;
+      }
     });
 
     this.ffmpeg.on("close", () => {
-      this.ffmpeg = null; // Signal frame loop that no more data is coming
+      if (this.sessionId === playSessionId) {
+        this.ffmpeg = null; // Signal frame loop that no more data is coming
+      }
     });
 
     this.ffmpeg.on("error", (err) => {
       this.logger.error({ err }, "FFmpeg error");
-      this.emit("error", err);
+      if (this.sessionId === playSessionId) {
+        this.emit("error", err);
+      }
     });
 
     this.state = "playing";
@@ -101,11 +119,15 @@ export class AudioPlayer extends EventEmitter {
   private scheduleNextFrame(): void {
     if (!this.frameLoopRunning) return;
 
+    const loopSessionId = this.sessionId;
+
     this.nextFrameTime += FRAME_DURATION_MS;
     const now = performance.now();
     const delay = Math.max(0, this.nextFrameTime - now);
 
     setTimeout(() => {
+      // Discard callback from a stale play session
+      if (loopSessionId !== this.sessionId) return;
       if (!this.frameLoopRunning) return;
 
       if (this.state === "playing") {
@@ -132,6 +154,12 @@ export class AudioPlayer extends EventEmitter {
 
     const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
     this.pcmBuffer = this.pcmBuffer.subarray(PCM_FRAME_BYTES);
+
+    // Backpressure: resume FFmpeg stdout when buffer drains below low-water mark
+    if (this.ffmpegPaused && this.pcmBuffer.length < AudioPlayer.BUFFER_LOW_WATER && this.ffmpeg?.stdout) {
+      this.ffmpeg.stdout.resume();
+      this.ffmpegPaused = false;
+    }
 
     const adjusted = this.applyVolume(pcmFrame);
     const opusFrame = this.encoder.encode(adjusted);
@@ -184,12 +212,14 @@ export class AudioPlayer extends EventEmitter {
   }
 
   stop(): void {
+    this.sessionId++;
     this.frameLoopRunning = false;
     if (this.ffmpeg) {
       this.ffmpeg.kill("SIGTERM");
       this.ffmpeg = null;
     }
     this.pcmBuffer = Buffer.alloc(0);
+    this.ffmpegPaused = false;
     this.state = "idle";
     this.currentUrl = "";
     this.seekOffset = 0;

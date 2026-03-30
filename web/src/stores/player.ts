@@ -69,9 +69,10 @@ export const usePlayerStore = defineStore('player', {
     /** Interpolated elapsed: serverElapsed + time since last sync (if playing) */
     elapsed(): number {
       if (!this.activeBot?.currentSong) return 0;
-      if (!this.wasPlaying || this.serverSyncTime === 0) return this.serverElapsed;
-      if (this.isPaused) return this.serverElapsed;
-      return this.serverElapsed + (Date.now() - this.serverSyncTime) / 1000;
+      const maxDuration = this.activeBot.currentSong.duration || Infinity;
+      if (!this.wasPlaying || this.serverSyncTime === 0) return Math.min(this.serverElapsed, maxDuration);
+      if (this.isPaused) return Math.min(this.serverElapsed, maxDuration);
+      return Math.min(this.serverElapsed + (Date.now() - this.serverSyncTime) / 1000, maxDuration);
     },
   },
 

@@ -39,6 +39,7 @@ export class TS3Client extends EventEmitter {
   private identity: Identity;
   private clientId = 0;
   private logger: Logger;
+  private disconnecting = false;
 
   constructor(private options: TS3ClientOptions, logger: Logger) {
     super();
@@ -167,9 +168,15 @@ export class TS3Client extends EventEmitter {
   }
 
   disconnect(): void {
-    if (this.client) {
-      this.client.disconnect().catch(() => {});
-      this.client = null;
+    if (this.client && !this.disconnecting) {
+      this.disconnecting = true;
+      const client = this.client;
+      client.disconnect().catch(() => {}).finally(() => {
+        if (this.client === client) {
+          this.client = null;
+        }
+        this.disconnecting = false;
+      });
     }
     this.clientId = 0;
     this.logger.info("Disconnected from TeamSpeak server");

@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { BotManager } from "../bot/manager.js";
+import type { BotInstance } from "../bot/instance.js";
 import type { Logger } from "../logger.js";
 
 export function setupWebSocket(
@@ -8,6 +9,13 @@ export function setupWebSocket(
   logger: Logger
 ): () => void {
   const clients = new Set<WebSocket>();
+
+  /** Track which bots already have listeners attached */
+  const attachedBots = new Map<string, {
+    stateChange: () => void;
+    connected: () => void;
+    disconnected: () => void;
+  }>();
 
   wss.on("connection", (ws) => {
     clients.add(ws);
@@ -36,39 +44,63 @@ export function setupWebSocket(
     }
   };
 
-  const attachBotListeners = () => {
+  function attachBotListener(bot: BotInstance): void {
+    if (attachedBots.has(bot.id)) return;
+
+    const onStateChange = () => {
+      broadcast({
+        type: "stateChange",
+        botId: bot.id,
+        status: bot.getStatus(),
+        queue: bot.getQueue(),
+      });
+    };
+
+    const onConnected = () => {
+      broadcast({
+        type: "botConnected",
+        botId: bot.id,
+        status: bot.getStatus(),
+      });
+    };
+
+    const onDisconnected = () => {
+      broadcast({ type: "botDisconnected", botId: bot.id });
+    };
+
+    bot.on("stateChange", onStateChange);
+    bot.on("connected", onConnected);
+    bot.on("disconnected", onDisconnected);
+
+    attachedBots.set(bot.id, {
+      stateChange: onStateChange,
+      connected: onConnected,
+      disconnected: onDisconnected,
+    });
+  }
+
+  /** Attach listeners for any new bots that don't have them yet */
+  function ensureAllBotsAttached(): void {
     for (const bot of botManager.getAllBots()) {
-      bot.removeAllListeners("stateChange");
-      bot.removeAllListeners("connected");
-      bot.removeAllListeners("disconnected");
-
-      bot.on("stateChange", () => {
-        broadcast({
-          type: "stateChange",
-          botId: bot.id,
-          status: bot.getStatus(),
-          queue: bot.getQueue(),
-        });
-      });
-
-      bot.on("connected", () => {
-        broadcast({
-          type: "botConnected",
-          botId: bot.id,
-          status: bot.getStatus(),
-        });
-      });
-
-      bot.on("disconnected", () => {
-        broadcast({ type: "botDisconnected", botId: bot.id });
-      });
+      attachBotListener(bot);
     }
-  };
+  }
 
-  const intervalId = setInterval(attachBotListeners, 5000);
-  attachBotListeners();
+  // Check for newly added bots periodically
+  const intervalId = setInterval(ensureAllBotsAttached, 5000);
+  ensureAllBotsAttached();
 
   return () => {
     clearInterval(intervalId);
+    // Clean up named listeners
+    for (const bot of botManager.getAllBots()) {
+      const listeners = attachedBots.get(bot.id);
+      if (listeners) {
+        bot.removeListener("stateChange", listeners.stateChange);
+        bot.removeListener("connected", listeners.connected);
+        bot.removeListener("disconnected", listeners.disconnected);
+      }
+    }
+    attachedBots.clear();
   };
 }

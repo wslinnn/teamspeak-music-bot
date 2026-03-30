@@ -57,7 +57,7 @@
           min="0"
           max="100"
           :value="activeBot?.volume ?? 75"
-          @input="onVolumeChange"
+          @change="onVolumeChange"
           class="volume-slider"
         />
         <button class="control-btn" :class="{ active: showQueue }" @click="showQueue = !showQueue">

@@ -211,7 +211,11 @@ export function createPlayerRouter(
     try {
       const bot = (req as any).bot;
       const { songId, platform } = req.body;
-      const provider = (platform === "qq" ? qqProvider : neteaseProvider)!;
+      const provider = platform === "qq" ? qqProvider : neteaseProvider;
+      if (!provider) {
+        res.status(500).json({ error: "Provider not available" });
+        return;
+      }
 
       const song = await provider.getSongDetail(songId);
       if (!song) {
@@ -241,7 +245,11 @@ export function createPlayerRouter(
     try {
       const bot = (req as any).bot;
       const { songId, platform } = req.body;
-      const provider = (platform === "qq" ? qqProvider : neteaseProvider)!;
+      const provider = platform === "qq" ? qqProvider : neteaseProvider;
+      if (!provider) {
+        res.status(500).json({ error: "Provider not available" });
+        return;
+      }
 
       const song = await provider.getSongDetail(songId);
       if (!song) {

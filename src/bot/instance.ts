@@ -54,6 +54,7 @@ export class BotInstance extends EventEmitter {
   private logger: Logger;
   private connected = false;
   private voteSkipUsers = new Set<string>();
+  private isAdvancing = false;
 
   constructor(options: BotInstanceOptions) {
     super();
@@ -142,9 +143,13 @@ export class BotInstance extends EventEmitter {
       }
     } catch (err) {
       this.logger.error({ err, command: parsed.name }, "Command execution error");
-      await this.tsClient.sendTextMessage(
-        `Error: ${(err as Error).message}`
-      );
+      try {
+        await this.tsClient.sendTextMessage(
+          `Error: ${(err as Error).message}`
+        );
+      } catch (sendErr) {
+        this.logger.error({ err: sendErr }, "Failed to send error message to chat");
+      }
     }
   }
 
@@ -421,7 +426,9 @@ export class BotInstance extends EventEmitter {
 
     if (votes >= needed) {
       this.voteSkipUsers.clear();
-      this.playNext();
+      this.playNext().catch((err) => {
+        this.logger.error({ err }, "playNext failed after vote skip");
+      });
       return `Vote passed (${votes}/${needed}). Skipping to next song.`;
     }
     return `Vote to skip: ${votes}/${needed} (need ${needed - votes} more)`;
@@ -472,23 +479,29 @@ export class BotInstance extends EventEmitter {
   }
 
   private async playNext(): Promise<void> {
-    this.voteSkipUsers.clear();
-    const next = this.queue.next();
-    if (next) {
-      const ok = await this.resolveAndPlay(next);
-      if (!ok) {
-        // Skip to next if URL resolve fails (up to 3 retries)
-        for (let i = 0; i < 3; i++) {
-          const retry = this.queue.next();
-          if (!retry) break;
-          if (await this.resolveAndPlay(retry)) return;
+    if (this.isAdvancing) return;
+    this.isAdvancing = true;
+    try {
+      this.voteSkipUsers.clear();
+      const next = this.queue.next();
+      if (next) {
+        const ok = await this.resolveAndPlay(next);
+        if (!ok) {
+          // Skip to next if URL resolve fails (up to 3 retries)
+          for (let i = 0; i < 3; i++) {
+            const retry = this.queue.next();
+            if (!retry) break;
+            if (await this.resolveAndPlay(retry)) return;
+          }
+          this.player.stop();
         }
+      } else {
         this.player.stop();
       }
-    } else {
-      this.player.stop();
+      this.emit("stateChange");
+    } finally {
+      this.isAdvancing = false;
     }
-    this.emit("stateChange");
   }
 
   private extractId(input: string): string {
