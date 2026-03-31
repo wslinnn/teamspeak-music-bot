@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
+import { accessSync, chmodSync, constants } from "node:fs";
 import { createOpusEncoder, PCM_FRAME_BYTES, type Encoder } from "./encoder.js";
 import type { Logger } from "../logger.js";
 
@@ -8,9 +9,24 @@ import type { Logger } from "../logger.js";
 const require = createRequire(import.meta.url);
 const ffmpegPath: string | null = require("ffmpeg-static");
 
+/** Ensure the bundled ffmpeg binary has execute permission. */
+function ensureExecutable(binPath: string): boolean {
+  try {
+    accessSync(binPath, constants.X_OK);
+    return true;
+  } catch {
+    try {
+      chmodSync(binPath, 0o755);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 /** Resolve ffmpeg binary: prefer bundled ffmpeg-static, fall back to system PATH. */
 function getFfmpegCommand(): string {
-  if (ffmpegPath) return ffmpegPath;
+  if (ffmpegPath && ensureExecutable(ffmpegPath)) return ffmpegPath;
   return "ffmpeg"; // fallback to system-installed ffmpeg
 }
 
