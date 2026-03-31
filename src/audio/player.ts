@@ -9,14 +9,15 @@ import type { Logger } from "../logger.js";
 const require = createRequire(import.meta.url);
 const ffmpegPath: string | null = require("ffmpeg-static");
 
-/** Ensure the bundled ffmpeg binary has execute permission. */
-function ensureExecutable(binPath: string): boolean {
+/** Ensure the given binary has execute permission. */
+function isExecutable(binPath: string): boolean {
   try {
     accessSync(binPath, constants.X_OK);
     return true;
   } catch {
     try {
       chmodSync(binPath, 0o755);
+      accessSync(binPath, constants.X_OK);
       return true;
     } catch {
       return false;
@@ -24,10 +25,13 @@ function ensureExecutable(binPath: string): boolean {
   }
 }
 
+/** Resolved once at module load — no repeated fs checks per play(). */
+const resolvedFfmpeg: string =
+  ffmpegPath && isExecutable(ffmpegPath) ? ffmpegPath : "ffmpeg";
+
 /** Resolve ffmpeg binary: prefer bundled ffmpeg-static, fall back to system PATH. */
 function getFfmpegCommand(): string {
-  if (ffmpegPath && ensureExecutable(ffmpegPath)) return ffmpegPath;
-  return "ffmpeg"; // fallback to system-installed ffmpeg
+  return resolvedFfmpeg;
 }
 
 export interface PlayerEvents {
