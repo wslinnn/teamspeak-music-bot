@@ -140,15 +140,40 @@ export class BotManager {
   }
 
   async startBot(id: string): Promise<void> {
-    const bot = this.bots.get(id);
-    if (!bot) throw new Error(`Bot ${id} not found`);
-    await bot.connect();
+    const oldBot = this.bots.get(id);
+    if (!oldBot) throw new Error(`Bot ${id} not found`);
 
-    // Mark as autoStart so it reconnects on Docker restart, and persist identity
+    // Reload config from database so updated settings (channel, nickname, etc.) take effect
     const saved = this.database.getBotInstances().find((i) => i.id === id);
     if (saved) {
+      const proto = saved.serverProtocol as "ts3" | "ts6" | "" | undefined;
+      const bot = new BotInstance({
+        id: saved.id,
+        name: saved.name,
+        tsOptions: {
+          host: saved.serverAddress,
+          port: saved.serverPort,
+          queryPort: proto === "ts6" ? 10080 : 10011,
+          nickname: saved.nickname,
+          defaultChannel: saved.defaultChannel || undefined,
+          channelPassword: saved.channelPassword || undefined,
+          serverProtocol: proto === "ts3" || proto === "ts6" ? proto : undefined,
+          ts6ApiKey: saved.ts6ApiKey || undefined,
+        },
+        neteaseProvider: this.neteaseProvider,
+        qqProvider: this.qqProvider,
+        bilibiliProvider: this.bilibiliProvider,
+        database: this.database,
+        config: this.config,
+        logger: this.logger,
+      });
+      this.bots.set(id, bot);
+      await bot.connect();
+      // Mark as autoStart so it reconnects on Docker restart, and persist identity
       this.database.saveBotInstance({ ...saved, autoStart: true });
       this.persistBotIdentity(saved, bot);
+    } else {
+      await oldBot.connect();
     }
   }
 
