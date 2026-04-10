@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { EventEmitter } from "node:events";
 import {
   BotInstance,
   type BotInstanceOptions,
@@ -28,7 +29,7 @@ export interface CreateBotParams {
   serverPassword?: string;
 }
 
-export class BotManager {
+export class BotManager extends EventEmitter {
   private bots = new Map<string, BotInstance>();
   private neteaseProvider: MusicProvider;
   private qqProvider: MusicProvider;
@@ -46,6 +47,7 @@ export class BotManager {
     config: BotConfig,
     logger: Logger
   ) {
+    super();
     this.neteaseProvider = neteaseProvider;
     this.qqProvider = qqProvider;
     this.bilibiliProvider = bilibiliProvider;
@@ -82,6 +84,7 @@ export class BotManager {
     });
 
     this.bots.set(id, bot);
+    this.emit("botInstance", bot);
 
     this.database.saveBotInstance({
       id,
@@ -179,6 +182,7 @@ export class BotManager {
         logger: this.logger,
       });
       this.bots.set(id, bot);
+      this.emit("botInstance", bot);
       await bot.connect();
       // Mark as autoStart so it reconnects on Docker restart, and persist identity
       this.database.saveBotInstance({ ...saved, autoStart: true });
@@ -229,6 +233,7 @@ export class BotManager {
       });
 
       this.bots.set(saved.id, bot);
+      this.emit("botInstance", bot);
 
       // Only auto-connect bots that have autoStart enabled
       if (saved.autoStart) {

@@ -158,13 +158,13 @@ onUnmounted(() => {
 .bot-selector-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
+  gap: 10px;
+  padding: 10px 20px;
   background: var(--hover-bg);
   border-radius: var(--radius-md);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
-  min-height: 36px;
+  min-height: 44px;
   border: 1px solid var(--border-color);
   transition: background var(--transition-fast), border-color var(--transition-fast);
   cursor: pointer;
@@ -176,13 +176,13 @@ onUnmounted(() => {
 }
 
 .bot-state-mini {
-  font-size: 11px;
+  font-size: 14px;
   &.playing { color: #22c55e; }
   &.paused { color: #eab308; }
 }
 
 .bot-chevron {
-  font-size: 16px;
+  font-size: 20px;
   opacity: 0.5;
   transition: transform 0.2s ease;
 
@@ -192,8 +192,8 @@ onUnmounted(() => {
 }
 
 .bot-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--text-tertiary);
   flex-shrink: 0;
@@ -204,7 +204,7 @@ onUnmounted(() => {
 }
 
 .bot-selector-name {
-  max-width: 120px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
