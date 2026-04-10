@@ -6,7 +6,7 @@ export interface PlayHistoryEntry {
   songName: string;
   artist: string;
   album: string;
-  platform: "netease" | "qq" | "bilibili";
+  platform: "netease" | "qq" | "bilibili" | "youtube";
   coverUrl: string;
 }
 
@@ -24,6 +24,12 @@ export interface BotInstance {
   defaultChannel: string;
   channelPassword: string;
   autoStart: boolean;
+  /** "ts3" | "ts6" | "" (empty = auto-detect) */
+  serverProtocol: string;
+  /** API key for TS6 HTTP Query */
+  ts6ApiKey: string;
+  /** Password to join the TS server (server password) */
+  serverPassword: string;
   identity?: string;
 }
 
@@ -38,11 +44,19 @@ export interface BotDatabase {
 }
 
 function migrateSchema(db: Database.Database): void {
-  // Add identity column if it doesn't exist (migration for existing databases)
   const columns = db.prepare("PRAGMA table_info(bot_instances)").all() as Array<{ name: string }>;
-  const hasIdentity = columns.some((c) => c.name === "identity");
-  if (!hasIdentity) {
+  const names = columns.map((c) => c.name);
+  if (!names.includes("identity")) {
     db.exec("ALTER TABLE bot_instances ADD COLUMN identity TEXT");
+  }
+  if (!names.includes("serverProtocol")) {
+    db.exec("ALTER TABLE bot_instances ADD COLUMN serverProtocol TEXT NOT NULL DEFAULT ''");
+  }
+  if (!names.includes("ts6ApiKey")) {
+    db.exec("ALTER TABLE bot_instances ADD COLUMN ts6ApiKey TEXT NOT NULL DEFAULT ''");
+  }
+  if (!names.includes("serverPassword")) {
+    db.exec("ALTER TABLE bot_instances ADD COLUMN serverPassword TEXT NOT NULL DEFAULT ''");
   }
 }
 
@@ -69,6 +83,9 @@ function initTables(db: Database.Database): void {
       defaultChannel TEXT NOT NULL,
       channelPassword TEXT NOT NULL,
       autoStart INTEGER NOT NULL DEFAULT 0,
+      serverProtocol TEXT NOT NULL DEFAULT '',
+      ts6ApiKey TEXT NOT NULL DEFAULT '',
+      serverPassword TEXT NOT NULL DEFAULT '',
       identity TEXT
     );
   `);
@@ -90,8 +107,8 @@ export function createDatabase(dbPath: string): BotDatabase {
   `);
 
   const upsertInstance = db.prepare(`
-    INSERT INTO bot_instances (id, name, serverAddress, serverPort, nickname, defaultChannel, channelPassword, autoStart, identity)
-    VALUES (@id, @name, @serverAddress, @serverPort, @nickname, @defaultChannel, @channelPassword, @autoStart, @identity)
+    INSERT INTO bot_instances (id, name, serverAddress, serverPort, nickname, defaultChannel, channelPassword, autoStart, serverProtocol, ts6ApiKey, serverPassword, identity)
+    VALUES (@id, @name, @serverAddress, @serverPort, @nickname, @defaultChannel, @channelPassword, @autoStart, @serverProtocol, @ts6ApiKey, @serverPassword, @identity)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       serverAddress = excluded.serverAddress,
@@ -100,6 +117,9 @@ export function createDatabase(dbPath: string): BotDatabase {
       defaultChannel = excluded.defaultChannel,
       channelPassword = excluded.channelPassword,
       autoStart = excluded.autoStart,
+      serverProtocol = excluded.serverProtocol,
+      ts6ApiKey = excluded.ts6ApiKey,
+      serverPassword = excluded.serverPassword,
       identity = excluded.identity
   `);
 
@@ -133,6 +153,9 @@ export function createDatabase(dbPath: string): BotDatabase {
       return rows.map((r) => ({
         ...r,
         autoStart: r.autoStart === 1,
+        serverProtocol: r.serverProtocol ?? "",
+        ts6ApiKey: r.ts6ApiKey ?? "",
+        serverPassword: r.serverPassword ?? "",
         identity: r.identity ?? undefined,
       }));
     },

@@ -60,6 +60,9 @@ describe("database", () => {
       defaultChannel: "Music",
       channelPassword: "",
       autoStart: true,
+      serverProtocol: "",
+      ts6ApiKey: "",
+      serverPassword: "",
     };
 
     botDb.saveBotInstance(instance);
@@ -86,6 +89,9 @@ describe("database", () => {
       defaultChannel: "Music",
       channelPassword: "",
       autoStart: false,
+      serverProtocol: "",
+      ts6ApiKey: "",
+      serverPassword: "",
     });
 
     expect(botDb.deleteBotInstance("bot1")).toBe(true);

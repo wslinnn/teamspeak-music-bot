@@ -9,34 +9,49 @@
     </div>
 
     <div class="nav-right">
-      <!-- Multi-bot selector -->
-      <div v-if="store.bots.length > 1" class="bot-selector" ref="selectorRef">
+      <!-- Bot selector (always shown when at least one bot exists) -->
+      <div v-if="store.bots.length > 0" class="bot-selector" ref="selectorRef">
         <button class="bot-selector-btn" @click="dropdownOpen = !dropdownOpen">
           <span class="bot-dot" :class="{ online: activeBot?.connected }" />
           <span class="bot-selector-name">{{ activeBot?.name ?? '选择机器人' }}</span>
+          <span v-if="activeBot?.playing && !activeBot?.paused" class="bot-state-mini playing">▶</span>
+          <span v-else-if="activeBot?.paused" class="bot-state-mini paused">⏸</span>
           <Icon icon="mdi:chevron-down" class="bot-chevron" :class="{ rotated: dropdownOpen }" />
         </button>
         <div v-if="dropdownOpen" class="bot-dropdown">
-          <button
+          <div
             v-for="bot in store.bots"
             :key="bot.id"
-            class="bot-dropdown-item"
-            :class="{ active: bot.id === store.activeBotId }"
-            @click="selectBot(bot.id)"
+            class="bot-dropdown-row"
           >
-            <span class="bot-dot" :class="{ online: bot.connected }" />
-            <span class="bot-dropdown-name">{{ bot.name }}</span>
-            <span v-if="bot.playing && !bot.paused" class="bot-playing-badge">播放中</span>
-            <span v-else-if="bot.paused" class="bot-paused-badge">已暂停</span>
-            <span v-else-if="bot.connected" class="bot-idle-badge">空闲</span>
-            <span v-else class="bot-offline-badge">离线</span>
-          </button>
+            <button
+              class="bot-dropdown-item"
+              :class="{ active: bot.id === store.activeBotId }"
+              @click="selectBot(bot.id)"
+            >
+              <span class="bot-dot" :class="{ online: bot.connected }" />
+              <span class="bot-dropdown-name">{{ bot.name }}</span>
+              <span v-if="bot.playing && !bot.paused" class="bot-playing-badge">播放中</span>
+              <span v-else-if="bot.paused" class="bot-paused-badge">已暂停</span>
+              <span v-else-if="bot.connected" class="bot-idle-badge">空闲</span>
+              <span v-else class="bot-offline-badge">离线</span>
+            </button>
+            <button
+              class="bot-power-btn"
+              :class="{ online: bot.connected }"
+              :title="bot.connected ? `停止 ${bot.name}` : `启动 ${bot.name}`"
+              :disabled="togglingBots[bot.id]"
+              @click.stop="togglePower(bot)"
+            >
+              <Icon :icon="bot.connected ? 'mdi:power' : 'mdi:power-off'" />
+            </button>
+            <button class="bot-link-btn" :title="`复制 ${bot.name} 的专属链接`" @click.stop="copyBotLink(bot.id)">
+              <Icon icon="mdi:link-variant" />
+            </button>
+          </div>
+          <div class="bot-dropdown-divider" />
+          <div class="bot-dropdown-hint">点击切换 · 🔗 复制专属链接</div>
         </div>
-      </div>
-
-      <!-- Single bot status (original behavior) -->
-      <div v-else-if="activeBot" class="bot-status" :class="{ online: activeBot.connected }">
-        {{ activeBot.name }} {{ activeBot.connected ? '在线' : '离线' }}
       </div>
 
       <RouterLink to="/settings" class="settings-btn">
@@ -55,10 +70,34 @@ const store = usePlayerStore();
 const activeBot = computed(() => store.activeBot);
 const dropdownOpen = ref(false);
 const selectorRef = ref<HTMLElement | null>(null);
+const togglingBots = ref<Record<string, boolean>>({});
 
 function selectBot(id: string) {
   store.setActiveBotId(id);
   dropdownOpen.value = false;
+}
+
+function copyBotLink(id: string) {
+  const url = `${window.location.origin}/bot/${id}`;
+  navigator.clipboard.writeText(url).then(() => {
+    dropdownOpen.value = false;
+  });
+}
+
+async function togglePower(bot: { id: string; connected: boolean; name: string }) {
+  if (togglingBots.value[bot.id]) return;
+  togglingBots.value[bot.id] = true;
+  try {
+    if (bot.connected) {
+      await store.stopBotInstance(bot.id);
+    } else {
+      await store.startBotInstance(bot.id);
+    }
+  } catch (err) {
+    console.error(`Failed to toggle bot ${bot.name}`, err);
+  } finally {
+    togglingBots.value[bot.id] = false;
+  }
 }
 
 function onClickOutside(e: MouseEvent) {
@@ -145,22 +184,31 @@ onUnmounted(() => {
 .bot-selector-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
+  gap: 10px;
+  padding: 10px 20px;
   background: var(--hover-bg);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  transition: background var(--transition-fast);
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  font-weight: 600;
+  min-height: 44px;
+  border: 1px solid var(--border-color);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
   cursor: pointer;
 
   &:hover {
     background: var(--bg-card);
+    border-color: var(--color-primary);
   }
 }
 
+.bot-state-mini {
+  font-size: 14px;
+  &.playing { color: #22c55e; }
+  &.paused { color: #eab308; }
+}
+
 .bot-chevron {
-  font-size: 16px;
+  font-size: 20px;
   opacity: 0.5;
   transition: transform 0.2s ease;
 
@@ -170,8 +218,8 @@ onUnmounted(() => {
 }
 
 .bot-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--text-tertiary);
   flex-shrink: 0;
@@ -182,7 +230,7 @@ onUnmounted(() => {
 }
 
 .bot-selector-name {
-  max-width: 120px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -205,7 +253,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
   font-size: 13px;
@@ -222,12 +271,59 @@ onUnmounted(() => {
   }
 }
 
+.bot-dropdown-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .bot-dropdown-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.bot-link-btn {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  opacity: 0.4;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+  cursor: pointer;
+
+  &:hover {
+    opacity: 1;
+    background: var(--hover-bg);
+  }
+}
+
+.bot-power-btn {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 16px;
+  opacity: 0.5;
+  color: var(--text-tertiary);
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    opacity: 1;
+    background: var(--hover-bg);
+  }
+
+  &:disabled {
+    opacity: 0.25;
+    cursor: wait;
+  }
+
+  &.online {
+    color: #22c55e;
+    opacity: 0.9;
+  }
 }
 
 .bot-playing-badge,
@@ -261,8 +357,21 @@ onUnmounted(() => {
   color: var(--text-tertiary);
 }
 
+.bot-dropdown-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+.bot-dropdown-hint {
+  padding: 4px 12px 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
 .settings-btn {
-  font-size: 20px;
+  font-size: 22px;
   opacity: 0.6;
   transition: opacity var(--transition-fast);
   &:hover { opacity: 1; }

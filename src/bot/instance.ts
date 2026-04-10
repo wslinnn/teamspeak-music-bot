@@ -23,6 +23,7 @@ export interface BotInstanceOptions {
   neteaseProvider: MusicProvider;
   qqProvider: MusicProvider;
   bilibiliProvider: MusicProvider;
+  youtubeProvider: MusicProvider;
   database: BotDatabase;
   config: BotConfig;
   logger: Logger;
@@ -51,10 +52,12 @@ export class BotInstance extends EventEmitter {
   private neteaseProvider: MusicProvider;
   private qqProvider: MusicProvider;
   private bilibiliProvider: MusicProvider;
+  private youtubeProvider: MusicProvider;
   private database: BotDatabase;
   private config: BotConfig;
   private logger: Logger;
   private connected = false;
+  private disconnectEmitted = false;
   private voteSkipUsers = new Set<string>();
   private isAdvancing = false;
 
@@ -65,6 +68,7 @@ export class BotInstance extends EventEmitter {
     this.neteaseProvider = options.neteaseProvider;
     this.qqProvider = options.qqProvider;
     this.bilibiliProvider = options.bilibiliProvider;
+    this.youtubeProvider = options.youtubeProvider;
     this.database = options.database;
     this.config = options.config;
     this.logger = options.logger.child({ botId: this.id });
@@ -105,23 +109,42 @@ export class BotInstance extends EventEmitter {
     });
 
     this.tsClient.on("disconnected", () => {
+      // Always reset local state — covers the case where connect() never
+      // completed (hanging handshake → 60s library idle timeout) and
+      // this.connected was never flipped to true. Previously this handler
+      // short-circuited on !this.connected, leaving player stuck as "playing".
       this.connected = false;
       this.player.stop();
+      // Only emit externally once per lifecycle so clients don't see a
+      // duplicate "disconnected" after an explicit disconnect() call.
+      if (this.disconnectEmitted) return;
+      this.disconnectEmitted = true;
       this.emit("disconnected");
     });
   }
 
   async connect(): Promise<void> {
+    this.disconnectEmitted = false;
     await this.tsClient.connect();
+    // Race guard: if disconnect() was called while the handshake was
+    // awaiting, don't flip connected back to true — that would leave the
+    // bot in an inconsistent state (externally "connected" but the tsClient
+    // has already been torn down).
+    if (this.disconnectEmitted) {
+      throw new Error("Connect aborted by concurrent disconnect");
+    }
     this.connected = true;
     this.emit("connected");
   }
 
   disconnect(): void {
     this.player.stop();
-    this.tsClient.disconnect();
     this.connected = false;
-    this.emit("disconnected");
+    if (!this.disconnectEmitted) {
+      this.disconnectEmitted = true;
+      this.emit("disconnected");
+    }
+    this.tsClient.disconnect();
   }
 
   private async handleTextMessage(msg: TS3TextMessage): Promise<void> {
@@ -162,6 +185,24 @@ export class BotInstance extends EventEmitter {
     cmd: ParsedCommand,
     msg?: TS3TextMessage
   ): Promise<string | null> {
+    // Reject commands that would push audio when the bot isn't connected:
+    // otherwise ffmpeg spawns and voice goes to a half-initialized or
+    // torn-down TS client, leaving player.state="playing" on a disconnected
+    // bot. Config-only commands (vol, mode, clear, stop, queue, now) are
+    // still allowed so the UI stays usable while the bot is offline.
+    const AUDIO_COMMANDS = new Set([
+      "play",
+      "add",
+      "next",
+      "skip",
+      "prev",
+      "playlist",
+      "album",
+      "fm",
+    ]);
+    if (!this.connected && AUDIO_COMMANDS.has(cmd.name)) {
+      throw new Error("Bot is not connected to TeamSpeak");
+    }
     switch (cmd.name) {
       case "play":
         return this.cmdPlay(cmd);
@@ -212,24 +253,46 @@ export class BotInstance extends EventEmitter {
     }
   }
 
-  getProviderFor(platform: "netease" | "qq" | "bilibili"): MusicProvider {
+  getProviderFor(platform: "netease" | "qq" | "bilibili" | "youtube"): MusicProvider {
     if (platform === "bilibili") return this.bilibiliProvider;
+    if (platform === "youtube") return this.youtubeProvider;
     return platform === "qq" ? this.qqProvider : this.neteaseProvider;
   }
 
   private getProvider(flags: Set<string>): MusicProvider {
     if (flags.has("b")) return this.bilibiliProvider;
     if (flags.has("q")) return this.qqProvider;
+    if (flags.has("y")) return this.youtubeProvider;
     return this.neteaseProvider;
   }
 
   /** Resolve URL for a song and start playing it. Skips to next if URL fails. */
   async resolveAndPlay(song: QueuedSong): Promise<boolean> {
+    if (!this.connected) {
+      this.logger.warn({ songId: song.id, name: song.name }, "resolveAndPlay called on disconnected bot — skipping");
+      return false;
+    }
+    // Clear any accumulated skip votes — every fresh track starts with a
+    // clean slate, regardless of which code path loaded it (cmdPlay,
+    // cmdPlaylist, cmdAlbum, cmdFm, trackEnd auto-advance, etc.).
+    this.voteSkipUsers.clear();
     const provider = this.getProviderFor(song.platform);
     try {
       const url = await provider.getSongUrl(song.id);
       if (!url) {
         this.logger.warn({ songId: song.id, name: song.name }, "No URL available, skipping");
+        return false;
+      }
+      // Re-check connection state AFTER the network round-trip — the URL
+      // resolve can take multiple seconds and the user may have called stop
+      // during that window. Without this, we'd spawn ffmpeg on a
+      // disconnected bot and land back in the same "connected=false but
+      // playing=true" inconsistency that Bug C was about.
+      if (!this.connected) {
+        this.logger.warn(
+          { songId: song.id, name: song.name },
+          "bot disconnected during URL resolve — aborting playback",
+        );
         return false;
       }
       song.url = url;
@@ -278,7 +341,20 @@ export class BotInstance extends EventEmitter {
       return `No results found for: ${cmd.args}`;
 
     const song = result.songs[0];
+    const wasIdle = this.player.getState() === "idle";
     this.queue.add({ ...song, platform: provider.platform });
+
+    // If nothing was playing, start this newly-added song immediately.
+    // Matches /api/player/:id/add-by-id behavior so both add paths feel
+    // the same to the user (add to idle bot → plays now).
+    if (wasIdle) {
+      this.queue.playAt(this.queue.size() - 1);
+      this.player.resetFailures();
+      await this.resolveAndPlay(this.queue.current()!);
+      this.emit("stateChange");
+      return `Now playing: ${song.name} - ${song.artist}`;
+    }
+
     this.emit("stateChange");
     return `Added to queue: ${song.name} - ${song.artist} (position ${this.queue.size()})`;
   }
@@ -430,8 +506,11 @@ export class BotInstance extends EventEmitter {
     if (!msg) return "Vote can only be used in TeamSpeak";
     this.voteSkipUsers.add(msg.invokerUid);
     const clients = await this.tsClient.getClientsInChannel();
-    const totalUsers = clients.length - 1;
-    const needed = Math.ceil(totalUsers / 2);
+    const totalUsers = clients.length - 1; // exclude the bot itself
+    // At least 1 vote is always required — otherwise a single voter in an
+    // otherwise empty channel (or a transient clients.length=1 race) could
+    // unanimously "win" with needed=0.
+    const needed = Math.max(1, Math.ceil(totalUsers / 2));
     const votes = this.voteSkipUsers.size;
 
     if (votes >= needed) {
@@ -472,6 +551,7 @@ export class BotInstance extends EventEmitter {
       `${p}play <song>  — Search and play`,
       `${p}play -q <song> — Search from QQ Music`,
       `${p}play -b <song> — Search from BiliBili`,
+      `${p}play -y <song> — Search from YouTube (yt-dlp)`,
       `${p}add <song>   — Add to queue`,
       `${p}pause/resume — Pause/resume`,
       `${p}next/prev    — Next/previous`,
@@ -490,20 +570,25 @@ export class BotInstance extends EventEmitter {
   }
 
   private async playNext(): Promise<void> {
-    if (this.isAdvancing) return;
+    if (this.isAdvancing || !this.connected) return;
     this.isAdvancing = true;
     try {
       this.voteSkipUsers.clear();
       const next = this.queue.next();
       if (next) {
-        const ok = await this.resolveAndPlay(next);
-        if (!ok) {
+        let started = await this.resolveAndPlay(next);
+        if (!started) {
           // Skip to next if URL resolve fails (up to 3 retries)
-          for (let i = 0; i < 3; i++) {
+          for (let i = 0; i < 3 && this.connected; i++) {
             const retry = this.queue.next();
             if (!retry) break;
-            if (await this.resolveAndPlay(retry)) break;
+            if (await this.resolveAndPlay(retry)) {
+              started = true;
+              break;
+            }
           }
+        }
+        if (!started) {
           this.player.stop();
         }
       } else {

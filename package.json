@@ -15,7 +15,7 @@
   "license": "MIT",
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
-    "@honeybbq/teamspeak-client": "^0.1.0",
+    "@honeybbq/teamspeak-client": "^0.2.1",
     "@koa/router": "^15.4.0",
     "@sansenjian/qq-music-api": "^2.2.9",
     "axios": "^1.14.0",
@@ -30,7 +30,8 @@
     "pino": "^10.3.1",
     "ts3-nodejs-library": "^3.5.1",
     "tweetnacl": "^1.0.3",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "yt-dlp-wrap": "^2.3.12"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
