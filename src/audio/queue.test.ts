@@ -150,6 +150,32 @@ describe("PlayQueue", () => {
     expect(next).not.toBeNull();
   });
 
+  it("random mode with single song returns null on next", () => {
+    queue.setMode(PlayMode.Random);
+    queue.add(makeSong("1"));
+    queue.play();
+    expect(queue.next()).toBeNull();
+  });
+
+  it("random mode plays each song exactly once then stops", () => {
+    queue.setMode(PlayMode.Random);
+    queue.add(makeSong("A"));
+    queue.add(makeSong("B"));
+    queue.add(makeSong("C"));
+    queue.play();
+    const played = new Set<string>();
+    played.add(queue.current()!.id);
+    for (let i = 0; i < 3; i++) {
+      const song = queue.next();
+      if (!song) break;
+      played.add(song.id);
+    }
+    // All 3 songs should have been played
+    expect(played).toEqual(new Set(["A", "B", "C"]));
+    // next() after all played should return null
+    expect(queue.next()).toBeNull();
+  });
+
   it("random-loop mode never returns null", () => {
     queue.setMode(PlayMode.RandomLoop);
     queue.add(makeSong("1"));
