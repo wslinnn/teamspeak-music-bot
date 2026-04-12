@@ -149,24 +149,23 @@ export class BotProfileManager {
 
   private async updateDescription(song: QueuedSong | null): Promise<void> {
     if (!this.config.descriptionEnabled || this.permDenied.description) return;
-
-    // TS3 full-client protocol rejects client_description in clientupdate
-    // (error 1538 "invalid parameter"). Only TS6 HTTP Query supports it.
-    // On TS3 we rely on nickname to display song info instead.
-    const httpQuery = this.tsClient.getHttpQuery();
-    if (!httpQuery) {
-      this.permDenied.description = true;
-      this.logger.info(
-        "Description not available on TS3 — using nickname to display song info",
-      );
-      return;
-    }
-
     try {
       const text = song
         ? `${song.name} - ${song.artist} [${song.album}]`
         : "";
-      await httpQuery.clientUpdate({ client_description: text });
+      const httpQuery = this.tsClient.getHttpQuery();
+      if (httpQuery) {
+        await httpQuery.clientUpdate({ client_description: text });
+      } else {
+        // clientupdate rejects client_description (error 1538).
+        // Use clientedit on our own clid instead — this is what
+        // TS3AudioBot does via TSLib's ChangeDescription().
+        const clid = this.tsClient.getClientId();
+        if (clid <= 0) return;
+        await this.tsClient.execCommand(
+          `clientedit clid=${clid} client_description=${escapeTS3(text)}`,
+        );
+      }
       this.logger.info("Description updated");
     } catch (err) {
       this.handleFeatureError("description", err);
