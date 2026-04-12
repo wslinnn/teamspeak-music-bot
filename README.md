@@ -279,7 +279,7 @@ sudo systemctl start tsmusicbot
 ## 项目架构
 
 ```
-tsmusicbot/
+teamspeak-music-bot/
 ├── src/                        # 后端源码 (TypeScript)
 │   ├── audio/                  # 音频管线：FFmpeg → PCM → Opus → 20ms 帧
 │   │   ├── encoder.ts          # Opus 编码器 (@discordjs/opus)
