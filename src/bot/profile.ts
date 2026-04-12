@@ -9,6 +9,8 @@ import type { Logger } from "../logger.js";
 const TS3_NICKNAME_MAX = 30;
 /** TS3 avatar max size — server default is ~300 KB. Use 200 KB to be safe. */
 const AVATAR_MAX_BYTES = 200 * 1024;
+/** Timeout for file-transfer operations (upload / delete). */
+const FILE_TRANSFER_TIMEOUT_MS = 6000;
 
 /**
  * Manages the bot's TeamSpeak presence (avatar, description, nickname,
@@ -33,6 +35,14 @@ export class BotProfileManager {
     nowPlayingMsg: false,
   };
 
+  /**
+   * Monotonically increasing generation counter. Incremented on every
+   * onSongChange / onConnect call. Long-running operations (avatar
+   * download/upload) check this before committing their result — if
+   * the generation changed, a newer update has superseded them.
+   */
+  private generation = 0;
+
   constructor(
     tsClient: TS3Client,
     logger: Logger,
@@ -53,15 +63,23 @@ export class BotProfileManager {
    *
    * Commands are serialized to avoid overwhelming the TS3 command queue.
    * Nickname + away status are merged into a single `clientupdate` call.
+   *
+   * A generation counter guards against stale updates: if a newer
+   * onSongChange fires while the avatar is still downloading, the old
+   * update is discarded.
    */
   async onSongChange(song: QueuedSong | null): Promise<void> {
+    const gen = ++this.generation;
+
     // 1. Avatar first — file transfer uses its own response tracker and
     //    must run before sendCommandNoWait calls whose orphaned responses
     //    could confuse the command matcher.
-    await this.updateAvatar(song?.coverUrl ?? null);
+    await this.updateAvatar(song?.coverUrl ?? null, gen);
+    if (this.generation !== gen) return; // superseded
+
     // 2. Combined clientupdate (nickname + away in one fire-and-forget)
     await this.updateClientProperties(song);
-    // 3. Description (TS6 only — instant skip on TS3)
+    // 3. Description (clientedit on TS3, httpQuery on TS6)
     await this.updateDescription(song);
     // 4. Channel description (fire-and-forget channeledit)
     await this.updateChannelDescription(song);
@@ -69,8 +87,9 @@ export class BotProfileManager {
     if (song) await this.sendNowPlayingMessage(song);
   }
 
-  /** Reset permission-denied flags on new connection. */
+  /** Reset permission-denied flags and bump generation on new connection. */
   onConnect(): void {
+    this.generation++;
     this.permDenied = {
       avatar: false,
       description: false,
@@ -91,7 +110,7 @@ export class BotProfileManager {
 
   // --- Internal update methods ---
 
-  private async updateAvatar(coverUrl: string | null): Promise<void> {
+  private async updateAvatar(coverUrl: string | null, gen: number): Promise<void> {
     if (!this.config.avatarEnabled || this.permDenied.avatar) return;
     try {
       if (!coverUrl) {
@@ -101,6 +120,10 @@ export class BotProfileManager {
       // Request a thumbnail from the CDN to stay within TS3's avatar size limit.
       const thumbUrl = this.thumbnailUrl(coverUrl);
       const imageBuffer = await this.downloadImage(thumbUrl);
+
+      // Check generation after the slow download — bail if superseded.
+      if (this.generation !== gen) return;
+
       if (!imageBuffer || imageBuffer.length === 0) return;
       if (imageBuffer.length > AVATAR_MAX_BYTES) {
         this.logger.warn(
@@ -110,14 +133,9 @@ export class BotProfileManager {
         return;
       }
 
-      // Wrap the file-transfer sequence with a 6s timeout — the TS3
+      // Wrap the file-transfer sequence with a timeout — the TS3
       // full-client file transfer can silently hang.
-      await Promise.race([
-        this.doAvatarUpload(imageBuffer),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Avatar upload timed out")), 6000),
-        ),
-      ]);
+      await this.withTimeout(this.doAvatarUpload(imageBuffer), FILE_TRANSFER_TIMEOUT_MS);
       this.logger.info("Avatar updated");
     } catch (err) {
       this.handleFeatureError("avatar", err);
@@ -136,9 +154,12 @@ export class BotProfileManager {
 
   private async clearAvatar(): Promise<void> {
     try {
-      await this.tsClient.fileTransferDeleteFile(0n, ["/avatar"]);
+      await this.withTimeout(
+        this.tsClient.fileTransferDeleteFile(0n, ["/avatar"]),
+        FILE_TRANSFER_TIMEOUT_MS,
+      );
     } catch {
-      // File may not exist — that's fine
+      // File may not exist or transfer timed out — that's fine
     }
     try {
       await this.tsClient.sendCommandNoWait("clientupdate client_flag_avatar=");
@@ -185,16 +206,9 @@ export class BotProfileManager {
       if (!song) {
         parts.push(`client_nickname=${escapeTS3(this.defaultNickname)}`);
       } else {
-        const songInfo = `${song.name} - ${song.artist}`;
-        const prefix = "\u266A "; // ♪
-        const sep = " - ";
-        const overhead = prefix.length + sep.length + this.defaultNickname.length;
-        if (overhead <= TS3_NICKNAME_MAX) {
-          const maxSongLen = TS3_NICKNAME_MAX - overhead;
-          const truncated = songInfo.length > maxSongLen
-            ? songInfo.slice(0, maxSongLen - 1) + "\u2026"
-            : songInfo;
-          parts.push(`client_nickname=${escapeTS3(`${prefix}${truncated}${sep}${this.defaultNickname}`)}`);
+        const nickname = this.buildNickname(song);
+        if (nickname) {
+          parts.push(`client_nickname=${escapeTS3(nickname)}`);
         }
       }
     }
@@ -234,6 +248,51 @@ export class BotProfileManager {
     }
   }
 
+  /**
+   * Build a nickname string that fits within TS3_NICKNAME_MAX.
+   * Uses UTF-8 byte length for the limit since TS3 counts bytes,
+   * not characters.
+   */
+  private buildNickname(song: QueuedSong): string | null {
+    const songInfo = `${song.name} - ${song.artist}`;
+    const prefix = "\u266A "; // ♪
+    const sep = " - ";
+    const suffix = `${sep}${this.defaultNickname}`;
+
+    const overheadBytes = Buffer.byteLength(prefix, "utf8") + Buffer.byteLength(suffix, "utf8");
+    if (overheadBytes >= TS3_NICKNAME_MAX) {
+      // Default nickname alone is too long with decoration — skip
+      return null;
+    }
+
+    const maxSongBytes = TS3_NICKNAME_MAX - overheadBytes;
+    const truncated = this.truncateUtf8(songInfo, maxSongBytes);
+    return `${prefix}${truncated}${suffix}`;
+  }
+
+  /**
+   * Truncate a string so its UTF-8 byte length does not exceed maxBytes.
+   * Appends an ellipsis if truncation occurred, taking its byte cost
+   * into account. Never splits a multi-byte character.
+   */
+  private truncateUtf8(str: string, maxBytes: number): string {
+    if (Buffer.byteLength(str, "utf8") <= maxBytes) return str;
+    const ellipsis = "\u2026"; // …
+    const ellipsisBytes = Buffer.byteLength(ellipsis, "utf8"); // 3
+    const target = maxBytes - ellipsisBytes;
+    if (target <= 0) return ellipsis;
+    // Walk characters, accumulating byte length
+    let byteLen = 0;
+    let end = 0;
+    for (const ch of str) {
+      const chBytes = Buffer.byteLength(ch, "utf8");
+      if (byteLen + chBytes > target) break;
+      byteLen += chBytes;
+      end += ch.length; // ch.length handles surrogate pairs
+    }
+    return str.slice(0, end) + ellipsis;
+  }
+
   private async updateChannelDescription(song: QueuedSong | null): Promise<void> {
     if (!this.config.channelDescEnabled || this.permDenied.channelDesc) return;
     try {
@@ -244,7 +303,6 @@ export class BotProfileManager {
         await this.tsClient.sendCommandNoWait(
           `channeledit cid=${channelId} channel_description=`,
         );
-        this.logger.debug("Channel description cleared");
         return;
       }
 
@@ -257,7 +315,6 @@ export class BotProfileManager {
       await this.tsClient.sendCommandNoWait(
         `channeledit cid=${channelId} channel_description=${escapeTS3(desc)}`,
       );
-      this.logger.debug("Channel description updated");
     } catch (err) {
       this.handleFeatureError("channelDesc", err);
     }
@@ -268,7 +325,6 @@ export class BotProfileManager {
     try {
       const text = `\u266A \u6B63\u5728\u64AD\u653E: ${song.name} - ${song.artist} [${song.album}]`;
       await this.tsClient.sendTextMessage(text);
-      this.logger.debug("Now-playing message sent");
     } catch (err) {
       this.handleFeatureError("nowPlayingMsg", err);
     }
@@ -278,18 +334,20 @@ export class BotProfileManager {
 
   /**
    * Append CDN resize parameters to get a thumbnail suitable for TS3 avatars.
-   * NetEase and QQ Music CDNs both support URL-based image resizing.
+   * NetEase and QQ Music CDNs support URL-based image resizing.
+   * BiliBili and YouTube covers fall through to the size-check guard.
    */
   private thumbnailUrl(url: string): string {
     if (url.includes("music.126.net") || url.includes("netease")) {
-      // NetEase Cloud Music CDN: ?param=<w>y<h>
       return url.includes("?") ? url : `${url}?param=200y200`;
     }
     if (url.includes("qqmusic") || url.includes("qq.com")) {
-      // QQ Music CDN: /200 suffix or similar
       return url.replace(/\/\d+$/, "/200");
     }
-    // Other platforms — return as-is, size check will skip if too large
+    if (url.includes("bilivideo") || url.includes("hdslb")) {
+      // BiliBili CDN supports @<w>w_<h>h suffix
+      return url.includes("@") ? url : `${url}@200w_200h`;
+    }
     return url;
   }
 
@@ -305,6 +363,16 @@ export class BotProfileManager {
       this.logger.warn({ err, url }, "Failed to download cover image");
       return null;
     }
+  }
+
+  /** Race a promise against a timeout. */
+  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Timed out after ${ms}ms`)), ms),
+      ),
+    ]);
   }
 
   private handleFeatureError(
