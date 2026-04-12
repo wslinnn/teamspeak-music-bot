@@ -114,7 +114,7 @@ export class BotProfileManager {
     if (!this.config.avatarEnabled || this.permDenied.avatar) return;
     try {
       if (!coverUrl) {
-        await this.clearAvatar();
+        await this.clearAvatar(gen);
         return;
       }
       // Request a thumbnail from the CDN to stay within TS3's avatar size limit.
@@ -152,7 +152,7 @@ export class BotProfileManager {
     await this.tsClient.sendCommandNoWait(`clientupdate client_flag_avatar=${escapeTS3(md5)}`);
   }
 
-  private async clearAvatar(): Promise<void> {
+  private async clearAvatar(gen: number): Promise<void> {
     try {
       await this.withTimeout(
         this.tsClient.fileTransferDeleteFile(0n, ["/avatar"]),
@@ -161,6 +161,8 @@ export class BotProfileManager {
     } catch {
       // File may not exist or transfer timed out — that's fine
     }
+    // Bail if a newer song started while we were deleting
+    if (this.generation !== gen) return;
     try {
       await this.tsClient.sendCommandNoWait("clientupdate client_flag_avatar=");
     } catch (err) {
@@ -183,8 +185,13 @@ export class BotProfileManager {
         // TS3AudioBot does via TSLib's ChangeDescription().
         const clid = this.tsClient.getClientId();
         if (clid <= 0) return;
-        await this.tsClient.execCommand(
-          `clientedit clid=${clid} client_description=${escapeTS3(text)}`,
+        // Use a 5s timeout — if clientedit hangs, don't block the
+        // remaining profile updates (channeledit, now-playing msg).
+        await this.withTimeout(
+          this.tsClient.execCommand(
+            `clientedit clid=${clid} client_description=${escapeTS3(text)}`,
+          ),
+          5000,
         );
       }
       this.logger.info("Description updated");
