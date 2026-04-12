@@ -176,6 +176,75 @@ describe("PlayQueue", () => {
     expect(queue.next()).toBeNull();
   });
 
+  it("random mode: removing currently-playing song does not skip others", () => {
+    queue.setMode(PlayMode.Random);
+    queue.add(makeSong("A"));
+    queue.add(makeSong("B"));
+    queue.add(makeSong("C"));
+    queue.add(makeSong("D"));
+    queue.play(); // plays A (index 0)
+    const second = queue.next()!; // plays some song
+    // Remove the currently-playing song
+    const curIdx = queue.getCurrentIndex();
+    queue.remove(curIdx);
+    // Remaining songs (excluding A and the removed song) should all be reachable
+    const played = new Set<string>();
+    played.add("A"); // already played via play()
+    played.add(second.id); // played and then removed
+    let song = queue.next();
+    while (song) {
+      played.add(song.id);
+      song = queue.next();
+    }
+    // All 4 original songs should have been played or accounted for
+    expect(played).toEqual(new Set(["A", "B", "C", "D"]));
+  });
+
+  it("random mode: prev does not cause duplicate plays", () => {
+    queue.setMode(PlayMode.Random);
+    queue.add(makeSong("A"));
+    queue.add(makeSong("B"));
+    queue.add(makeSong("C"));
+    queue.play(); // plays A
+    queue.next(); // plays B or C
+    queue.prev(); // go back — this song is now marked as played
+    // Exhaust remaining songs
+    const ids: string[] = [];
+    let song = queue.next();
+    while (song) {
+      ids.push(song.id);
+      song = queue.next();
+    }
+    // No song ID should appear more than once across the entire session
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("random mode: adding song mid-playback includes the new song", () => {
+    queue.setMode(PlayMode.Random);
+    queue.add(makeSong("A"));
+    queue.add(makeSong("B"));
+    queue.play(); // plays A
+    queue.next(); // plays B
+    // Add a new song while all existing songs have been played
+    queue.add(makeSong("C"));
+    const song = queue.next();
+    expect(song).not.toBeNull();
+    expect(song!.id).toBe("C");
+    // After C, should stop
+    expect(queue.next()).toBeNull();
+  });
+
+  it("random mode: setMode preserves current song as played", () => {
+    queue.add(makeSong("A"));
+    queue.add(makeSong("B"));
+    queue.play(); // plays A in sequential mode
+    queue.setMode(PlayMode.Random); // switch to random — A should be marked played
+    // next() should only return B, never A again
+    const song = queue.next();
+    expect(song?.id).toBe("B");
+    expect(queue.next()).toBeNull();
+  });
+
   it("random-loop mode never returns null", () => {
     queue.setMode(PlayMode.RandomLoop);
     queue.add(makeSong("1"));

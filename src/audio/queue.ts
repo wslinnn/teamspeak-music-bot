@@ -61,6 +61,7 @@ export class PlayQueue {
     if (this.songs.length === 0) return null;
     this.playedIndices.clear();
     this.currentIndex = 0;
+    this.playedIndices.add(0);
     return this.songs[0];
   }
 
@@ -68,6 +69,7 @@ export class PlayQueue {
     if (index < 0 || index >= this.songs.length) return null;
     this.playedIndices.clear();
     this.currentIndex = index;
+    this.playedIndices.add(index);
     return this.songs[index];
   }
 
@@ -86,9 +88,6 @@ export class PlayQueue {
         return this.songs[this.currentIndex];
       }
       case PlayMode.Random: {
-        if (this.currentIndex >= 0) {
-          this.playedIndices.add(this.currentIndex);
-        }
         const unplayed: number[] = [];
         for (let i = 0; i < this.songs.length; i++) {
           if (!this.playedIndices.has(i)) unplayed.push(i);
@@ -97,6 +96,7 @@ export class PlayQueue {
         const nextIndex =
           unplayed[Math.floor(Math.random() * unplayed.length)];
         this.currentIndex = nextIndex;
+        this.playedIndices.add(nextIndex);
         return this.songs[nextIndex];
       }
       case PlayMode.RandomLoop: {
@@ -124,6 +124,7 @@ export class PlayQueue {
     } else {
       this.currentIndex = prevIndex;
     }
+    this.playedIndices.add(this.currentIndex);
     return this.songs[this.currentIndex];
   }
 
@@ -152,6 +153,9 @@ export class PlayQueue {
   setMode(mode: PlayMode): void {
     this.mode = mode;
     this.playedIndices.clear();
+    if (this.currentIndex >= 0) {
+      this.playedIndices.add(this.currentIndex);
+    }
   }
 
   getCurrentIndex(): number {
