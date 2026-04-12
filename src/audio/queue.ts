@@ -20,6 +20,7 @@ export class PlayQueue {
   private songs: QueuedSong[] = [];
   private currentIndex = -1;
   private mode: PlayMode = PlayMode.Sequential;
+  private playedIndices = new Set<number>();
 
   add(song: QueuedSong): void {
     this.songs.push(song);
@@ -36,15 +37,16 @@ export class PlayQueue {
     if (index < this.currentIndex) {
       this.currentIndex--;
     } else if (index === this.currentIndex) {
-      // Move the pointer back by one so next() in sequential mode advances
-      // to the song that shifted into the removed slot. Without this, the
-      // shifted song is silently skipped because current() incorrectly
-      // returns it (even though the player is still on the removed song)
-      // and next() then increments past it. currentIndex may become -1,
-      // which is fine — it represents "no current song" and next() will
-      // pick index 0.
       this.currentIndex--;
     }
+
+    // Rebuild playedIndices to account for shifted indices
+    const newPlayed = new Set<number>();
+    for (const idx of this.playedIndices) {
+      if (idx === index) continue;
+      newPlayed.add(idx > index ? idx - 1 : idx);
+    }
+    this.playedIndices = newPlayed;
 
     return removed;
   }
@@ -52,17 +54,22 @@ export class PlayQueue {
   clear(): void {
     this.songs = [];
     this.currentIndex = -1;
+    this.playedIndices.clear();
   }
 
   play(): QueuedSong | null {
     if (this.songs.length === 0) return null;
+    this.playedIndices.clear();
     this.currentIndex = 0;
+    this.playedIndices.add(0);
     return this.songs[0];
   }
 
   playAt(index: number): QueuedSong | null {
     if (index < 0 || index >= this.songs.length) return null;
+    this.playedIndices.clear();
     this.currentIndex = index;
+    this.playedIndices.add(index);
     return this.songs[index];
   }
 
@@ -81,12 +88,15 @@ export class PlayQueue {
         return this.songs[this.currentIndex];
       }
       case PlayMode.Random: {
-        if (this.songs.length === 1) return this.songs[0];
-        let nextIndex: number;
-        do {
-          nextIndex = Math.floor(Math.random() * this.songs.length);
-        } while (nextIndex === this.currentIndex && this.songs.length > 1);
+        const unplayed: number[] = [];
+        for (let i = 0; i < this.songs.length; i++) {
+          if (!this.playedIndices.has(i)) unplayed.push(i);
+        }
+        if (unplayed.length === 0) return null;
+        const nextIndex =
+          unplayed[Math.floor(Math.random() * unplayed.length)];
         this.currentIndex = nextIndex;
+        this.playedIndices.add(nextIndex);
         return this.songs[nextIndex];
       }
       case PlayMode.RandomLoop: {
@@ -114,6 +124,7 @@ export class PlayQueue {
     } else {
       this.currentIndex = prevIndex;
     }
+    this.playedIndices.add(this.currentIndex);
     return this.songs[this.currentIndex];
   }
 
@@ -141,6 +152,10 @@ export class PlayQueue {
 
   setMode(mode: PlayMode): void {
     this.mode = mode;
+    this.playedIndices.clear();
+    if (this.currentIndex >= 0) {
+      this.playedIndices.add(this.currentIndex);
+    }
   }
 
   getCurrentIndex(): number {
