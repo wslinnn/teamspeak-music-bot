@@ -188,6 +188,9 @@ export class TS3Client extends EventEmitter {
     };
 
     this.client = new TS3FullClient(this.identity, addr, this.options.nickname, {
+      // Forward server password to the protocol library so it can be
+      // included in clientinit for password-protected servers
+      serverPassword: this.options.serverPassword,
       logger: {
         debug: (msg) => this.logger.debug(msg),
         info: (msg) => this.logger.info(msg),
