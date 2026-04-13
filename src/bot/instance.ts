@@ -60,6 +60,8 @@ export class BotInstance extends EventEmitter {
   private disconnectEmitted = false;
   private voteSkipUsers = new Set<string>();
   private isAdvancing = false;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private channelUserCount = 0;
 
   constructor(options: BotInstanceOptions) {
     super();
@@ -121,6 +123,10 @@ export class BotInstance extends EventEmitter {
       this.disconnectEmitted = true;
       this.emit("disconnected");
     });
+
+    this.tsClient.on("connected", () => {
+      this._startIdlePoller();
+    });
   }
 
   async connect(): Promise<void> {
@@ -138,6 +144,7 @@ export class BotInstance extends EventEmitter {
   }
 
   disconnect(): void {
+    this._cancelIdleTimer();
     this.player.stop();
     this.connected = false;
     if (!this.disconnectEmitted) {
@@ -145,6 +152,48 @@ export class BotInstance extends EventEmitter {
       this.emit("disconnected");
     }
     this.tsClient.disconnect();
+  }
+
+  /** 外部更新 idleTimeoutMinutes（由 API 保存时调用） */
+  updateIdleTimeout(minutes: number): void {
+    this.config.idleTimeoutMinutes = minutes;
+    if (minutes === 0) this._cancelIdleTimer();
+  }
+
+  private _startIdlePoller(): void {
+    // 每 30 秒检查一次频道人数
+    const poll = async () => {
+      if (!this.connected) return;
+      try {
+        const clients = await this.tsClient.getClientsInChannel();
+        const userCount = clients.length - 1; // 排除 bot 自身
+        if (userCount <= 0) {
+          this._scheduleIdleCheck();
+        } else {
+          this._cancelIdleTimer();
+        }
+      } catch { /* ignore */ }
+      setTimeout(poll, 30_000);
+    };
+    setTimeout(poll, 30_000);
+  }
+
+  private _scheduleIdleCheck(): void {
+    if (this.idleTimer !== null) return; // 已经在倒计时，不重复创建
+    const minutes = this.config.idleTimeoutMinutes ?? 0;
+    if (!this.connected || minutes <= 0) return;
+    this.idleTimer = setTimeout(() => {
+      if (!this.connected) return;
+      this.logger.info({ idleMinutes: minutes }, "Channel empty, disconnecting due to idle timeout");
+      this.disconnect();
+    }, minutes * 60 * 1000);
+  }
+
+  private _cancelIdleTimer(): void {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
   }
 
   private async handleTextMessage(msg: TS3TextMessage): Promise<void> {

@@ -371,6 +371,32 @@
         </div>
       </div>
     </section>
+    
+    <!-- Idle Timeout -->
+    <section class="settings-section">
+      <h2 class="section-title">行为设置</h2>
+      <div class="setting-row">
+        <div class="setting-label">
+          <Icon icon="mdi:timer-off-outline" class="setting-icon" />
+          <div>
+            <div>闲置自动退出</div>
+            <div style="font-size:12px; opacity:0.6; margin-top:2px">频道无人时，机器人自动断开的等待时间（0 = 不退出）</div>
+          </div>
+        </div>
+        <div class="prefix-input-wrap">
+          <input
+            v-model.number="idleTimeout"
+            type="number"
+            min="0"
+            class="input input-sm"
+            style="max-width:80px"
+            placeholder="0"
+          />
+          <span style="font-size:13px; opacity:0.7">分钟</span>
+          <button class="btn-primary" @click="saveIdleTimeout">保存</button>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -661,10 +687,27 @@ async function savePrefix() {
   // Prefix is saved client-side for now
 }
 
+// Idle timeout
+const idleTimeout = ref(0);
+
+async function loadIdleTimeout() {
+  try {
+    const res = await axios.get('/api/bot/settings');
+    idleTimeout.value = res.data.idleTimeoutMinutes ?? 0;
+  } catch { /* ignore */ }
+}
+
+async function saveIdleTimeout() {
+  try {
+    await axios.post('/api/bot/settings', { idleTimeoutMinutes: idleTimeout.value });
+  } catch { /* ignore */ }
+}
+
 onMounted(() => {
   store.fetchBots(); // Refresh bot status on page visit
   checkAuthStatus();
   loadQuality();
+  loadIdleTimeout();
 });
 
 onUnmounted(() => {

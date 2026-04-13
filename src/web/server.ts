@@ -22,6 +22,7 @@ export interface WebServerOptions {
   bilibiliProvider: MusicProvider;
   database: BotDatabase;
   config: BotConfig;
+  configPath: string;
   logger: Logger;
   cookieStore?: CookieStore;
   staticDir?: string;
@@ -41,7 +42,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   app.use(
     "/api/bot",
-    createBotRouter(options.botManager, options.config, logger)
+    createBotRouter(options.botManager, options.config, options.configPath, logger)
   );
   app.use(
     "/api/music",
