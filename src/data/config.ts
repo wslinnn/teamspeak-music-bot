@@ -13,6 +13,7 @@ export interface BotConfig {
   adminGroups: number[];
   autoReturnDelay: number;
   autoPauseOnEmpty: boolean;
+  idleTimeoutMinutes: number;  
 }
 
 export function getDefaultConfig(): BotConfig {
@@ -28,6 +29,7 @@ export function getDefaultConfig(): BotConfig {
     adminGroups: [],
     autoReturnDelay: 300,
     autoPauseOnEmpty: true,
+    idleTimeoutMinutes: 0,
   };
 }
 

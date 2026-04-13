@@ -1,11 +1,13 @@
 import { Router } from "express";
 import type { BotManager } from "../../bot/manager.js";
 import type { BotConfig } from "../../data/config.js";
+import { saveConfig } from "../../data/config.js";
 import type { Logger } from "../../logger.js";
 
 export function createBotRouter(
   botManager: BotManager,
   config: BotConfig,
+  configPath: string,
   logger: Logger
 ): Router {
   const router = Router();
@@ -114,6 +116,27 @@ export function createBotRouter(
     } catch (err) {
       res.status(500).json({ error: (err as Error).message });
     }
+  });
+  
+  // GET /api/bot/settings — 读取全局 bot 行为设置
+  router.get("/settings", (_req, res) => {
+    res.json({ idleTimeoutMinutes: config.idleTimeoutMinutes ?? 0 });
+  });
+
+  // POST /api/bot/settings — 保存全局 bot 行为设置
+  router.post("/settings", (req, res) => {
+    const { idleTimeoutMinutes } = req.body;
+    if (typeof idleTimeoutMinutes !== "number" || idleTimeoutMinutes < 0) {
+      res.status(400).json({ error: "idleTimeoutMinutes must be a non-negative number" });
+      return;
+    }
+    config.idleTimeoutMinutes = idleTimeoutMinutes;
+    saveConfig(configPath, config);
+    // 通知所有 bot 实例更新定时器
+    for (const bot of botManager.getAllBots()) {
+      bot.updateIdleTimeout(idleTimeoutMinutes);
+    }
+    res.json({ ok: true });
   });
 
   return router;

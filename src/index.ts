@@ -71,6 +71,7 @@ async function main() {
     bilibiliProvider,
     database: db,
     config,
+    configPath: CONFIG_PATH,
     logger,
     cookieStore,
     staticDir: STATIC_DIR,
