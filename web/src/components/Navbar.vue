@@ -77,11 +77,33 @@ function selectBot(id: string) {
   dropdownOpen.value = false;
 }
 
-function copyBotLink(id: string) {
+async function copyBotLink(id: string) {
   const url = `${window.location.origin}/bot/${id}`;
-  navigator.clipboard.writeText(url).then(() => {
+  // navigator.clipboard requires a secure context (HTTPS or localhost).
+  // Fall back to a hidden textarea + execCommand('copy') for plain HTTP
+  // access (e.g. when the bot is hosted on a remote IP).
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      ta.style.pointerEvents = 'none';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (!ok) throw new Error('execCommand copy returned false');
+    }
     dropdownOpen.value = false;
-  });
+  } catch (err) {
+    // Last-resort: prompt the user with the URL so they can copy manually
+    console.error('Failed to copy bot link', err);
+    window.prompt('复制以下链接：', url);
+  }
 }
 
 async function togglePower(bot: { id: string; connected: boolean; name: string }) {
