@@ -95,8 +95,8 @@ export class AudioPlayer extends EventEmitter {
   private seekOffset = 0;
   private framesPlayed = 0; // ground truth: number of 20ms frames sent
   private sessionId = 0;
-  private static readonly BUFFER_HIGH_WATER = 960 * 1024; // ~5s of PCM at 48kHz stereo
-  private static readonly BUFFER_LOW_WATER = 480 * 1024;  // ~2.5s
+  private static readonly BUFFER_HIGH_WATER = 640 * 1024; // ~5s of PCM at 48kHz stereo
+  private static readonly BUFFER_LOW_WATER = 256 * 1024;  // ~2.5s
   private ffmpegPaused = false;
   private spawnFailed = false; // true if ffmpeg spawn errored (prevent trackEnd cascade)
   private consecutiveFailures = 0;
@@ -294,7 +294,9 @@ export class AudioPlayer extends EventEmitter {
 
   private applyVolume(pcm: Buffer): Buffer {
     if (this.volume === 100) return Buffer.from(pcm);
-    const factor = this.volume / 100;
+    // Apply volume + fixed 6dB attenuation (factor ≈ 0.5)
+    const BASE_ATTENUATION = 0.2; // -6dB (10^(-6/20) ≈ 0.5012)
+    const factor = (this.volume / 100) * BASE_ATTENUATION;
     const out = Buffer.alloc(pcm.length);
     for (let i = 0; i < pcm.length; i += 2) {
       let sample = pcm.readInt16LE(i);
@@ -347,7 +349,32 @@ export class AudioPlayer extends EventEmitter {
     this.sessionId++;
     this.frameLoopRunning = false;
     if (this.ffmpeg) {
+      const ffmpegPid = this.ffmpeg.pid;
+      this.logger.debug({ pid: ffmpegPid }, "Stopping ffmpeg process");
+      
+      // Try SIGTERM first for graceful shutdown
       this.ffmpeg.kill("SIGTERM");
+      
+      // If process doesn't exit after 1 second, force kill with SIGKILL
+      const killTimeout = setTimeout(() => {
+        if (this.ffmpeg && this.ffmpeg.pid) {
+          this.logger.warn({ pid: this.ffmpeg.pid }, "FFmpeg didn't exit from SIGTERM, sending SIGKILL");
+          try {
+            this.ffmpeg.kill("SIGKILL");
+          } catch (err) {
+            this.logger.debug({ err }, "Error killing ffmpeg process");
+          }
+        }
+      }, 1000);
+      
+      // Store timeout ID for cleanup on next stop call
+      const tempProc = this.ffmpeg;
+      const onClose = () => {
+        clearTimeout(killTimeout);
+        tempProc.removeListener("close", onClose);
+      };
+      tempProc.once("close", onClose);
+      
       this.ffmpeg = null;
     }
     this.pcmBuffer = Buffer.alloc(0);
