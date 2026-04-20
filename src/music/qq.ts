@@ -42,7 +42,7 @@ export class QQMusicProvider implements MusicProvider {
 
     const songs: Song[] = (res.data?.response?.data?.song?.list ?? []).map(
       (s: any) => ({
-        id: String(s.songmid ?? s.songid),
+        id: String(s.mid ?? s.songmid ?? s.songid),
         name: s.songname ?? "",
         artist: (s.singer ?? []).map((a: any) => a.name).join(" / "),
         album: s.albumname ?? "",
@@ -57,12 +57,26 @@ export class QQMusicProvider implements MusicProvider {
     return { songs, playlists: [], albums: [] };
   }
 
-  async getSongUrl(songId: string, _quality?: string): Promise<string | null> {
-    const res = await this.api.get("/getMusicPlay", {
-      params: { songmid: songId, ...this.cookieParams },
-    });
-    const playUrl = res.data?.data?.playUrl?.[songId];
-    return playUrl?.url || null;
+  async getSongUrl(songId: string, quality?: string): Promise<string | null> {
+    try {
+      const res = await this.api.get("/getMusicPlay", {
+        params: { songmid: songId, quality: quality ?? this.quality, ...this.cookieParams },
+      });
+      const playUrl = res.data?.data?.playUrl?.[songId];
+      if (playUrl?.url) return playUrl.url;
+    } catch {
+      // try with songid
+      try {
+        const res = await this.api.get("/getMusicPlay", {
+          params: { songid: songId, quality: quality ?? this.quality, ...this.cookieParams },
+        });
+        const playUrl = res.data?.data?.playUrl?.[songId];
+        if (playUrl?.url) return playUrl.url;
+      } catch {
+        // ignore
+      }
+    }
+    return null;
   }
 
   async getSongDetail(songId: string): Promise<Song | null> {
@@ -115,12 +129,14 @@ export class QQMusicProvider implements MusicProvider {
     const cdlist = res.data?.response?.cdlist ?? [];
     if (cdlist.length === 0) return [];
     return (cdlist[0].songlist ?? []).map((s: any) => ({
-      id: String(s.songmid ?? s.songid),
+      id: String(s.mid ?? s.songmid ?? s.songid),
       name: s.songname ?? s.name ?? "",
       artist: (s.singer ?? []).map((a: any) => a.name).join(" / "),
       album: s.albumname ?? "",
       duration: s.interval ?? 0,
-      coverUrl: s.albummid
+      coverUrl: s.album?.mid
+        ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${s.album.mid}.jpg`
+        : s.albummid
         ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${s.albummid}.jpg`
         : "",
       platform: "qq",
