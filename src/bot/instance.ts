@@ -690,7 +690,7 @@ export class BotInstance extends EventEmitter {
           this.refillFm().catch(err => this.logger.error({ err }, "Proactive FM refill failed"));
         }
       } else {
-        // Queue exhausted — in FM mode, refill instead of stopping
+        // Defensive: only reached if play mode is changed away from RandomLoop during FM
         if (this.isFmMode) {
           await this.refillFm();
           const refillNext = this.queue.next();
