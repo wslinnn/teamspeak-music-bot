@@ -71,7 +71,7 @@
 - `POST /api/auth/login`：接收 `{ password: string }`，与 `config.adminPassword` 比对
 - 成功返回 `{ success: true, token, expiresIn }`
 - 失败返回 401，记录日志
-- 限流：5 秒内最多 5 次失败尝试
+- 限流：基于客户端 IP，5 秒内最多 5 次失败尝试
 
 ### 1.4 WebSocket 认证
 
@@ -80,9 +80,9 @@
 - 客户端连接时通过 query 参数传递 token：`ws://host:port/ws?token=<jwt>`
 - 服务端在 `upgrade` 事件中验证 token，无效则拒绝连接（关闭码 4001）
 
-**改造文件：** `web/src/composables/useWebSocket.ts`
+**前端最小改动：** `web/src/composables/useWebSocket.ts`
 
-- 连接 URL 中自动附加当前 JWT token
+- 连接 URL 中附加当前 JWT token（仅此最小改动，阶段 3 将全面重写此 composable）
 
 ### 1.5 TS 命令权限检查
 
