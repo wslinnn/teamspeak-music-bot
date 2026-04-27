@@ -260,6 +260,7 @@ export class BotInstance extends EventEmitter {
       "playlist",
       "album",
       "fm",
+      "artist",
     ]);
     if (!this.connected && AUDIO_COMMANDS.has(cmd.name)) {
       throw new Error("Bot is not connected to TeamSpeak");
@@ -299,6 +300,8 @@ export class BotInstance extends EventEmitter {
         return this.cmdAlbum(cmd);
       case "fm":
         return this.cmdFm();
+      case "artist":
+        return this.cmdArtist(cmd);
       case "vote":
         return this.cmdVote(msg);
       case "lyrics":
@@ -616,6 +619,37 @@ export class BotInstance extends EventEmitter {
     return `Personal FM started: ${first?.name ?? "unknown"} - ${first?.artist ?? ""}`;
   }
 
+  private async cmdArtist(cmd: ParsedCommand): Promise<string> {
+    if (!cmd.args) return "Usage: !artist <artist name>";
+    const provider = this.getProvider(cmd.flags);
+    const result = await provider.search(cmd.args, 50);
+    if (result.songs.length === 0)
+      return `No results found for artist: ${cmd.args}`;
+
+    const query = cmd.args.toLowerCase();
+    let filtered = result.songs.filter(
+      s => s.artist.toLowerCase().includes(query)
+    );
+
+    // Fallback to unfiltered results if filtering drops everything
+    if (filtered.length === 0) {
+      filtered = result.songs.slice(0, 20);
+    }
+
+    this.queue.clear();
+    this.isFmMode = false;
+    for (const song of filtered) {
+      this.queue.add({ ...song, platform: provider.platform });
+    }
+    this.queue.setMode(PlayMode.Loop);
+    this.player.resetFailures();
+
+    const first = this.queue.play();
+    if (first) await this.resolveAndPlay(first);
+    this.emit("stateChange");
+    return `Artist mode: ${cmd.args} — ${filtered.length} songs loaded. Now playing: ${first?.name ?? "unknown"}`;
+  }
+
   private async refillFm(): Promise<void> {
     if (!this.isFmMode || !this.neteaseProvider.getPersonalFm) return;
     try {
@@ -690,6 +724,7 @@ export class BotInstance extends EventEmitter {
       `${p}playlist <name or id> — Load playlist by name or ID`,
       `${p}album <id>   — Load album`,
       `${p}fm           — Personal FM (NetEase)`,
+      `${p}artist <name> — Play songs by artist (loop)`,
       `${p}vote         — Vote to skip`,
       `${p}lyrics       — Show lyrics`,
       `${p}now          — Current song info`,
