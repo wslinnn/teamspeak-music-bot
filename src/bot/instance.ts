@@ -526,10 +526,44 @@ export class BotInstance extends EventEmitter {
   }
 
   private async cmdPlaylist(cmd: ParsedCommand): Promise<string> {
-    if (!cmd.args) return "Usage: !playlist <playlist ID or URL>";
+    if (!cmd.args) return "Usage: !playlist <playlist name or ID>";
     const provider = this.getProvider(cmd.flags);
+
+    // Determine if input is a numeric ID or a name search
     const id = this.extractId(cmd.args);
-    const songs = await provider.getPlaylistSongs(id);
+    const isNumericId = /^\d+$/.test(cmd.args.trim());
+
+    let playlistId: string;
+
+    if (isNumericId || id !== cmd.args) {
+      // Input is a numeric ID or URL containing an ID — use existing logic
+      playlistId = id;
+    } else {
+      // Name-based search
+      const result = await provider.search(cmd.args);
+      let playlists = result.playlists ?? [];
+
+      // Also search user's personal playlists if logged in
+      if (provider.getUserPlaylists) {
+        try {
+          const userPlaylists = await provider.getUserPlaylists();
+          const query = cmd.args.toLowerCase();
+          const matched = userPlaylists.filter(
+            p => p.name.toLowerCase().includes(query)
+          );
+          // Merge: public results first (API-ranked), then user matches
+          playlists = [...playlists, ...matched];
+        } catch {
+          // User playlists unavailable — continue with public results
+        }
+      }
+
+      if (playlists.length === 0)
+        return `No playlists found for: ${cmd.args}`;
+      playlistId = playlists[0].id;
+    }
+
+    const songs = await provider.getPlaylistSongs(playlistId);
     if (songs.length === 0) return "Playlist is empty or not found";
 
     this.queue.clear();
@@ -653,7 +687,7 @@ export class BotInstance extends EventEmitter {
       `${p}vol <0-100>  — Set volume`,
       `${p}queue        — Show queue`,
       `${p}mode <seq|loop|random|rloop> — Play mode`,
-      `${p}playlist <id> — Load playlist`,
+      `${p}playlist <name or id> — Load playlist by name or ID`,
       `${p}album <id>   — Load album`,
       `${p}fm           — Personal FM (NetEase)`,
       `${p}vote         — Vote to skip`,
