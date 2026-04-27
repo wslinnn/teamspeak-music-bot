@@ -271,4 +271,26 @@ export class QQMusicProvider implements MusicProvider {
       return { loggedIn: false };
     }
   }
+
+  async getUserPlaylists(): Promise<Playlist[]> {
+    if (!this.cookie) return [];
+    const uinMatch = /(?:^|; )uin=o?0?(\d+)/.exec(this.cookie);
+    const uin = uinMatch ? uinMatch[1] : "";
+    if (!uin) return [];
+    try {
+      const res = await this.api.get("/user/getUserPlaylists", {
+        params: { uin, ...this.cookieParams },
+      });
+      if (res.data?.response?.code !== 0) return [];
+      return (res.data?.response?.data?.playlists ?? []).map((p: any) => ({
+        id: String(p.dissid ?? p.id ?? ""),
+        name: p.dissname ?? p.name ?? "",
+        coverUrl: p.imgurl ?? p.coverUrl ?? "",
+        songCount: p.song_count ?? p.listennum ?? 0,
+        platform: "qq",
+      }));
+    } catch {
+      return [];
+    }
+  }
 }
