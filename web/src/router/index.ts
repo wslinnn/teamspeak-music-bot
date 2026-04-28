@@ -44,6 +44,11 @@ const router = createRouter({
       name: 'bot',
       component: () => import('../views/BotRedirect.vue'),
     },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/NotFound.vue'),
+    },
   ],
 });
 
