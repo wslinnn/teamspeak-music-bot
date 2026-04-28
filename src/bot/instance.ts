@@ -12,6 +12,7 @@ import {
   isAdminCommand,
   type ParsedCommand,
 } from "./commands.js";
+import { Mutex } from "../utils/mutex.js";
 import type { Logger } from "../logger.js";
 import type { BotDatabase, ProfileConfig } from "../data/database.js";
 import type { BotConfig } from "../data/config.js";
@@ -60,7 +61,7 @@ export class BotInstance extends EventEmitter {
   private connected = false;
   private disconnectEmitted = false;
   private voteSkipUsers = new Set<string>();
-  private isAdvancing = false;
+  private playNextMutex = new Mutex();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private channelUserCount = 0;
   private profileManager: BotProfileManager;
@@ -640,15 +641,13 @@ export class BotInstance extends EventEmitter {
   }
 
   private async playNext(): Promise<void> {
-    if (this.isAdvancing || !this.connected) return;
-    this.isAdvancing = true;
-    try {
+    if (!this.connected) return;
+    await this.playNextMutex.run(async () => {
       this.voteSkipUsers.clear();
       const next = this.queue.next();
       if (next) {
         let started = await this.resolveAndPlay(next);
         if (!started) {
-          // Skip to next if URL resolve fails (up to 3 retries)
           for (let i = 0; i < 3 && this.connected; i++) {
             const retry = this.queue.next();
             if (!retry) break;
@@ -660,16 +659,18 @@ export class BotInstance extends EventEmitter {
         }
         if (!started) {
           this.player.stop();
-          this.profileManager.onSongChange(null).catch(() => {});
+          this.profileManager.onSongChange(null).catch((err) => {
+            this.logger.error({ err }, "Failed to update profile on song end");
+          });
         }
       } else {
         this.player.stop();
-        this.profileManager.onSongChange(null).catch(() => {});
+        this.profileManager.onSongChange(null).catch((err) => {
+          this.logger.error({ err }, "Failed to update profile on song end");
+        });
       }
       this.emit("stateChange");
-    } finally {
-      this.isAdvancing = false;
-    }
+    });
   }
 
   private extractId(input: string): string {
