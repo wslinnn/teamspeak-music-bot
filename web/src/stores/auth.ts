@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import { http } from '../utils/http.js';
+import { http } from '../utils/http';
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('jwt_token'));
@@ -13,7 +13,12 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await http.get('/api/health');
       return res.data.authEnabled === true;
-    } catch {
+    } catch (err: unknown) {
+      const status = (err as any)?.response?.status;
+      // Distinguish server unreachable (rethrow) from auth disabled
+      if (!status) {
+        throw err;
+      }
       return false;
     }
   }
@@ -31,7 +36,7 @@ export const useAuthStore = defineStore('auth', () => {
       error.value = res.data.error ?? 'Login failed';
       return false;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Login failed';
+      const msg = (err as any)?.response?.data?.error ?? (err instanceof Error ? err.message : 'Login failed');
       error.value = msg;
       return false;
     } finally {

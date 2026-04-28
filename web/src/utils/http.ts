@@ -1,27 +1,27 @@
-import axios from 'axios';
-import { useAuthStore } from '../stores/auth.js';
-import { useToastStore } from '../stores/toast.js';
+import axios, { type AxiosInstance } from 'axios';
+import { useToastStore } from '../stores/toast';
 
-export const http = axios.create({
+export const http: AxiosInstance = axios.create({
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
 });
 
-http.interceptors.request.use((config) => {
-  const authStore = useAuthStore();
-  const token = authStore.getToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+http.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('jwt_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 http.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      const authStore = useAuthStore();
-      authStore.logout();
+      localStorage.removeItem('jwt_token');
       window.location.href = '/login';
       return Promise.reject(error);
     }

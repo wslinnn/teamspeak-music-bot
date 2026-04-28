@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { http } from '../utils/http.js';
+import { http } from '../utils/http';
 
 export interface Song {
   id: string;
@@ -374,7 +374,14 @@ export const usePlayerStore = defineStore('player', {
         this.bilibiliPopular = biliRes.value.data.songs;
       }
 
-      this.lastFetchTime = Date.now();
+      const anySuccess =
+        playlistRes.status === 'fulfilled' ||
+        dailyRes.status === 'fulfilled' ||
+        userRes.status === 'fulfilled' ||
+        biliRes.status === 'fulfilled';
+      if (anySuccess) {
+        this.lastFetchTime = Date.now();
+      }
     },
   },
 });
