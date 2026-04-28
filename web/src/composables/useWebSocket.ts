@@ -24,7 +24,18 @@ function getReconnectDelay(retryCount: number): number {
   return Math.min(delay, RECONNECT_MAX_MS);
 }
 
+function cleanupWebSocket(ws: WebSocket | null) {
+  if (!ws) return;
+  ws.onopen = null;
+  ws.onmessage = null;
+  ws.onclose = null;
+  ws.onerror = null;
+  ws.close();
+}
+
 export function useWebSocket() {
+  const store = usePlayerStore();
+  const authStore = useAuthStore();
   const connected = ref(false);
   const connectionState = ref<ConnectionState>('disconnected');
   let ws: WebSocket | null = null;
@@ -33,12 +44,23 @@ export function useWebSocket() {
   const toast = useToast();
 
   function connect() {
-    if (ws?.readyState === WebSocket.OPEN) return;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
+    // Clean up any existing socket before creating a new one
+    if (ws) {
+      cleanupWebSocket(ws);
+      ws = null;
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let url = `${protocol}//${window.location.host}/ws`;
 
-    const authStore = useAuthStore();
     const token = authStore.getToken();
     if (token) {
       url += `?token=${encodeURIComponent(token)}`;
@@ -51,7 +73,6 @@ export function useWebSocket() {
       connected.value = true;
       connectionState.value = 'connected';
       retryCount = 0;
-      console.log('WebSocket connected');
     };
 
     ws.onmessage = (event) => {
@@ -67,8 +88,6 @@ export function useWebSocket() {
         console.warn('WebSocket received message without type field', data);
         return;
       }
-
-      const store = usePlayerStore();
 
       switch (data.type) {
         case 'init':
@@ -132,7 +151,6 @@ export function useWebSocket() {
       // Auth failure — stop reconnecting
       if (event.code === 4001) {
         connectionState.value = 'disconnected';
-        console.warn('WebSocket auth failed, stopping reconnection');
         toast.error('WebSocket 认证失败，请重新登录');
         return;
       }
@@ -151,7 +169,6 @@ export function useWebSocket() {
 
       const delay = getReconnectDelay(retryCount);
       retryCount++;
-      console.log(`WebSocket reconnecting in ${Math.round(delay)}ms (attempt ${retryCount})`);
       connectionState.value = 'reconnecting';
       reconnectTimer = setTimeout(connect, delay);
     };
@@ -167,7 +184,10 @@ export function useWebSocket() {
       reconnectTimer = null;
     }
     retryCount = 0;
-    ws?.close();
+    if (ws) {
+      cleanupWebSocket(ws);
+      ws = null;
+    }
   }
 
   onUnmounted(disconnect);
