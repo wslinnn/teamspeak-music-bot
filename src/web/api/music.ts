@@ -22,7 +22,7 @@ export function createMusicRouter(
     try {
       const { q, platform, limit } = req.query;
       if (!q) {
-        res.status(400).json({ error: "q (query) is required" });
+        res.status(400).json({ success: false, error: "q (query) is required" });
         return;
       }
       const provider = getProvider(platform as string);
@@ -33,7 +33,7 @@ export function createMusicRouter(
       res.json(result);
     } catch (err) {
       logger.error({ err }, "Search failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -41,7 +41,7 @@ export function createMusicRouter(
     try {
       const { q, limit } = req.query;
       if (!q) {
-        res.status(400).json({ error: "q (query) is required" });
+        res.status(400).json({ success: false, error: "q (query) is required" });
         return;
       }
       const parsedLimit = parseInt(limit as string) || 20;
@@ -62,7 +62,7 @@ export function createMusicRouter(
       res.json({ songs });
     } catch (err) {
       logger.error({ err }, "Unified search failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -71,12 +71,12 @@ export function createMusicRouter(
       const provider = getProvider(req.query.platform as string);
       const song = await provider.getSongDetail(req.params.id);
       if (!song) {
-        res.status(404).json({ error: "Song not found" });
+        res.status(404).json({ success: false, error: "Song not found" });
         return;
       }
       res.json(song);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -86,7 +86,7 @@ export function createMusicRouter(
       const songs = await provider.getPlaylistSongs(req.params.id);
       res.json({ songs });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -96,7 +96,7 @@ export function createMusicRouter(
       const playlists = await provider.getRecommendPlaylists();
       res.json({ playlists });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -106,7 +106,7 @@ export function createMusicRouter(
       const songs = await provider.getAlbumSongs(req.params.id);
       res.json({ songs });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -116,7 +116,7 @@ export function createMusicRouter(
       const lyrics = await provider.getLyrics(req.params.id);
       res.json({ lyrics });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -124,14 +124,14 @@ export function createMusicRouter(
     try {
       const provider = getProvider(req.query.platform as string);
       if (!provider.getDailyRecommendSongs) {
-        res.status(501).json({ error: "Not supported by this provider" });
+        res.status(501).json({ success: false, error: "Not supported by this provider" });
         return;
       }
       const songs = await provider.getDailyRecommendSongs();
       res.json({ songs });
     } catch (err) {
       logger.error({ err }, "Get daily recommend songs failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -139,14 +139,14 @@ export function createMusicRouter(
     try {
       const provider = getProvider(req.query.platform as string);
       if (!provider.getPersonalFm) {
-        res.status(501).json({ error: "Not supported by this provider" });
+        res.status(501).json({ success: false, error: "Not supported by this provider" });
         return;
       }
       const songs = await provider.getPersonalFm();
       res.json({ songs });
     } catch (err) {
       logger.error({ err }, "Get personal FM failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -154,66 +154,49 @@ export function createMusicRouter(
     try {
       const provider = getProvider(req.query.platform as string);
       if (!provider.getUserPlaylists) {
-        res.status(501).json({ error: "Not supported by this provider" });
+        res.status(501).json({ success: false, error: "Not supported by this provider" });
         return;
       }
       const playlists = await provider.getUserPlaylists();
       res.json({ playlists });
     } catch (err) {
       logger.error({ err }, "Get user playlists failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.get("/playlist/:id/detail", async (req, res) => {
     try {
       const provider = getProvider(req.query.platform as string);
-      // Use the playlist songs endpoint to get basic info,
-      // but we also need detail info (name, cover, description).
-      // For netease, we access the underlying API directly.
-      const nProvider = provider as any;
-      if (nProvider.api) {
-        const cookieParams = nProvider.cookie
-          ? { cookie: nProvider.cookie }
-          : {};
-        const detailRes = await nProvider.api.get("/playlist/detail", {
-          params: { id: req.params.id, ...cookieParams },
-        });
-        const p = detailRes.data?.playlist;
-        if (p) {
-          res.json({
-            playlist: {
-              id: String(p.id),
-              name: p.name,
-              description: p.description ?? "",
-              coverUrl: p.coverImgUrl ?? "",
-              songCount: p.trackCount ?? 0,
-            },
-          });
-          return;
-        }
+      if (!provider.getPlaylistDetail) {
+        res.status(501).json({ success: false, error: "Not supported by this provider" });
+        return;
       }
-      res.status(404).json({ error: "Playlist not found" });
+      const playlist = await provider.getPlaylistDetail(req.params.id);
+      if (!playlist.id) {
+        res.status(404).json({ success: false, error: "Playlist not found" });
+        return;
+      }
+      res.json({ playlist });
     } catch (err) {
       logger.error({ err }, "Get playlist detail failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   // B站热门视频
   router.get("/bilibili/popular", async (req, res) => {
     try {
-      const provider = bilibiliProvider as any;
-      if (provider.getPopularVideos) {
+      if (bilibiliProvider.getPopularVideos) {
         const limit = parseInt(req.query.limit as string) || 20;
-        const songs = await provider.getPopularVideos(limit);
+        const songs = await bilibiliProvider.getPopularVideos(limit);
         res.json({ songs });
       } else {
         res.json({ songs: [] });
       }
     } catch (err) {
       logger.error({ err }, "Get bilibili popular failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -230,7 +213,7 @@ export function createMusicRouter(
   router.post("/quality", (req, res) => {
     const { quality, platform } = req.body;
     if (!quality) {
-      res.status(400).json({ error: "quality is required" });
+      res.status(400).json({ success: false, error: "quality is required" });
       return;
     }
     if (!platform || platform === "netease") {
