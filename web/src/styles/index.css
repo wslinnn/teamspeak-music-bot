@@ -146,3 +146,12 @@
 .fade-leave-to {
   opacity: 0;
 }
+
+/* Staggered list enter animation */
+.stagger-enter-active {
+  transition: all 0.3s ease;
+}
+.stagger-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
