@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-col items-center justify-center py-24 text-foreground-muted">
-    <Icon icon="mdi:alert-circle-outline" class="mb-4 text-6xl opacity-30" />
+    <Icon icon="mdi:alert-circle-outline" aria-hidden="true" class="mb-4 text-6xl opacity-30" />
     <h1 class="mb-2 text-2xl font-bold text-foreground">页面未找到</h1>
     <p class="mb-6 text-sm">您访问的页面不存在或已被移除</p>
     <BaseButton variant="secondary" @click="$router.push('/')">
