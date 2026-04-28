@@ -14,7 +14,6 @@
           class="flex-1 border-none bg-transparent text-base text-foreground outline-none placeholder:text-foreground-subtle"
           placeholder="搜索歌曲、歌手、专辑..."
           @keyup.enter="doSearch"
-          autofocus
         />
       </div>
     </div>
@@ -36,6 +35,13 @@
         @add="store.addSong(song)"
       />
     </div>
+
+    <!-- Error -->
+    <EmptyState
+      v-else-if="errorMsg"
+      :message="errorMsg"
+      icon="mdi:alert-circle-outline"
+    />
 
     <!-- Empty -->
     <EmptyState
@@ -59,19 +65,24 @@ import SkeletonLoader from '../components/common/SkeletonLoader.vue';
 const store = usePlayerStore();
 const route = useRoute();
 
+const searchInput = ref<HTMLInputElement | null>(null);
 const query = ref((route.query.q as string) || '');
 const results = ref<Song[]>([]);
 const loading = ref(false);
 const searched = ref(false);
+const errorMsg = ref('');
 
 async function doSearch() {
   if (!query.value.trim()) return;
   loading.value = true;
   searched.value = true;
+  errorMsg.value = '';
   try {
     const res = await http.get('/api/music/search/all', { params: { q: query.value } });
     results.value = res.data.songs;
-  } catch {
+  } catch (err: unknown) {
+    console.error('Search failed:', err);
+    errorMsg.value = '搜索失败，请稍后重试';
     results.value = [];
   } finally {
     loading.value = false;
@@ -79,6 +90,7 @@ async function doSearch() {
 }
 
 onMounted(() => {
+  searchInput.value?.focus();
   if (query.value) doSearch();
 });
 </script>
