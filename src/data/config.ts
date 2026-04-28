@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { createHmac } from "node:crypto";
 
 export interface BotConfig {
   webPort: number;
@@ -57,4 +58,13 @@ export function loadConfig(path: string): BotConfig {
 export function saveConfig(path: string, config: BotConfig): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+}
+
+/**
+ * Derive a stable JWT secret from the admin password.
+ * If adminPassword is empty, returns an empty string (auth disabled).
+ */
+export function getJwtSecret(adminPassword: string): string {
+  if (!adminPassword) return "";
+  return createHmac("sha256", "tsmusicbot-jwt-salt").update(adminPassword).digest("hex");
 }

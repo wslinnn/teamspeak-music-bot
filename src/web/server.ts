@@ -6,13 +6,16 @@ import type { BotManager } from "../bot/manager.js";
 import type { MusicProvider } from "../music/provider.js";
 import type { BotDatabase } from "../data/database.js";
 import type { BotConfig } from "../data/config.js";
+import { getJwtSecret } from "../data/config.js";
 import type { Logger } from "../logger.js";
 import type { CookieStore } from "../music/auth.js";
 import { createBotRouter } from "./api/bot.js";
 import { createMusicRouter } from "./api/music.js";
 import { createPlayerRouter } from "./api/player.js";
 import { createAuthRouter } from "./api/auth.js";
-import { setupWebSocket } from "./websocket.js";
+import { createAdminLoginHandler } from "../auth/login.js";
+import { createRequireAuth } from "../auth/middleware.js";
+import { setupAuthenticatedWebSocket } from "./websocket.js";
 
 export interface WebServerOptions {
   port: number;
@@ -37,26 +40,52 @@ export function createWebServer(options: WebServerOptions): WebServer {
   const app = express();
   const server = http.createServer(app);
   const logger = options.logger.child({ component: "web" });
+  const jwtSecret = getJwtSecret(options.config.adminPassword);
+  const authEnabled = jwtSecret.length > 0;
 
   if (options.config.trustProxy) {
-    // Honor X-Forwarded-* from a reverse proxy (nginx/Caddy/Cloudflare).
     app.set("trust proxy", true);
   }
 
   app.use(express.json());
 
+  // --- Public routes (no auth required) ---
   app.get("/api/config/public-url", (_req, res) => {
     const raw = (options.config.publicUrl ?? "").trim();
     res.json({ publicUrl: raw ? raw.replace(/\/+$/, "") : null });
   });
 
+  app.get("/api/health", (_req, res) => {
+    res.json({ status: "ok", version: "0.1.0", authEnabled });
+  });
+
+  // Login endpoint — always public
+  if (authEnabled) {
+    app.post(
+      "/api/auth/login",
+      createAdminLoginHandler(options.config.adminPassword, jwtSecret, logger),
+    );
+  }
+
+  // --- Protected routes (auth required when enabled) ---
+  if (authEnabled) {
+    app.use("/api/bot", createRequireAuth(jwtSecret));
+    app.use("/api/music", createRequireAuth(jwtSecret));
+    app.use("/api/player", createRequireAuth(jwtSecret));
+    app.use("/api/auth", createRequireAuth(jwtSecret));
+    logger.info("Authentication enabled — all API endpoints require JWT");
+  } else {
+    logger.warn("No adminPassword set — authentication DISABLED, all endpoints are public");
+  }
+
+  // Route handlers
   app.use(
     "/api/bot",
-    createBotRouter(options.botManager, options.config, options.configPath, logger)
+    createBotRouter(options.botManager, options.config, options.configPath, logger),
   );
   app.use(
     "/api/music",
-    createMusicRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger)
+    createMusicRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger),
   );
   app.use("/api/player", createPlayerRouter(
     options.botManager, logger, options.database,
@@ -64,12 +93,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
   ));
   app.use(
     "/api/auth",
-    createAuthRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger, options.cookieStore)
+    createAuthRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger, options.cookieStore),
   );
-
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", version: "0.1.0" });
-  });
 
   if (options.staticDir) {
     app.use(express.static(options.staticDir));
@@ -86,7 +111,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
   wss.on("error", (err) => {
     logger.error({ err }, "WebSocket server error");
   });
-  const cleanupWs = setupWebSocket(wss, options.botManager, logger);
+  const cleanupWs = setupAuthenticatedWebSocket(
+    wss, options.botManager, logger, jwtSecret,
+  );
 
   return {
     async start(): Promise<void> {

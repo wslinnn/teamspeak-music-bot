@@ -22,7 +22,7 @@ function mockRes(): { statusCode: number; body: unknown } & Response {
       return this;
     },
   };
-  return res as unknown as Response;
+  return res as unknown as ({ statusCode: number; body: unknown } & Response);
 }
 
 describe("requireAuth middleware", () => {
