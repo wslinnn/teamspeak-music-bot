@@ -52,6 +52,7 @@
     </div>
     <button
       v-if="store.userPlaylists.length > USER_PLAYLIST_LIMIT"
+      :aria-expanded="userPlaylistsExpanded"
       class="mt-3 flex w-full items-center justify-center gap-1 rounded-[var(--radius-md)] bg-surface-card py-2.5 text-[13px] font-medium text-foreground-muted transition-colors hover:bg-interactive-hover hover:text-primary"
       @click="userPlaylistsExpanded = !userPlaylistsExpanded"
     >

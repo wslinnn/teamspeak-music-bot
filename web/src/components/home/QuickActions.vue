@@ -2,7 +2,10 @@
   <!-- Search Bar -->
   <div
     class="flex items-center rounded-[var(--radius-md)] bg-surface-card px-5 py-3 mb-8 cursor-pointer transition-colors hover:bg-interactive-hover"
+    role="button"
+    tabindex="0"
     @click="$router.push('/search')"
+    @keydown.enter="$router.push('/search')"
   >
     <Icon icon="mdi:magnify" class="mr-3 text-xl opacity-40" />
     <span class="text-sm opacity-30">搜索歌曲、歌单、专辑...</span>
@@ -12,8 +15,11 @@
   <section class="mb-9">
     <h2 class="mb-4 text-[22px] font-bold">私人FM</h2>
     <div
-      class="flex items-center gap-5 rounded-[var(--radius-lg)] bg-surface-card p-5 cursor-pointer transition-colors hover:bg-interactive-hover"
+      class="group flex items-center gap-5 rounded-[var(--radius-lg)] bg-surface-card p-5 cursor-pointer transition-colors hover:bg-interactive-hover"
+      role="button"
+      tabindex="0"
       @click="playFm"
+      @keydown.enter="playFm"
     >
       <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-gradient-to-br from-primary to-indigo-500">
         <Icon icon="mdi:radio" class="text-[28px] text-white" />
@@ -32,9 +38,11 @@ import { Icon } from '@iconify/vue';
 import { useRouter } from 'vue-router';
 import { http } from '../../utils/http';
 import { usePlayerStore, type Song } from '../../stores/player';
+import { useToast } from '../../composables/useToast';
 
 const router = useRouter();
 const store = usePlayerStore();
+const toast = useToast();
 
 async function playFm() {
   try {
@@ -46,6 +54,8 @@ async function playFm() {
         await store.addToQueue(songs[i].name, songs[i].platform);
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    toast.error('无法获取私人FM');
+  }
 }
 </script>
