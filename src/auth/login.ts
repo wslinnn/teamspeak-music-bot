@@ -23,7 +23,7 @@ export function createAdminLoginHandler(
   return function handleLogin(req: import("express").Request, res: import("express").Response): void {
     const ip = req.ip ?? "unknown";
 
-    if (!limiter.check(ip)) {
+    if (limiter.isLimited(ip)) {
       logger.warn({ ip }, "Login rate limited");
       res.status(429).json({ success: false, error: "Too many login attempts" });
       return;
@@ -37,6 +37,7 @@ export function createAdminLoginHandler(
 
     if (password !== adminPassword) {
       logger.warn({ ip }, "Login failed: wrong password");
+      limiter.recordFailure(ip);
       res.status(401).json({ success: false, error: "Invalid password" });
       return;
     }

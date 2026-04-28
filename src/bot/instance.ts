@@ -208,18 +208,23 @@ export class BotInstance extends EventEmitter {
   }
 
   /**
-   * Check if a TS user (by client database ID) belongs to any of the
+   * Check if a TS user (by client ID) belongs to any of the
    * configured admin server groups.
    * Returns true if adminGroups is empty (no restriction) or the user
    * is in one of the configured groups.
+   *
+   * Note: msg.invokerId from TS3TextMessage is a client ID (clid),
+   * not a database ID (cldbid). The clientinfo command accepts clid.
+   * Fails closed: on error, denies access rather than granting it.
    */
-  private async isInvokerAdmin(invokerDbId: string): Promise<boolean> {
+  private async isInvokerAdmin(invokerClientId: string): Promise<boolean> {
     const groups = this.config.adminGroups;
     if (groups.length === 0) return true;
 
     try {
+      // clientinfo accepts clid (client ID, which is what invokerId provides)
       const results = await this.tsClient.execCommandWithResponse(
-        `clientinfo clid=${invokerDbId}`,
+        `clientinfo clid=${invokerClientId}`,
       );
       if (!results.length) return false;
 
@@ -231,8 +236,9 @@ export class BotInstance extends EventEmitter {
 
       return userGroups.some((g: number) => groups.includes(g));
     } catch (err) {
-      this.logger.error({ err, invokerDbId }, "Failed to check invoker groups");
-      return true;
+      this.logger.error({ err, invokerClientId }, "Failed to check invoker groups");
+      // Fail closed: deny access on error to prevent privilege escalation
+      return false;
     }
   }
 
