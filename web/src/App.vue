@@ -2,9 +2,14 @@
   <div class="app" :data-theme="theme">
     <Navbar />
     <main class="main-content">
-      <RouterView />
+      <RouterView v-slot="{ Component }">
+        <Transition name="fade" mode="out-in">
+          <component :is="Component" />
+        </Transition>
+      </RouterView>
     </main>
     <Player />
+    <ToastContainer />
   </div>
 </template>
 
@@ -14,6 +19,7 @@ import { usePlayerStore } from './stores/player.js';
 import { useWebSocket } from './composables/useWebSocket.js';
 import Navbar from './components/Navbar.vue';
 import Player from './components/Player.vue';
+import ToastContainer from './components/common/ToastContainer.vue';
 
 const playerStore = usePlayerStore();
 const theme = computed(() => playerStore.theme);
@@ -25,7 +31,6 @@ onMounted(() => {
   playerStore.loadTheme();
   connect();
   playerStore.fetchBots();
-  // Periodically sync elapsed time from server (ground truth)
   syncTimer = setInterval(() => playerStore.syncElapsed(), 3000);
 });
 
