@@ -41,6 +41,37 @@
 /* Dark mode variant driven by [data-theme="dark"] */
 @variant dark (&:where([data-theme="dark"] *));
 
+/* ── CSS custom properties for dark/light theming ── */
+:root {
+  --font-primary: 'Barlow', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --navbar-height: 56px;
+  --player-height: 56px;
+}
+
+[data-theme='dark'] {
+  --bg-primary: #222222;
+  --bg-secondary: #323232;
+  --bg-card: rgba(255, 255, 255, 0.04);
+  --bg-navbar: rgba(34, 34, 34, 0.86);
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.58);
+  --text-tertiary: rgba(255, 255, 255, 0.38);
+  --border-color: rgba(255, 255, 255, 0.06);
+  --hover-bg: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='light'] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f7;
+  --bg-card: rgba(0, 0, 0, 0.02);
+  --bg-navbar: rgba(255, 255, 255, 0.86);
+  --text-primary: #000000;
+  --text-secondary: rgba(0, 0, 0, 0.58);
+  --text-tertiary: rgba(0, 0, 0, 0.38);
+  --border-color: rgba(0, 0, 0, 0.06);
+  --hover-bg: rgba(0, 0, 0, 0.04);
+}
+
 /* ── Global reset (from global.scss) ── */
 @layer base {
   * {
