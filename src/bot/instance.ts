@@ -207,6 +207,35 @@ export class BotInstance extends EventEmitter {
     }
   }
 
+  /**
+   * Check if a TS user (by client database ID) belongs to any of the
+   * configured admin server groups.
+   * Returns true if adminGroups is empty (no restriction) or the user
+   * is in one of the configured groups.
+   */
+  private async isInvokerAdmin(invokerDbId: string): Promise<boolean> {
+    const groups = this.config.adminGroups;
+    if (groups.length === 0) return true;
+
+    try {
+      const results = await this.tsClient.execCommandWithResponse(
+        `clientinfo clid=${invokerDbId}`,
+      );
+      if (!results.length) return false;
+
+      const serverGroupsStr = results[0]["client_servergroups"] ?? "";
+      const userGroups = serverGroupsStr
+        .split(",")
+        .map((g: string) => parseInt(g, 10))
+        .filter((g: number) => !isNaN(g));
+
+      return userGroups.some((g: number) => groups.includes(g));
+    } catch (err) {
+      this.logger.error({ err, invokerDbId }, "Failed to check invoker groups");
+      return true;
+    }
+  }
+
   private async handleTextMessage(msg: TS3TextMessage): Promise<void> {
     const parsed = parseCommand(
       msg.message,
@@ -216,7 +245,11 @@ export class BotInstance extends EventEmitter {
     if (!parsed) return;
 
     if (isAdminCommand(parsed.name)) {
-      // TODO: Check if invoker is in adminGroups
+      const isAdmin = await this.isInvokerAdmin(msg.invokerId);
+      if (!isAdmin) {
+        await this.tsClient.sendTextMessage("Permission denied: admin only command");
+        return;
+      }
     }
 
     this.logger.info(
