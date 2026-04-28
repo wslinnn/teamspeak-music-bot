@@ -1,6 +1,7 @@
-export type Platform = "netease" | "qq" | "bilibili" | "youtube";
+export const VALID_PLATFORMS = ["netease", "qq", "bilibili", "youtube"] as const;
+export type Platform = (typeof VALID_PLATFORMS)[number];
 
-const VALID_PLATFORMS: Set<string> = new Set(["netease", "qq", "bilibili", "youtube"]);
+const VALID_PLATFORM_SET: Set<string> = new Set(VALID_PLATFORMS);
 
 /**
  * Validate and return a music platform string.
@@ -9,8 +10,8 @@ const VALID_PLATFORMS: Set<string> = new Set(["netease", "qq", "bilibili", "yout
  */
 export function validatePlatform(platform: string | undefined): Platform {
   if (!platform) return "netease";
-  if (!VALID_PLATFORMS.has(platform)) {
-    throw new Error(`Invalid platform: '${platform}'. Must be one of: netease, qq, bilibili, youtube`);
+  if (!VALID_PLATFORM_SET.has(platform)) {
+    throw new Error(`Invalid platform: '${platform}'. Must be one of: ${VALID_PLATFORMS.join(", ")}`);
   }
   return platform as Platform;
 }

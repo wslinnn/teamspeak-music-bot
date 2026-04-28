@@ -39,15 +39,18 @@ export function createBotRouter(
     res.json({ ok: true });
   });
 
-  router.get("/:id", (req, res) => {
-    let id: string;
+  // Middleware: validate :id param for all /:id routes below
+  router.use("/:id", (req, res, next) => {
     try {
-      id = validateBotId(req.params.id);
+      (req as any).validatedId = validateBotId(req.params.id);
+      next();
     } catch (err) {
       res.status(400).json({ success: false, error: (err as Error).message });
-      return;
     }
-    const bot = botManager.getBot(id);
+  });
+
+  router.get("/:id", (req, res) => {
+    const bot = botManager.getBot((req as any).validatedId);
     if (!bot) {
       res.status(404).json({ success: false, error: "Bot not found" });
       return;
@@ -57,14 +60,7 @@ export function createBotRouter(
 
   // Get saved config for a bot
   router.get("/:id/config", (req, res) => {
-    let id: string;
-    try {
-      id = validateBotId(req.params.id);
-    } catch (err) {
-      res.status(400).json({ success: false, error: (err as Error).message });
-      return;
-    }
-    const saved = botManager.getBotConfig(id);
+    const saved = botManager.getBotConfig((req as any).validatedId);
     if (!saved) {
       res.status(404).json({ success: false, error: "Bot config not found" });
       return;
@@ -110,20 +106,13 @@ export function createBotRouter(
   // Update bot config (must be stopped first to apply connection changes)
   router.put("/:id", async (req, res) => {
     try {
-      let id: string;
-      try {
-        id = validateBotId(req.params.id);
-      } catch (err) {
-        res.status(400).json({ success: false, error: (err as Error).message });
-        return;
-      }
+      const id = (req as any).validatedId;
       const bot = botManager.getBot(id);
       if (!bot) {
         res.status(404).json({ success: false, error: "Bot not found" });
         return;
       }
       const { name, serverAddress, serverPort, nickname, defaultChannel, channelPassword, serverPassword } = req.body;
-      // Update in database
       botManager.updateBot(id, {
         name, serverAddress, serverPort, nickname, defaultChannel, channelPassword, serverPassword,
       });
@@ -136,14 +125,7 @@ export function createBotRouter(
 
   router.delete("/:id", async (req, res) => {
     try {
-      let id: string;
-      try {
-        id = validateBotId(req.params.id);
-      } catch (err) {
-        res.status(400).json({ success: false, error: (err as Error).message });
-        return;
-      }
-      await botManager.removeBot(id);
+      await botManager.removeBot((req as any).validatedId);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
@@ -152,14 +134,7 @@ export function createBotRouter(
 
   router.post("/:id/start", async (req, res) => {
     try {
-      let id: string;
-      try {
-        id = validateBotId(req.params.id);
-      } catch (err) {
-        res.status(400).json({ success: false, error: (err as Error).message });
-        return;
-      }
-      await botManager.startBot(id);
+      await botManager.startBot((req as any).validatedId);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
@@ -168,14 +143,7 @@ export function createBotRouter(
 
   router.post("/:id/stop", (req, res) => {
     try {
-      let id: string;
-      try {
-        id = validateBotId(req.params.id);
-      } catch (err) {
-        res.status(400).json({ success: false, error: (err as Error).message });
-        return;
-      }
-      botManager.stopBot(id);
+      botManager.stopBot((req as any).validatedId);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
