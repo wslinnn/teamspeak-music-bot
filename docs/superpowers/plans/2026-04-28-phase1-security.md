@@ -21,7 +21,7 @@
 | Create | `src/auth/rate-limit.ts` | Per-IP login rate limiter |
 | Modify | `src/data/config.ts` | Add `jwtSecret` derived field helper |
 | Modify | `src/web/server.ts` | Wire auth middleware, add login route |
-| Modify | `src/web/api/auth.ts` | Add admin login endpoint |
+| Create | `src/auth/login.ts` | Admin login handler with rate limiting |
 | Modify | `src/web/websocket.ts` | Validate token on connection |
 | Modify | `src/bot/instance.ts` | Implement admin group check for TS commands |
 | Create | `web/src/stores/auth.ts` | Frontend auth store (token management) |
@@ -501,6 +501,8 @@ git commit -m "feat(auth): add admin login handler with rate limiting"
 ---
 
 ### Task 6: Derive JWT secret from admin password and wire everything into server
+
+> **Note:** This task and Task 7 are interdependent — `server.ts` imports `setupAuthenticatedWebSocket` from `websocket.ts`. Apply both Task 6 and Task 7 before running `tsc --noEmit`.
 
 **Files:**
 - Modify: `src/data/config.ts` — add `getJwtSecret()` helper
