@@ -16,14 +16,24 @@
 </template>
 
 <script setup lang="ts">
-import { useToastStore } from '../../stores/toast.js';
+import { onUnmounted } from 'vue';
+import { useToastStore } from '../../stores/toast';
 import Toast from './Toast.vue';
 
 const store = useToastStore();
+const timers = new Set<ReturnType<typeof setTimeout>>();
 
 function scheduleRemove(item: { id: string; duration: number }) {
-  setTimeout(() => store.remove(item.id), item.duration);
+  const timer = setTimeout(() => {
+    timers.delete(timer);
+    store.remove(item.id);
+  }, item.duration);
+  timers.add(timer);
 }
+
+onUnmounted(() => {
+  timers.forEach(clearTimeout);
+});
 </script>
 
 <style>

@@ -3,6 +3,7 @@
     class="flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium shadow-lg"
     :class="typeClasses"
     role="alert"
+    aria-atomic="true"
   >
     <Icon :icon="iconName" class="text-lg" />
     <span>{{ item.message }}</span>
@@ -12,7 +13,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import type { ToastItem } from '../../stores/toast.js';
+import type { ToastItem } from '../../stores/toast';
 
 const props = defineProps<{ item: ToastItem }>();
 
