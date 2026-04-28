@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+/* ── Theme tokens (migrated from variables.scss) ── */
+@theme {
+  /* Colors */
+  --color-primary: #335eea;
+  --color-primary-bg: #eaeffd;
+  --color-success: #22c55e;
+  --color-warning: #eab308;
+  --color-danger: #ef4444;
+
+  /* Surfaces (bound to existing CSS variables for dark/light toggle compatibility) */
+  --color-surface: var(--bg-primary);
+  --color-surface-elevated: var(--bg-secondary);
+  --color-surface-card: var(--bg-card);
+  --color-surface-navbar: var(--bg-navbar);
+
+  /* Foreground */
+  --color-foreground: var(--text-primary);
+  --color-foreground-muted: var(--text-secondary);
+  --color-foreground-subtle: var(--text-tertiary);
+
+  /* Border & interactive */
+  --color-border-default: var(--border-color);
+  --color-interactive-hover: var(--hover-bg);
+
+  /* Font */
+  --font-family-sans: 'Barlow', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Animation */
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+}
+
+/* Dark mode variant driven by [data-theme="dark"] */
+@variant dark (&:where([data-theme="dark"] *));
+
+/* ── Global reset (from global.scss) ── */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    font-size: 16px;
+  }
+
+  body {
+    font-family: var(--font-family-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  button {
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--text-tertiary);
+    border-radius: 4px;
+  }
+}
+
+/* ── Utility classes previously in global.scss ── */
+@layer utilities {
+  .frosted-glass {
+    background: var(--bg-navbar);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+
+  .hover-scale {
+    transition: transform var(--transition-fast);
+  }
+  .hover-scale:hover {
+    transform: scale(1.04);
+  }
+  .hover-scale:active {
+    transform: scale(0.96);
+  }
+}
+
+/* ── Route transition ── */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 150ms ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
