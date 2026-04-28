@@ -3,6 +3,7 @@ import type { BotManager } from "../../bot/manager.js";
 import type { BotConfig } from "../../data/config.js";
 import { saveConfig } from "../../data/config.js";
 import type { Logger } from "../../logger.js";
+import { validateBotId } from "../../utils/validate.js";
 
 export function createBotRouter(
   botManager: BotManager,
@@ -18,9 +19,16 @@ export function createBotRouter(
   });
 
   router.get("/:id", (req, res) => {
-    const bot = botManager.getBot(req.params.id);
+    let id: string;
+    try {
+      id = validateBotId(req.params.id);
+    } catch (err) {
+      res.status(400).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    const bot = botManager.getBot(id);
     if (!bot) {
-      res.status(404).json({ error: "Bot not found" });
+      res.status(404).json({ success: false, error: "Bot not found" });
       return;
     }
     res.json(bot.getStatus());
@@ -28,9 +36,16 @@ export function createBotRouter(
 
   // Get saved config for a bot
   router.get("/:id/config", (req, res) => {
-    const saved = botManager.getBotConfig(req.params.id);
+    let id: string;
+    try {
+      id = validateBotId(req.params.id);
+    } catch (err) {
+      res.status(400).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    const saved = botManager.getBotConfig(id);
     if (!saved) {
-      res.status(404).json({ error: "Bot config not found" });
+      res.status(404).json({ success: false, error: "Bot config not found" });
       return;
     }
     res.json(saved);
@@ -51,7 +66,7 @@ export function createBotRouter(
       if (!name || !serverAddress || !nickname) {
         res
           .status(400)
-          .json({ error: "name, serverAddress, and nickname are required" });
+          .json({ success: false, error: "name, serverAddress, and nickname are required" });
         return;
       }
       const bot = await botManager.createBot({
@@ -67,54 +82,82 @@ export function createBotRouter(
       res.status(201).json(bot.getStatus());
     } catch (err) {
       logger.error({ err }, "Failed to create bot");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   // Update bot config (must be stopped first to apply connection changes)
   router.put("/:id", async (req, res) => {
     try {
-      const bot = botManager.getBot(req.params.id);
+      let id: string;
+      try {
+        id = validateBotId(req.params.id);
+      } catch (err) {
+        res.status(400).json({ success: false, error: (err as Error).message });
+        return;
+      }
+      const bot = botManager.getBot(id);
       if (!bot) {
-        res.status(404).json({ error: "Bot not found" });
+        res.status(404).json({ success: false, error: "Bot not found" });
         return;
       }
       const { name, serverAddress, serverPort, nickname, defaultChannel, channelPassword, serverPassword } = req.body;
       // Update in database
-      botManager.updateBot(req.params.id, {
+      botManager.updateBot(id, {
         name, serverAddress, serverPort, nickname, defaultChannel, channelPassword, serverPassword,
       });
       res.json({ success: true });
     } catch (err) {
       logger.error({ err }, "Failed to update bot");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.delete("/:id", async (req, res) => {
     try {
-      await botManager.removeBot(req.params.id);
+      let id: string;
+      try {
+        id = validateBotId(req.params.id);
+      } catch (err) {
+        res.status(400).json({ success: false, error: (err as Error).message });
+        return;
+      }
+      await botManager.removeBot(id);
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.post("/:id/start", async (req, res) => {
     try {
-      await botManager.startBot(req.params.id);
+      let id: string;
+      try {
+        id = validateBotId(req.params.id);
+      } catch (err) {
+        res.status(400).json({ success: false, error: (err as Error).message });
+        return;
+      }
+      await botManager.startBot(id);
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.post("/:id/stop", (req, res) => {
     try {
-      botManager.stopBot(req.params.id);
+      let id: string;
+      try {
+        id = validateBotId(req.params.id);
+      } catch (err) {
+        res.status(400).json({ success: false, error: (err as Error).message });
+        return;
+      }
+      botManager.stopBot(id);
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
   
@@ -127,7 +170,7 @@ export function createBotRouter(
   router.post("/settings", (req, res) => {
     const { idleTimeoutMinutes } = req.body;
     if (typeof idleTimeoutMinutes !== "number" || idleTimeoutMinutes < 0) {
-      res.status(400).json({ error: "idleTimeoutMinutes must be a non-negative number" });
+      res.status(400).json({ success: false, error: "idleTimeoutMinutes must be a non-negative number" });
       return;
     }
     config.idleTimeoutMinutes = idleTimeoutMinutes;
