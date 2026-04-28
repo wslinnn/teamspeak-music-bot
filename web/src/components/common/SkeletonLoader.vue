@@ -1,7 +1,11 @@
 <template>
   <div
+    role="status"
+    aria-label="Loading"
+    aria-busy="true"
     class="animate-pulse rounded-md bg-foreground-subtle/10"
     :style="computedStyle"
+    v-bind="$attrs"
   />
 </template>
 

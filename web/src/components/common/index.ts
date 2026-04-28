@@ -4,3 +4,5 @@ export { default as BaseModal } from './BaseModal.vue';
 export { default as LoadingSpinner } from './LoadingSpinner.vue';
 export { default as EmptyState } from './EmptyState.vue';
 export { default as SkeletonLoader } from './SkeletonLoader.vue';
+export { default as Toast } from './Toast.vue';
+export { default as ToastContainer } from './ToastContainer.vue';

@@ -1,6 +1,6 @@
 <template>
-  <div class="flex flex-col items-center justify-center py-16 text-foreground-muted">
-    <Icon v-if="icon" :icon="icon" class="mb-4 text-4xl opacity-40" />
+  <div role="status" class="flex flex-col items-center justify-center py-16 text-foreground-muted">
+    <Icon v-if="icon" :icon="icon" aria-hidden="true" class="mb-4 text-4xl opacity-40" />
     <p class="text-sm">{{ message }}</p>
     <p v-if="description" class="mt-1 text-xs opacity-70">{{ description }}</p>
   </div>
