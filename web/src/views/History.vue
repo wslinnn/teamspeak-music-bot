@@ -29,7 +29,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
-import axios from 'axios';
+import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import SongCard from '../components/SongCard.vue';
 
@@ -47,7 +47,7 @@ onMounted(async () => {
 
   if (store.activeBotId) {
     try {
-      const res = await axios.get(`/api/player/${store.activeBotId}/history`);
+      const res = await http.get(`/api/player/${store.activeBotId}/history`);
       history.value = res.data.history;
     } catch {
       // Ignore if API not ready

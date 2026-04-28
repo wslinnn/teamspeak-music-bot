@@ -36,7 +36,7 @@
 <script setup lang="ts">
 import { watch, computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import axios from 'axios';
+import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
 
@@ -64,7 +64,7 @@ async function playAtIndex(index: number) {
 async function removeSong(index: number) {
   if (!store.activeBotId) return;
   try {
-    await axios.delete(`/api/player/${store.activeBotId}/queue/${index + 1}`);
+    await http.delete(`/api/player/${store.activeBotId}/queue/${index + 1}`);
     await store.fetchQueue();
   } catch {
     // Ignore
