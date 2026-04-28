@@ -1,8 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { useAuthStore } from '../stores/auth.js';
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/Login.vue'),
+      meta: { public: true },
+    },
     {
       path: '/',
       name: 'home',
@@ -39,12 +46,42 @@ const router = createRouter({
       component: () => import('../views/Setup.vue'),
     },
     {
-      // Per-bot URL: /bot/:id — sets active bot then redirects to home
       path: '/bot/:id',
       name: 'bot',
       component: () => import('../views/BotRedirect.vue'),
     },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/Home.vue'),
+    },
   ],
+});
+
+// Track whether we've checked if auth is enabled
+let authCheckDone = false;
+let serverAuthEnabled = false;
+
+router.beforeEach(async (to) => {
+  // Login page is always accessible
+  if (to.meta.public) return true;
+
+  const authStore = useAuthStore();
+
+  // Check once if the server has auth enabled
+  if (!authCheckDone) {
+    serverAuthEnabled = await authStore.checkAuthEnabled();
+    authCheckDone = true;
+  }
+
+  // If server doesn't require auth, let all routes through
+  if (!serverAuthEnabled) return true;
+
+  // Server requires auth — check if user is logged in
+  if (authStore.isAuthenticated) return true;
+
+  // Not logged in, redirect to login
+  return { name: 'login', query: { redirect: to.fullPath } };
 });
 
 export default router;
