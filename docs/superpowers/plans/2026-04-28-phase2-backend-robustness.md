@@ -4,9 +4,9 @@
 
 **Goal:** Fix concurrency bugs, resource management, error handling, type safety, config validation, and API input validation across the backend.
 
-**Architecture:** Add a Mutex utility for concurrent queue operations, improve FFmpeg lifecycle management with Promise-based cleanup, unify error responses across all API endpoints, replace `any` casts with proper types, and add config/input validation.
+**Architecture:** Add a Mutex utility for concurrent queue operations, replace global FFmpeg PID tracking with instance-scoped management, unify error responses across all API endpoints, replace `any` casts with typed optional methods on MusicProvider, and add config/input validation.
 
-**Tech Stack:** TypeScript, better-sqlite3, Express 5, Node.js async primitives
+**Tech Stack:** TypeScript, better-sqlite3, Express 5, Node.js async primitives, Vitest
 
 **Spec:** `docs/superpowers/specs/2026-04-28-comprehensive-refactoring-design.md` — Phase 2
 
@@ -18,19 +18,20 @@
 |--------|------|---------|
 | Create | `src/utils/mutex.ts` | Async mutex for playNext concurrency |
 | Create | `src/utils/mutex.test.ts` | Mutex tests |
-| Create | `src/utils/validate.ts` | Config & API input validation helpers |
+| Create | `src/utils/validate.ts` | API input validation helpers |
 | Create | `src/utils/validate.test.ts` | Validation tests |
-| Modify | `src/bot/instance.ts` | Mutex on playNext, fix empty catches |
-| Modify | `src/bot/manager.ts` | Bot restart coordination, fix empty catches |
-| Modify | `src/audio/player.ts` | Promise-based FFmpeg cleanup, remove global PID tracker |
-| Modify | `src/data/database.ts` | Proper close() with statement finalization |
-| Modify | `src/data/config.ts` | Add validateConfig function |
+| Modify | `src/bot/instance.ts:63,681-711` | Replace isAdvancing with Mutex, fix empty catches |
+| Modify | `src/bot/manager.ts:40-44` | Bot restart coordination, fix empty catch |
+| Modify | `src/audio/player.ts:12,119,137,184-206` | Instance-scoped PID, improve cleanup |
+| Modify | `src/data/database.ts:245-247` | Double-close guard, WAL checkpoint |
+| Modify | `src/data/config.ts:47-56` | Add validateConfig, call in loadConfig |
 | Modify | `src/data/config.test.ts` | Config validation tests |
-| Modify | `src/web/server.ts` | Global error middleware |
-| Modify | `src/web/api/music.ts` | Unified errors, fix `as any`, partial failure reporting |
-| Modify | `src/web/api/player.ts` | Input validation, unified errors |
-| Modify | `src/web/api/bot.ts` | Input validation, unified errors |
-| Modify | `src/music/provider.ts` | Add helper for optional method calls |
+| Modify | `src/web/server.ts` (after line 108) | Global error middleware |
+| Modify | `src/music/provider.ts:29,47,56-80` | Fix typos, add optional methods to interface |
+| Modify | `src/music/netease.ts` (add method) | Implement getPlaylistDetail |
+| Modify | `src/web/api/music.ts:140,174,206` | Fix typo, replace as any, unify errors |
+| Modify | `src/web/api/player.ts` | Input validation, unify errors |
+| Modify | `src/web/api/bot.ts` | Input validation, unify errors |
 
 ---
 
@@ -139,29 +140,19 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/bot/instance.ts`
 
-**Context:** The `playNext` method (line 681) uses a simple `isAdvancing` boolean flag that offers no mutual exclusion under concurrent calls. Replace it with the `Mutex` utility. Also fix two empty catch blocks at lines 702 and 706.
+**Context:** Line 63 has `private isAdvancing = false;`. Lines 681-711 contain `playNext()` which uses `isAdvancing` with try/finally — not true mutual exclusion. Lines 702 and 706 have `.catch(() => {})` empty catches.
 
-- [ ] **Step 1: Read `src/bot/instance.ts`**
+- [ ] **Step 1: Add Mutex import**
 
-Read the file. Find:
-- Line 4: import from `"./commands.js"`
-- Line 8: import `PlayQueue`
-- Line 46: `class BotInstance extends EventEmitter`
-- Lines 681-711: `playNext` method
-- Lines 702, 706: `.catch(() => {})` empty catches
-- The `isAdvancing` property declaration
-
-- [ ] **Step 2: Add Mutex import**
-
-After the existing import from `"./commands.js"`, add:
+After line 14 (`import {` ending with `} from "./commands.js";`), add:
 
 ```typescript
 import { Mutex } from "../utils/mutex.js";
 ```
 
-- [ ] **Step 3: Replace `isAdvancing` with `Mutex`**
+- [ ] **Step 2: Replace `isAdvancing` with `Mutex`**
 
-Find the property declaration (search for `private isAdvancing`). Replace:
+On line 63, replace:
 
 ```typescript
   private isAdvancing = false;
@@ -173,9 +164,9 @@ With:
   private playNextMutex = new Mutex();
 ```
 
-- [ ] **Step 4: Rewrite playNext method**
+- [ ] **Step 3: Rewrite playNext method**
 
-Find the `playNext` method (starting around line 681). Replace the entire method:
+Replace the entire `playNext` method (lines 681-711) with:
 
 ```typescript
   private async playNext(): Promise<void> {
@@ -212,12 +203,14 @@ Find the `playNext` method (starting around line 681). Replace the entire method
   }
 ```
 
-- [ ] **Step 5: Verify TypeScript compiles**
+Key changes: replaced `isAdvancing` flag with `Mutex.run()`, added error logging to the two `.catch(() => {})` blocks.
+
+- [ ] **Step 4: Verify TypeScript compiles**
 
 Run: `npx tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/bot/instance.ts
@@ -236,43 +229,41 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/audio/player.ts`
 
-**Context:** The `forceCleanup` method (line 184) has an empty catch block and the global PID tracker (`globalActivePids`) is a process-wide singleton that should be instance-scoped. The cleanup should use a Promise to allow callers to await completion.
+**Context:** Line 12 has `const globalActivePids = new Set<number>();` — a global singleton shared across all AudioPlayer instances. The `forceCleanup` method (lines 184-206) has empty catch blocks and a short 1500ms SIGKILL timeout.
 
-- [ ] **Step 1: Read `src/audio/player.ts`**
+- [ ] **Step 1: Remove global PID tracker**
 
-Read the full file. Identify:
-- Line 12: `const globalActivePids = new Set<number>()`
-- Lines 184-206: `forceCleanup` method with empty catch
-- Lines 118-119: `globalActivePids.add(currentPid)`
-- Lines 137, 197, 204: `globalActivePids.delete(currentPid)`
+Delete line 12:
 
-- [ ] **Step 2: Replace global PID tracker with instance-level tracking**
+```typescript
+const globalActivePids = new Set<number>();
+```
 
-Remove the global tracker. Replace line 12 (`const globalActivePids = new Set<number>()`) and modify the `AudioPlayer` class:
+- [ ] **Step 2: Add instance-level PID property**
 
-Add a new property to the class (after `private static readonly MAX_CONSECUTIVE_FAILURES = 3`):
+After line 80 (`private static readonly MAX_CONSECUTIVE_FAILURES = 3;`), add:
 
 ```typescript
   private activePid: number | null = null;
 ```
 
-- [ ] **Step 3: Replace all `globalActivePids` references**
+- [ ] **Step 3: Replace globalActivePids.add (line 119)**
 
-In the `play` method, replace:
+Replace:
 
 ```typescript
-    if (currentPid) {
       globalActivePids.add(currentPid);
 ```
 
 With:
 
 ```typescript
-    if (currentPid) {
       this.activePid = currentPid;
 ```
 
-In the `exit` handler inside `play`, replace:
+- [ ] **Step 4: Replace globalActivePids.delete in exit handler (line 137)**
+
+Replace:
 
 ```typescript
       if (currentPid) globalActivePids.delete(currentPid);
@@ -284,9 +275,9 @@ With:
       if (this.activePid === currentPid) this.activePid = null;
 ```
 
-- [ ] **Step 4: Rewrite forceCleanup as Promise-based**
+- [ ] **Step 5: Rewrite forceCleanup method (lines 184-206)**
 
-Replace the entire `forceCleanup` method:
+Replace the entire `forceCleanup` method with:
 
 ```typescript
   private forceCleanup(proc: ChildProcess, pid: number): void {
@@ -315,17 +306,14 @@ Replace the entire `forceCleanup` method:
   }
 ```
 
-Changes:
-- Increased timeout from 1500ms to 3000ms for SIGKILL
-- Replaced empty catches with logging
-- Replaced global PID set with instance-level `activePid`
+Key changes: replaced global `Set` with instance-level `activePid`, increased SIGKILL timeout from 1500ms to 3000ms, replaced empty catches with logging.
 
-- [ ] **Step 5: Verify TypeScript compiles**
+- [ ] **Step 6: Verify TypeScript compiles**
 
 Run: `npx tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/audio/player.ts
@@ -346,19 +334,27 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/data/database.ts`
 
-**Context:** The `close()` method (line 245) calls `db.close()` but doesn't finalize prepared statements first. While better-sqlite3 finalizes them automatically, it's better to be explicit. Also add a `closed` guard.
+**Context:** The `close()` method (lines 245-247) is just `db.close()` with no guard against double-close or WAL checkpoint.
 
 - [ ] **Step 1: Add closed flag**
 
-In the `createDatabase` function, before the prepared statements, add:
+Inside `createDatabase`, before the first `const insertHistory = db.prepare(...)` statement, add:
 
 ```typescript
   let closed = false;
 ```
 
-- [ ] **Step 2: Improve close method**
+- [ ] **Step 2: Replace close() method**
 
-Replace the `close()` method:
+Replace lines 245-247:
+
+```typescript
+    close() {
+      db.close();
+    },
+```
+
+With:
 
 ```typescript
     close() {
@@ -372,8 +368,6 @@ Replace the `close()` method:
       db.close();
     },
 ```
-
-This adds: a double-close guard, and a WAL checkpoint before close to ensure all data is flushed.
 
 - [ ] **Step 3: Verify TypeScript compiles**
 
@@ -396,15 +390,11 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/web/server.ts`
 
-**Context:** Currently there is no global Express error handler, so unhandled errors in route handlers may produce inconsistent responses or crash the process.
+**Context:** No global Express error handler exists. Unhandled errors in route handlers may produce inconsistent responses or crash the process. The error middleware must be registered after all route handlers (after the `if (options.staticDir)` block on line 103) and before `server.on("error"` (line 110).
 
-- [ ] **Step 1: Read `src/web/server.ts`**
+- [ ] **Step 1: Add global error handler**
 
-Read the file. Find where routes are registered (after the last `app.use()` call for route handlers, before `server.on("error"`).
-
-- [ ] **Step 2: Add global error handler**
-
-After the last route handler registration (after the `if (options.staticDir)` block) and before `server.on("error"`, add:
+After the closing brace of `if (options.staticDir) { ... }` (line 108) and before `server.on("error"` (line 110), insert:
 
 ```typescript
   // Global error handler — catches errors thrown in route handlers
@@ -415,12 +405,12 @@ After the last route handler registration (after the `if (options.staticDir)` bl
   });
 ```
 
-- [ ] **Step 3: Verify TypeScript compiles**
+- [ ] **Step 2: Verify TypeScript compiles**
 
 Run: `npx tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add src/web/server.ts
@@ -434,47 +424,51 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Fix `as any` casts and unify error format in music.ts
+### Task 6: Fix type safety in provider.ts and music.ts
 
 **Files:**
+- Modify: `src/music/provider.ts`
+- Modify: `src/music/netease.ts`
 - Modify: `src/web/api/music.ts`
 
-**Context:** The file has two `as any` casts (lines 174 and 206) for accessing internal provider properties. Replace them with typed access through the provider interface. Also unify all error responses to `{ success: false, error: string }` format.
+**Context:**
+- `src/music/provider.ts` has two typos: line 29 `"string"` should be `"netease"` in the Album interface; line 47 `interface` should be `string` for QrCodeResult.key
+- `src/music/provider.ts` MusicProvider interface is missing optional `getPlaylistDetail` and `getPopularVideos` methods that music.ts needs
+- `src/music/netease.ts` (NeteaseProvider class) has `private api: AxiosInstance` (line 69) and `private cookie = ""` (line 70) — the playlist detail logic in music.ts accesses these via `as any`
+- `src/music/bilibili.ts` already has `getPopularVideos` at line 343 — just needs interface typing
+- `src/web/api/music.ts` line 140 has bug `req.query.query.platform` (double `.query`)
+- `src/web/api/music.ts` lines 174 and 206 use `as any` casts
+- `src/web/api/music.ts` error responses use `{ error: string }` format — missing `success: false`
 
-- [ ] **Step 1: Read `src/web/api/music.ts`**
+- [ ] **Step 1: Fix provider.ts typos**
 
-Read the full file.
-
-- [ ] **Step 2: Add provider access helper**
-
-Replace the `getProvider` function at the top of the router with one that validates the platform parameter:
+In `src/music/provider.ts`, fix line 29 — change:
 
 ```typescript
-  const VALID_PLATFORMS = new Set(["netease", "qq", "bilibili", "youtube"]);
-
-  function getProvider(platform?: string): MusicProvider {
-    if (platform === "bilibili") return bilibiliProvider;
-    if (platform === "youtube") return youtubeProvider;
-    return platform === "qq" ? qqProvider : neteaseProvider;
-  }
-
-  function getValidatedProvider(platform?: string): MusicProvider {
-    if (platform && !VALID_PLATFORMS.has(platform)) {
-      throw new Error(`Invalid platform: ${platform}. Must be one of: netease, qq, bilibili, youtube`);
-    }
-    return getProvider(platform);
-  }
+  platform: "string" | "qq" | "bilibili" | "youtube";
 ```
 
-- [ ] **Step 3: Replace all `getProvider` calls with `getValidatedProvider`**
+To:
 
-In every route handler that calls `getProvider(req.query.platform as string)`, replace with `getValidatedProvider(req.query.platform as string)`.
+```typescript
+  platform: "netease" | "qq" | "bilibili" | "youtube";
+```
 
-- [ ] **Step 4: Fix `as any` casts for playlist detail**
+Fix line 47 — change:
 
-The playlist detail endpoint (line 174) casts provider to `any` to access `api` and `cookie`. Since these are internal implementation details of `NeteaseProvider`, the cleanest fix is to add an optional method to the `MusicProvider` interface.
+```typescript
+  key: interface;
+```
 
-First, modify `src/music/provider.ts` — add this optional method to the interface:
+To:
+
+```typescript
+  key: string;
+```
+
+- [ ] **Step 2: Add optional methods to MusicProvider interface**
+
+In `src/music/provider.ts`, after line 79 (`getUserPlaylists?(): Promise<Playlist[]>;`), add these optional methods inside the interface:
 
 ```typescript
   getPlaylistDetail?(playlistId: string): Promise<{
@@ -484,48 +478,120 @@ First, modify `src/music/provider.ts` — add this optional method to the interf
     coverUrl: string;
     songCount: number;
   }>;
-```
-
-Then, implement it in `src/music/netease.ts`. Add the method to the `NeteaseProvider` class. Read the file to find the class and add the method using the existing `api` client.
-
-For the Bilibili popular endpoint (line 206), cast through a type that includes the optional method. Replace:
-
-```typescript
-      const provider = bilibiliProvider as any;
-      if (provider.getPopularVideos) {
-```
-
-With a check against the typed optional method. Add to `provider.ts` interface:
-
-```typescript
   getPopularVideos?(limit: number): Promise<Song[]>;
 ```
 
-Then replace the cast:
+- [ ] **Step 3: Implement getPlaylistDetail on NeteaseProvider**
+
+In `src/music/netease.ts`, add this method to the `NeteaseProvider` class (place it near `getPlaylistSongs`):
 
 ```typescript
-      if (bilibiliProvider.getPopularVideos) {
-        const songs = await bilibiliProvider.getPopularVideos(limit);
+  async getPlaylistDetail(playlistId: string): Promise<{
+    id: string;
+    name: string;
+    description: string;
+    coverUrl: string;
+    songCount: number;
+  }> {
+    const cookieParams = this.cookieParams;
+    const detailRes = await this.api.get("/playlist/detail", {
+      params: { id: playlistId, ...cookieParams },
+    });
+    const p = detailRes.data?.playlist;
+    return {
+      id: String(p?.id ?? ""),
+      name: p?.name ?? "",
+      description: p?.description ?? "",
+      coverUrl: p?.coverImgUrl ?? "",
+      songCount: p?.trackCount ?? 0,
+    };
+  }
 ```
 
-- [ ] **Step 5: Unify error responses**
+Note: `this.cookieParams` is the existing private getter on line 88 that returns `{ cookie: this.cookie }` or `{}`.
 
-Replace all `res.status(500).json({ error: ... })` with `res.status(500).json({ success: false, error: ... })`. Do this for every catch block in the file.
+- [ ] **Step 4: Fix music.ts — replace `as any` playlist detail endpoint**
 
-- [ ] **Step 6: Verify TypeScript compiles**
+In `src/web/api/music.ts`, replace the entire `/playlist/:id/detail` route handler (lines 168-201) with:
+
+```typescript
+  router.get("/playlist/:id/detail", async (req, res) => {
+    try {
+      const provider = getProvider(req.query.platform as string);
+      if (!provider.getPlaylistDetail) {
+        res.status(501).json({ success: false, error: "Not supported by this provider" });
+        return;
+      }
+      const playlist = await provider.getPlaylistDetail(req.params.id);
+      if (!playlist.id) {
+        res.status(404).json({ success: false, error: "Playlist not found" });
+        return;
+      }
+      res.json({ playlist });
+    } catch (err) {
+      logger.error({ err }, "Get playlist detail failed");
+      res.status(500).json({ success: false, error: (err as Error).message });
+    }
+  });
+```
+
+- [ ] **Step 5: Fix music.ts — replace `as any` bilibili popular endpoint**
+
+In `src/web/api/music.ts`, replace the entire `/bilibili/popular` route handler (lines 204-218) with:
+
+```typescript
+  router.get("/bilibili/popular", async (req, res) => {
+    try {
+      if (bilibiliProvider.getPopularVideos) {
+        const limit = parseInt(req.query.limit as string) || 20;
+        const songs = await bilibiliProvider.getPopularVideos(limit);
+        res.json({ songs });
+      } else {
+        res.json({ songs: [] });
+      }
+    } catch (err) {
+      logger.error({ err }, "Get bilibili popular failed");
+      res.status(500).json({ success: false, error: (err as Error).message });
+    }
+  });
+```
+
+- [ ] **Step 6: Fix music.ts — fix `req.query.query.platform` typo**
+
+On line 140, change:
+
+```typescript
+      const provider = getProvider(req.query.query.platform as string);
+```
+
+To:
+
+```typescript
+      const provider = getProvider(req.query.platform as string);
+```
+
+- [ ] **Step 7: Unify error responses in music.ts**
+
+Replace all remaining `res.status(500).json({ error:` patterns with `res.status(500).json({ success: false, error:`. This applies to lines: 36, 65, 79, 89, 99, 109, 119, 134, 149, 164.
+
+Also fix the 400/404 responses that use `{ error:` to use `{ success: false, error:`. Lines: 25, 44, 74, 127, 143, 157, 196, 232.
+
+- [ ] **Step 8: Verify TypeScript compiles**
 
 Run: `npx tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/music/provider.ts src/music/netease.ts src/web/api/music.ts
-git commit -m "fix: eliminate as any casts, add platform validation, unify errors
+git commit -m "fix: eliminate as any casts, add typed optional methods, unify errors
 
+- Fix provider.ts typos (Album.platform, QrCodeResult.key)
 - Add getPlaylistDetail and getPopularVideos to MusicProvider interface
-- Replace all as any casts with typed optional methods
-- Validate platform parameter against whitelist
+- Implement getPlaylistDetail on NeteaseProvider
+- Replace all as any casts in music.ts with typed method calls
+- Fix req.query.query.platform typo
 - Unify all error responses to { success: false, error } format
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
@@ -539,15 +605,17 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - Modify: `src/data/config.ts`
 - Modify: `src/data/config.test.ts`
 
-**Context:** The `loadConfig` function returns whatever is in the config file without validating values. Invalid ports, negative volumes, etc. can cause runtime issues.
+**Context:** `loadConfig` (line 47) returns whatever is in the config file without validating. Invalid ports or values cause runtime issues. `BotConfig` interface has: `webPort`, `neteaseApiPort`, `qqMusicApiPort` (ports), `autoReturnDelay`, `idleTimeoutMinutes` (non-negative numbers), `locale` (`"zh"|"en"`), `theme` (`"dark"|"light"`).
 
-- [ ] **Step 1: Read `src/data/config.ts` and `src/data/config.test.ts`**
+- [ ] **Step 1: Add validation tests**
 
-Read both files.
+In `src/data/config.test.ts`, add after the existing imports:
 
-- [ ] **Step 2: Add validation tests**
+```typescript
+import { validateConfig } from "./config.js";
+```
 
-In `src/data/config.test.ts`, add:
+Add a new `describe` block at the end of the file:
 
 ```typescript
 describe("validateConfig", () => {
@@ -575,17 +643,22 @@ describe("validateConfig", () => {
     const config = { ...getDefaultConfig(), locale: "fr" as "zh" | "en" };
     expect(() => validateConfig(config)).toThrow(/locale/);
   });
+
+  it("rejects invalid theme", () => {
+    const config = { ...getDefaultConfig(), theme: "neon" as "dark" | "light" };
+    expect(() => validateConfig(config)).toThrow(/theme/);
+  });
 });
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [ ] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run src/data/config.test.ts`
 Expected: FAIL — `validateConfig` not found
 
-- [ ] **Step 4: Add validateConfig function**
+- [ ] **Step 3: Add validateConfig function**
 
-In `src/data/config.ts`, add after `getJwtSecret`:
+In `src/data/config.ts`, add after `getJwtSecret` (line 70):
 
 ```typescript
 /**
@@ -622,9 +695,9 @@ export function validateConfig(config: BotConfig): void {
 }
 ```
 
-- [ ] **Step 5: Call validateConfig on load**
+- [ ] **Step 4: Call validateConfig on load**
 
-In `loadConfig`, add validation before returning:
+Replace the `loadConfig` function (lines 47-56):
 
 ```typescript
 export function loadConfig(path: string): BotConfig {
@@ -637,19 +710,19 @@ export function loadConfig(path: string): BotConfig {
     return config;
   } catch (err) {
     if (err instanceof Error && err.message.startsWith("Invalid configuration")) {
-      throw err; // Re-throw validation errors
+      throw err;
     }
     return defaults;
   }
 }
 ```
 
-- [ ] **Step 6: Run tests**
+- [ ] **Step 5: Run tests**
 
 Run: `npx vitest run src/data/config.test.ts`
 Expected: All tests pass
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/data/config.ts src/data/config.test.ts
@@ -798,70 +871,139 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: Apply input validation to player.ts and bot.ts API routes
+### Task 9: Apply input validation + unify errors in player.ts and bot.ts
 
 **Files:**
 - Modify: `src/web/api/player.ts`
 - Modify: `src/web/api/bot.ts`
 
-**Context:** These route handlers accept user input without validation. Add platform/botId/string validation using the helpers from Task 8.
+**Context:** Both files accept user input without validation. Error responses use `{ error: string }` — missing `success: false`.
 
-- [ ] **Step 1: Read `src/web/api/player.ts`**
+- [ ] **Step 1: Add validation import to player.ts**
 
-Read the file. Find where `req.params.botId` and `req.query.platform` / `req.body.platform` are used.
-
-- [ ] **Step 2: Add validation import and middleware**
-
-In `src/web/api/player.ts`, add at the top (after existing imports):
+In `src/web/api/player.ts`, after line 6 (`import { parseCommand } from "../../bot/commands.js";`), add:
 
 ```typescript
 import { validatePlatform, validateBotId } from "../../utils/validate.js";
 ```
 
-Find the bot ID middleware (the helper function that extracts botId from req.params and looks up the bot). Add `validateBotId` before the lookup:
+- [ ] **Step 2: Add botId validation in player.ts middleware**
 
-Wherever `req.params.botId` is used, wrap it:
-
-```typescript
-const botId = validateBotId(req.params.botId);
-```
-
-Wherever `req.query.platform` or `req.body.platform` is used:
+In the middleware on line 18 (`router.use("/:botId", (req, res, next) => {`), add validation. Replace:
 
 ```typescript
-const platform = validatePlatform(req.query.platform as string | undefined);
+  router.use("/:botId", (req, res, next) => {
+    const bot = botManager.getBot(req.params.botId);
 ```
 
-or for body:
+With:
 
 ```typescript
-const platform = validatePlatform(req.body.platform);
+  router.use("/:botId", (req, res, next) => {
+    let botId: string;
+    try {
+      botId = validateBotId(req.params.botId);
+    } catch (err) {
+      res.status(400).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    const bot = botManager.getBot(botId);
 ```
 
-- [ ] **Step 3: Apply same pattern to bot.ts**
+- [ ] **Step 3: Add platform validation in player.ts play route**
 
-In `src/web/api/bot.ts`, add:
+In the play route (line 36), the `platform` comes from `req.body.platform`. No explicit validation needed since `platformFlag()` already maps unknown platforms to `""` (netease default). But add validation to the `play-playlist` route (line 230) and `add-by-id` route (line 334) where platform is used for provider lookup.
+
+In the `play-playlist` route (line 236), replace:
+
+```typescript
+      const provider = bot.getProviderFor(
+        platform === "bilibili" || platform === "qq" || platform === "youtube"
+          ? platform
+          : "netease"
+      );
+```
+
+With:
+
+```typescript
+      const provider = bot.getProviderFor(validatePlatform(platform));
+```
+
+In the `add-by-id` route (line 338), replace the same pattern:
+
+```typescript
+      const provider = bot.getProviderFor(
+        platform === "bilibili" || platform === "qq" || platform === "youtube"
+          ? platform
+          : "netease"
+      );
+```
+
+With:
+
+```typescript
+      const provider = bot.getProviderFor(validatePlatform(platform));
+```
+
+- [ ] **Step 4: Unify error responses in player.ts**
+
+Replace all `res.status(500).json({ error:` with `res.status(500).json({ success: false, error:` in the catch blocks. Also replace `res.status(400).json({ error:` with `res.status(400).json({ success: false, error:`. This applies to all error responses in the file.
+
+Also replace `res.status(404).json({ error:` with `res.status(404).json({ success: false, error:` on line 21.
+
+- [ ] **Step 5: Add validation import to bot.ts**
+
+In `src/web/api/bot.ts`, after line 5 (`import type { Logger } from "../../logger.js";`), add:
 
 ```typescript
 import { validateBotId } from "../../utils/validate.js";
 ```
 
-Apply `validateBotId` to all routes that take `req.params.id` or `req.params.botId`.
+- [ ] **Step 6: Add botId validation in bot.ts**
 
-- [ ] **Step 4: Verify TypeScript compiles**
+For each route that uses `req.params.id`, wrap it with `validateBotId`. Add this pattern at the top of each handler:
+
+```typescript
+      const id = validateBotId(req.params.id);
+```
+
+Then replace `req.params.id` with `id` in that handler. Apply to routes on lines: 20 (GET /:id), 30 (GET /:id/config), 75 (PUT /:id), 94 (DELETE /:id), 103 (POST /:id/start), 112 (POST /:id/stop).
+
+Wrap in try/catch to return 400 on validation failure:
+
+```typescript
+  router.get("/:id", (req, res) => {
+    let id: string;
+    try {
+      id = validateBotId(req.params.id);
+    } catch (err) {
+      res.status(400).json({ success: false, error: (err as Error).message });
+      return;
+    }
+    const bot = botManager.getBot(id);
+    // ... rest unchanged
+  });
+```
+
+- [ ] **Step 7: Unify error responses in bot.ts**
+
+Replace all `res.status(500).json({ error:` with `res.status(500).json({ success: false, error:`. Also replace `res.status(400).json({ error:` with `res.status(400).json({ success: false, error:`. Also replace `res.status(404).json({ error:` with `res.status(404).json({ success: false, error:`.
+
+- [ ] **Step 8: Verify TypeScript compiles**
 
 Run: `npx tsc --noEmit`
 Expected: No errors
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/web/api/player.ts src/web/api/bot.ts
-git commit -m "fix: add input validation to player and bot API routes
+git commit -m "fix: add input validation and unify error responses in API routes
 
 - Validate platform parameter against whitelist
 - Validate botId parameter (non-empty, length limit)
-- Returns 400 with descriptive error on invalid input
+- Unify all error responses to { success: false, error } format
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 ```
@@ -873,33 +1015,42 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 **Files:**
 - Modify: `src/bot/manager.ts`
 
-**Context:** When restarting a bot, the old bot may still be sending audio while the new one starts. Add a brief delay after disconnect to ensure cleanup completes.
+**Context:** The `startBot` method (not `restartBot` — the method is called `startBot` but performs restart logic when an old bot exists) disconnects the old bot and immediately creates a new one without waiting for the audio pipeline to stop. Line 42 has an empty catch: `} catch { // ignore teardown errors }`.
 
-- [ ] **Step 1: Read `src/bot/manager.ts`**
+- [ ] **Step 1: Read the startBot method**
 
-Read the file. Find the `restartBot` method.
+Read `src/bot/manager.ts`. Find the `startBot` method. It calls `oldBot.disconnect()` and then immediately creates a new BotInstance.
 
-- [ ] **Step 2: Add cleanup delay to restartBot**
+- [ ] **Step 2: Add cleanup delay**
 
-Find the `restartBot` method. It should call `disconnect()` on the old bot, then `startBot`. Add a small delay between disconnect and reconnect to allow the audio pipeline to fully stop:
-
-After the old bot's `disconnect()` call and before the new bot creation, add a brief wait:
+After the `oldBot.disconnect()` call (around line 99 in the `startBot` method — look for `oldBot.disconnect()`), add a brief wait:
 
 ```typescript
+      oldBot.disconnect();
       // Wait for audio pipeline to fully stop before starting new bot
       await new Promise((resolve) => setTimeout(resolve, 100));
 ```
 
-Place this between the disconnect and the new bot creation.
+- [ ] **Step 3: Fix empty catch in connectWithTimeout**
 
-- [ ] **Step 3: Fix empty catches**
-
-Search for any `catch` blocks that swallow errors silently. Add logging:
+On lines 42-44, the `connectWithTimeout` helper has:
 
 ```typescript
-.catch((err) => {
-  this.logger.error({ err, botId }, "Error during bot teardown");
-});
+    try {
+      bot.disconnect();
+    } catch {
+      // ignore teardown errors
+    }
+```
+
+Replace with:
+
+```typescript
+    try {
+      bot.disconnect();
+    } catch (err) {
+      logger.debug({ err, botId: bot.id }, "Disconnect error during connect cleanup");
+    }
 ```
 
 - [ ] **Step 4: Verify TypeScript compiles**
@@ -914,54 +1065,14 @@ git add src/bot/manager.ts
 git commit -m "fix: add cleanup delay on bot restart, log teardown errors
 
 Ensures old bot's audio pipeline is fully stopped before starting
-a new instance. Replaces silent catch blocks with error logging.
+a new instance. Replaces silent catch block with debug logging.
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 11: Add optional method safety helper to provider.ts
-
-**Files:**
-- Modify: `src/music/provider.ts`
-
-**Context:** Optional methods like `getDailyRecommendSongs`, `getPersonalFm`, `getUserPlaylists` are called after a manual `if (provider.method)` check. This is fine but the pattern is repeated. Add a helper type guard.
-
-- [ ] **Step 1: Read `src/music/provider.ts`**
-
-Read the file.
-
-- [ ] **Step 2: Add a helper function at the end of the file**
-
-After the interface definition, add:
-
-```typescript
-/** Type-safe helper to call an optional method on a MusicProvider */
-export function callOptional<T>(
-  provider: MusicProvider,
-  method: keyof MusicProvider,
-  ...args: unknown[]
-): T | null {
-  const fn = provider[method];
-  if (typeof fn === "function") {
-    return (fn as (...a: unknown[]) => T).apply(provider, args);
-  }
-  return null;
-}
-```
-
-This is a utility — not strictly required since the existing pattern works, but it prevents accidental null dereference. The music.ts routes already check with `if`, so this is optional. Skip creating the helper; the existing pattern is sufficient. Delete this step if not needed.
-
-Actually, on reflection, the existing `if (provider.method)` pattern in music.ts is clear and works fine. Adding a generic helper adds complexity without clear benefit. **Skip this task.**
-
-- [ ] **Step 3: No changes needed — commit not required**
-
-The existing optional method checks in `music.ts` (e.g., `if (!provider.getDailyRecommendSongs)`) are already correct and clear.
-
----
-
-### Task 12: Build and integration test
+### Task 11: Build and integration test
 
 - [ ] **Step 1: Build backend**
 
@@ -976,7 +1087,7 @@ Expected: Clean build, no errors
 - [ ] **Step 3: Run all tests**
 
 Run: `npx vitest run`
-Expected: All tests pass (except the pre-existing database.test.ts failure)
+Expected: All tests pass (except any pre-existing failures)
 
 - [ ] **Step 4: Run new tests specifically**
 
@@ -1002,20 +1113,31 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 |---|---|
 | 2.1 Concurrent safety — Mutex for playNext | Task 1 + 2 |
 | 2.1 Concurrent safety — Bot restart coordination | Task 10 |
-| 2.2 FFmpeg process management — Remove global PID, reliable cleanup, backpressure | Task 3 |
-| 2.3 Database — WAL mode, prepared statement caching, proper close | Task 4 (WAL and caching already exist; adds close guard and checkpoint) |
-| 2.4 Error handling — No empty catches, Promise.allSettled, unified format, global middleware | Tasks 2, 3, 5, 6 |
-| 2.5 Type safety — Eliminate `any`, optional method checks | Task 6 |
-| 2.6 Config validation — Port, volume, string validation | Task 7 |
-| 2.7 API input validation — Platform whitelist, botId check, string limits | Tasks 8, 9 |
+| 2.2 FFmpeg process management — Remove global PID, reliable cleanup | Task 3 |
+| 2.2 FFmpeg process management — Backpressure control | Deferred (complex, existing backpressure already works) |
+| 2.3 Database — WAL mode, prepared statement caching, proper close | Task 4 (WAL and caching already exist) |
+| 2.3 Database — Connection health check | Deferred (not critical for robustness) |
+| 2.4 Error handling — No empty catches | Tasks 2, 3, 10 |
+| 2.4 Error handling — Promise.allSettled | Already done in music.ts search/all |
+| 2.4 Error handling — Unified error format `{ success, error }` | Tasks 6, 9 |
+| 2.4 Error handling — Global error middleware | Task 5 |
+| 2.5 Type safety — Fix `as any` casts | Task 6 |
+| 2.5 Type safety — Optional method existence checks | Task 6 (typed via interface) |
+| 2.5 Type safety — provider.ts bug fixes | Task 6 |
+| 2.6 Config validation — Port/delay/locale/theme validation | Task 7 |
+| 2.6 Config validation — Config file locking | Deferred (not critical for robustness) |
+| 2.7 API input validation — Platform whitelist | Task 8 + 9 |
+| 2.7 API input validation — botId check | Task 8 + 9 |
+| 2.7 API input validation — String length limits | Task 8 |
 
 ### Placeholder Scan
 
-No TBD, TODO, or "implement later" found.
+No TBD, TODO, or "implement later" found. All code steps contain complete implementations.
 
 ### Type Consistency
 
-- `Mutex.run<T>()` returns `Promise<T>` — matches usage in `playNext`
-- `validatePlatform` returns `string` — matches `getProvider(platform)` usage
-- `validateBotId` returns `string` — matches bot lookup usage
-- `getPlaylistDetail` and `getPopularVideos` added to `MusicProvider` interface before `music.ts` uses them
+- `Mutex.run<T>()` returns `Promise<T>` — matches usage in `playNext` which returns `Promise<void>`
+- `validatePlatform` returns `string` — matches `getProvider(platform)` and `bot.getProviderFor(platform)` usage
+- `validateBotId` returns `string` — matches `botManager.getBot(id)` usage
+- `getPlaylistDetail` returns typed object — matches `music.ts` response construction
+- `getPopularVideos` returns `Promise<Song[]>` — matches existing `BiliBiliProvider.getPopularVideos` signature
