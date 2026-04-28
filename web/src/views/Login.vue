@@ -7,13 +7,14 @@
         <input
           v-model="password"
           type="password"
+          aria-label="管理密码"
           class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
           placeholder="管理密码"
           autocomplete="current-password"
           :disabled="authStore.loading"
           autofocus
         />
-        <p v-if="authStore.error" class="text-sm text-danger">{{ authStore.error }}</p>
+        <p v-if="authStore.error" role="alert" class="text-sm text-danger">{{ authStore.error }}</p>
         <BaseButton type="submit" :loading="authStore.loading" :disabled="!password" class="w-full">
           登录
         </BaseButton>
