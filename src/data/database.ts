@@ -131,6 +131,8 @@ export function createDatabase(dbPath: string): BotDatabase {
   initTables(db);
   migrateSchema(db);
 
+  let closed = false;
+
   const insertHistory = db.prepare(`
     INSERT INTO play_history (botId, songId, songName, artist, album, platform, coverUrl)
     VALUES (@botId, @songId, @songName, @artist, @album, @platform, @coverUrl)
@@ -243,6 +245,13 @@ export function createDatabase(dbPath: string): BotDatabase {
     },
 
     close() {
+      if (closed) return;
+      closed = true;
+      try {
+        db.pragma("wal_checkpoint(TRUNCATE)");
+      } catch {
+        // Checkpoint may fail if WAL wasn't used — ignore
+      }
       db.close();
     },
   };

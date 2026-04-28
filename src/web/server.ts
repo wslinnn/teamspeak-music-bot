@@ -107,6 +107,13 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
   }
 
+  // Global error handler — catches errors thrown in route handlers
+  // that weren't caught by try/catch. Must have 4 parameters for Express.
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    logger.error({ err, path: _req.path }, "Unhandled API error");
+    res.status(500).json({ success: false, error: "Internal server error" });
+  });
+
   server.on("error", (err) => {
     logger.error({ err }, "HTTP server error");
   });
