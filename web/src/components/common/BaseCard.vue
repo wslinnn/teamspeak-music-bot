@@ -8,5 +8,5 @@
 </template>
 
 <script setup lang="ts">
-withDefaults(defineProps<{ hoverable?: boolean }>(), { hoverable: true });
+withDefaults(defineProps<{ hoverable?: boolean }>(), { hoverable: false });
 </script>

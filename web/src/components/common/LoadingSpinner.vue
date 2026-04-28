@@ -1,5 +1,7 @@
 <template>
   <div
+    role="status"
+    aria-label="Loading"
     class="animate-spin rounded-full border-2 border-current border-t-transparent"
     :class="sizeClass"
   />
