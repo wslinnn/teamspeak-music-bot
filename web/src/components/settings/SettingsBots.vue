@@ -84,23 +84,20 @@ const emit = defineEmits<{
   (e: 'createBot', form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; serverPassword: string }): void;
 }>();
 
-const form = reactive({
+const defaultForm = {
   name: '',
   serverAddress: '',
   serverPort: 9987,
   nickname: 'MusicBot',
   defaultChannel: '',
   serverPassword: '',
-});
+};
+
+const form = reactive({ ...defaultForm });
 
 function submitCreate() {
   emit('createBot', { ...form });
-  form.name = '';
-  form.serverAddress = '';
-  form.serverPort = 9987;
-  form.nickname = 'MusicBot';
-  form.defaultChannel = '';
-  form.serverPassword = '';
+  Object.assign(form, defaultForm);
 }
 
 function statusText(bot: BotStatus) {

@@ -38,7 +38,7 @@
           <LoadingSpinner size="sm" /> 生成二维码中...
         </div>
         <div v-else-if="qrStates[platform.key].dataUrl" class="flex flex-col items-center gap-4">
-          <img :src="qrStates[platform.key].dataUrl" class="w-[200px] h-[200px] rounded-[var(--radius-md)] border-2 border-border-default" alt="QR" />
+          <img :src="qrStates[platform.key].dataUrl" class="w-[200px] h-[200px] rounded-[var(--radius-md)] border-2 border-border-default" :alt="`扫码登录 ${platform.name}`" />
           <div class="flex items-center gap-1.5 rounded-md bg-surface-card px-4 py-2 text-sm" :class="qrStatusClass(qrStates[platform.key].status)">
             <Icon :icon="qrStatusIcon(qrStates[platform.key].status)" />
             <span>{{ qrStatusText(platform.key, qrStates[platform.key].status) }}</span>

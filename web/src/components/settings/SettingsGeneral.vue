@@ -31,6 +31,7 @@
       <div class="flex items-center gap-2">
         <input
           v-model="localPrefix"
+          aria-label="命令前缀"
           class="w-20 rounded-lg border border-border-default bg-interactive-hover px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
           placeholder="!"
         />
@@ -50,6 +51,7 @@
           v-model.number="localIdle"
           type="number"
           min="0"
+          aria-label="闲置自动退出时间（分钟）"
           class="w-20 rounded-lg border border-border-default bg-interactive-hover px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
         />
         <span class="text-sm text-foreground-muted">分钟</span>

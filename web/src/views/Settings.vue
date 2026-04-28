@@ -86,7 +86,7 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
-import { usePlayerStore } from '../stores/player';
+import { usePlayerStore, type BotStatus } from '../stores/player';
 import { useToast } from '../composables/useToast';
 import SettingsLayout from '../components/settings/SettingsLayout.vue';
 import SettingsTheme from '../components/settings/SettingsTheme.vue';
@@ -188,7 +188,7 @@ async function toggleBot(botId: string, connected: boolean) {
   }
 }
 
-async function openEditBot(bot: any) {
+async function openEditBot(bot: BotStatus) {
   editingBotId = bot.id;
   editForm.name = bot.name;
   try {
