@@ -5,7 +5,8 @@ import router from '../router/index.js';
 
 // Request interceptor: attach JWT token to all API requests
 axios.interceptors.request.use((config) => {
-  const token = localStorage.getItem('jwt_token');
+  const authStore = useAuthStore();
+  const token = authStore.getToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
