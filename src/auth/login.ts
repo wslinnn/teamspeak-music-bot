@@ -21,6 +21,10 @@ export function createAdminLoginHandler(
   });
 
   return function handleLogin(req: import("express").Request, res: import("express").Response): void {
+    // NOTE: req.ip uses the direct connection IP by default. If the bot is
+    // behind a reverse proxy (nginx/Caddy/Cloudflare), set `trustProxy: true`
+    // in config.json so Express reads X-Forwarded-For instead. Otherwise the
+    // rate limiter sees all requests from the same proxy IP and is ineffective.
     const ip = req.ip ?? "unknown";
 
     if (limiter.isLimited(ip)) {

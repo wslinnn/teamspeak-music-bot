@@ -49,7 +49,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   app.use(express.json());
 
-  // --- Public routes (no auth required) ---
+  // --- Public routes (no auth required, per spec) ---
+  // These MUST be registered BEFORE the auth middleware below.
+  // Do NOT move them after the createRequireAuth() calls.
   app.get("/api/config/public-url", (_req, res) => {
     const raw = (options.config.publicUrl ?? "").trim();
     res.json({ publicUrl: raw ? raw.replace(/\/+$/, "") : null });
@@ -59,7 +61,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     res.json({ status: "ok", version: "0.1.0", authEnabled });
   });
 
-  // Login endpoint — always public
+  // Login endpoint — always public (registered before auth middleware)
   if (authEnabled) {
     app.post(
       "/api/auth/login",
@@ -68,6 +70,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
   }
 
   // --- Protected routes (auth required when enabled) ---
+  // IMPORTANT: All routes below this point require JWT authentication when
+  // adminPassword is set. To add a new public endpoint, register it ABOVE.
   if (authEnabled) {
     app.use("/api/bot", createRequireAuth(jwtSecret));
     app.use("/api/music", createRequireAuth(jwtSecret));
