@@ -403,5 +403,32 @@ export function createPlayerRouter(
     res.json({ history });
   });
 
+  router.post("/:botId/queue/reorder", async (req, res) => {
+    try {
+      const bot = (req as any).bot;
+      const { fromIndex, toIndex } = req.body;
+      if (
+        typeof fromIndex !== "number" ||
+        typeof toIndex !== "number" ||
+        !Number.isFinite(fromIndex) ||
+        !Number.isFinite(toIndex) ||
+        fromIndex < 0 ||
+        toIndex < 0
+      ) {
+        res.status(400).json({ error: "fromIndex and toIndex must be non-negative numbers" });
+        return;
+      }
+      const queue = bot.getQueueManager();
+      const ok = queue.reorder(fromIndex, toIndex);
+      if (!ok) {
+        res.status(400).json({ error: "Invalid reorder indices" });
+        return;
+      }
+      res.json({ message: "Queue reordered", queue: queue.list() });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   return router;
 }

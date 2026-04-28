@@ -228,6 +228,16 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
+    async reorderQueue(fromIndex: number, toIndex: number) {
+      if (!this.activeBotId) return;
+      try {
+        await http.post(`/api/player/${this.activeBotId}/queue/reorder`, { fromIndex, toIndex });
+        await this.fetchQueue();
+      } catch (err) {
+        console.error('Queue reorder failed:', err);
+      }
+    },
+
     _syncAfterAction() {
       if (!this.activeBotId) return;
       this._setTiming(this.activeBotId, {

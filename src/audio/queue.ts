@@ -51,6 +51,45 @@ export class PlayQueue {
     return removed;
   }
 
+  reorder(fromIndex: number, toIndex: number): boolean {
+    if (
+      fromIndex < 0 ||
+      fromIndex >= this.songs.length ||
+      toIndex < 0 ||
+      toIndex >= this.songs.length ||
+      fromIndex === toIndex
+    ) {
+      return false;
+    }
+
+    const [moved] = this.songs.splice(fromIndex, 1);
+    this.songs.splice(toIndex, 0, moved);
+
+    if (this.currentIndex === fromIndex) {
+      this.currentIndex = toIndex;
+    } else if (fromIndex < this.currentIndex && toIndex >= this.currentIndex) {
+      this.currentIndex--;
+    } else if (fromIndex > this.currentIndex && toIndex <= this.currentIndex) {
+      this.currentIndex++;
+    }
+
+    const newPlayed = new Set<number>();
+    for (const idx of this.playedIndices) {
+      if (idx === fromIndex) {
+        newPlayed.add(toIndex);
+      } else if (fromIndex < idx && idx <= toIndex) {
+        newPlayed.add(idx - 1);
+      } else if (toIndex <= idx && idx < fromIndex) {
+        newPlayed.add(idx + 1);
+      } else {
+        newPlayed.add(idx);
+      }
+    }
+    this.playedIndices = newPlayed;
+
+    return true;
+  }
+
   clear(): void {
     this.songs = [];
     this.currentIndex = -1;
