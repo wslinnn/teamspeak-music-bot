@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { MusicProvider } from "../../music/provider.js";
 import { YouTubeProvider } from "../../music/youtube.js";
 import type { Logger } from "../../logger.js";
+import { validatePlatform } from "../../utils/validate.js";
 
 export function createMusicRouter(
   neteaseProvider: MusicProvider,
@@ -68,7 +69,7 @@ export function createMusicRouter(
 
   router.get("/song/:id", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       const song = await provider.getSongDetail(req.params.id);
       if (!song) {
         res.status(404).json({ success: false, error: "Song not found" });
@@ -82,7 +83,7 @@ export function createMusicRouter(
 
   router.get("/playlist/:id", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       const songs = await provider.getPlaylistSongs(req.params.id);
       res.json({ songs });
     } catch (err) {
@@ -92,7 +93,7 @@ export function createMusicRouter(
 
   router.get("/recommend/playlists", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       const playlists = await provider.getRecommendPlaylists();
       res.json({ playlists });
     } catch (err) {
@@ -102,7 +103,7 @@ export function createMusicRouter(
 
   router.get("/album/:id", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       const songs = await provider.getAlbumSongs(req.params.id);
       res.json({ songs });
     } catch (err) {
@@ -112,7 +113,7 @@ export function createMusicRouter(
 
   router.get("/lyrics/:id", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       const lyrics = await provider.getLyrics(req.params.id);
       res.json({ lyrics });
     } catch (err) {
@@ -122,7 +123,7 @@ export function createMusicRouter(
 
   router.get("/recommend/songs", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       if (!provider.getDailyRecommendSongs) {
         res.status(501).json({ success: false, error: "Not supported by this provider" });
         return;
@@ -137,7 +138,7 @@ export function createMusicRouter(
 
   router.get("/personal/fm", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       if (!provider.getPersonalFm) {
         res.status(501).json({ success: false, error: "Not supported by this provider" });
         return;
@@ -152,7 +153,7 @@ export function createMusicRouter(
 
   router.get("/user/playlists", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       if (!provider.getUserPlaylists) {
         res.status(501).json({ success: false, error: "Not supported by this provider" });
         return;
@@ -167,7 +168,7 @@ export function createMusicRouter(
 
   router.get("/playlist/:id/detail", async (req, res) => {
     try {
-      const provider = getProvider(req.query.platform as string);
+      const provider = getProvider(validatePlatform(req.query.platform as string));
       if (!provider.getPlaylistDetail) {
         res.status(501).json({ success: false, error: "Not supported by this provider" });
         return;
