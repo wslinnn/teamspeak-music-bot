@@ -155,3 +155,8 @@
   opacity: 0;
   transform: translateY(12px);
 }
+
+@keyframes bar-bounce {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
