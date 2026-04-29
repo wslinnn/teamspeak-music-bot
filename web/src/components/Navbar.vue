@@ -2,18 +2,24 @@
   <nav class="navbar frosted-glass">
     <RouterLink to="/" class="logo">TSMusicBot</RouterLink>
 
-    <div class="nav-links">
+    <!-- Desktop nav links -->
+    <div class="nav-links hidden md:flex">
       <RouterLink to="/" class="nav-link" active-class="active">发现</RouterLink>
       <RouterLink to="/search" class="nav-link" active-class="active">搜索</RouterLink>
       <RouterLink to="/history" class="nav-link" active-class="active">播放历史</RouterLink>
     </div>
+
+    <!-- Mobile hamburger -->
+    <button class="hamburger md:hidden" @click="mobileMenuOpen = !mobileMenuOpen">
+      <Icon :icon="mobileMenuOpen ? 'mdi:close' : 'mdi:menu'" class="text-2xl" />
+    </button>
 
     <div class="nav-right">
       <!-- Bot selector (always shown when at least one bot exists) -->
       <div v-if="store.bots.length > 0" class="bot-selector" ref="selectorRef">
         <button class="bot-selector-btn" @click="dropdownOpen = !dropdownOpen">
           <span class="bot-dot" :class="{ online: activeBot?.connected }" />
-          <span class="bot-selector-name">{{ activeBot?.name ?? '选择机器人' }}</span>
+          <span class="bot-selector-name hidden sm:inline">{{ activeBot?.name ?? '选择机器人' }}</span>
           <span v-if="activeBot?.playing && !activeBot?.paused" class="bot-state-mini playing">▶</span>
           <span v-else-if="activeBot?.paused" class="bot-state-mini paused">⏸</span>
           <Icon icon="mdi:chevron-down" class="bot-chevron" :class="{ rotated: dropdownOpen }" />
@@ -60,6 +66,26 @@
     </div>
   </nav>
 
+  <!-- Mobile menu overlay -->
+  <Transition name="mobile-menu">
+    <div v-if="mobileMenuOpen" class="mobile-menu-overlay md:hidden" @click="mobileMenuOpen = false">
+      <div class="mobile-menu" @click.stop>
+        <RouterLink to="/" class="mobile-nav-link" active-class="active" @click="mobileMenuOpen = false">
+          <Icon icon="mdi:home" class="mr-3" /> 发现
+        </RouterLink>
+        <RouterLink to="/search" class="mobile-nav-link" active-class="active" @click="mobileMenuOpen = false">
+          <Icon icon="mdi:magnify" class="mr-3" /> 搜索
+        </RouterLink>
+        <RouterLink to="/history" class="mobile-nav-link" active-class="active" @click="mobileMenuOpen = false">
+          <Icon icon="mdi:history" class="mr-3" /> 播放历史
+        </RouterLink>
+        <RouterLink to="/settings" class="mobile-nav-link" active-class="active" @click="mobileMenuOpen = false">
+          <Icon icon="mdi:cog" class="mr-3" /> 设置
+        </RouterLink>
+      </div>
+    </div>
+  </Transition>
+
   <div v-if="linkDialog.open" class="link-dialog-backdrop" @click="closeLinkDialog">
     <div class="link-dialog" @click.stop>
       <div class="link-dialog-title">{{ linkDialog.name }} 的专属链接</div>
@@ -89,6 +115,7 @@ import { usePlayerStore } from '../stores/player.js';
 const store = usePlayerStore();
 const activeBot = computed(() => store.activeBot);
 const dropdownOpen = ref(false);
+const mobileMenuOpen = ref(false);
 const selectorRef = ref<HTMLElement | null>(null);
 const togglingBots = ref<Record<string, boolean>>({});
 const linkInputRef = ref<HTMLInputElement | null>(null);
@@ -554,5 +581,59 @@ onUnmounted(() => {
       filter: brightness(1.08);
     }
   }
+}
+
+.hamburger {
+  margin-left: auto;
+  padding: 8px;
+  font-size: 20px;
+  opacity: 0.7;
+  transition: opacity var(--transition-fast);
+  &:hover { opacity: 1; }
+}
+
+.mobile-menu-overlay {
+  position: fixed;
+  inset: var(--navbar-height) 0 0 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 99;
+  backdrop-filter: blur(4px);
+}
+
+.mobile-menu {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 240px;
+  max-width: 80vw;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobile-nav-link {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 500;
+  opacity: 0.7;
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+
+  &:hover { opacity: 0.9; background: var(--hover-bg); }
+  &.active { opacity: 1; color: var(--color-primary); background: rgba(51, 94, 234, 0.1); }
+}
+
+.mobile-menu-enter-active,
+.mobile-menu-leave-active {
+  transition: opacity 0.2s ease;
+}
+.mobile-menu-enter-from,
+.mobile-menu-leave-to {
+  opacity: 0;
 }
 </style>
