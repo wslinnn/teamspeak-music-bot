@@ -16,18 +16,21 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue';
 import { usePlayerStore } from './stores/player.js';
+import { useAuthStore } from './stores/auth';
 import { useWebSocket } from './composables/useWebSocket.js';
 import Navbar from './components/Navbar.vue';
 import Player from './components/Player.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
 
 const playerStore = usePlayerStore();
+const authStore = useAuthStore();
 const theme = computed(() => playerStore.theme);
 const { connect } = useWebSocket();
 
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
+  authStore.checkAuthEnabled().catch(() => {});
   playerStore.loadTheme();
   connect();
   playerStore.fetchBots();

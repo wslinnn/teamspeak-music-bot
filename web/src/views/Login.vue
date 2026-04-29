@@ -5,11 +5,20 @@
       <p class="mb-8 text-center text-sm text-foreground-muted">请输入管理密码</p>
       <form @submit.prevent="handleLogin" class="flex flex-col gap-4">
         <input
+          v-model="username"
+          type="text"
+          aria-label="用户名"
+          class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
+          placeholder="用户名（可选）"
+          autocomplete="username"
+          :disabled="authStore.loading"
+        />
+        <input
           v-model="password"
           type="password"
           aria-label="管理密码"
           class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
-          placeholder="管理密码"
+          placeholder="密码"
           autocomplete="current-password"
           :disabled="authStore.loading"
           autofocus
@@ -31,10 +40,11 @@ import BaseButton from '../components/common/BaseButton.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
+const username = ref('');
 const password = ref('');
 
 async function handleLogin() {
-  const success = await authStore.login(password.value);
+  const success = await authStore.login(password.value, username.value || undefined);
   if (success) {
     const redirect = (router.currentRoute.value.query.redirect as string) || '/';
     router.push(redirect);

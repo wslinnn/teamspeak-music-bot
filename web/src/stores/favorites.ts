@@ -1,0 +1,87 @@
+import { defineStore } from 'pinia';
+import { ref, computed } from 'vue';
+import { http } from '../utils/http';
+
+export interface Favorite {
+  id: number;
+  songId: string;
+  platform: string;
+  title: string;
+  artist: string;
+  coverUrl: string;
+  createdAt: string;
+}
+
+export const useFavoritesStore = defineStore('favorites', () => {
+  const favorites = ref<Favorite[]>([]);
+  const loading = ref(false);
+
+  async function fetchFavorites() {
+    loading.value = true;
+    try {
+      const res = await http.get('/api/favorites');
+      favorites.value = res.data.favorites ?? [];
+    } catch {
+      favorites.value = [];
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function addFavorite(song: {
+    id: string;
+    platform: string;
+    name: string;
+    artist: string;
+    coverUrl: string;
+  }) {
+    try {
+      await http.post('/api/favorites', {
+        songId: song.id,
+        platform: song.platform,
+        title: song.name,
+        artist: song.artist,
+        coverUrl: song.coverUrl,
+      });
+      await fetchFavorites();
+    } catch (err) {
+      console.error('Failed to add favorite:', err);
+    }
+  }
+
+  async function removeFavorite(id: number) {
+    try {
+      await http.delete(`/api/favorites/${id}`);
+      await fetchFavorites();
+    } catch (err) {
+      console.error('Failed to remove favorite:', err);
+    }
+  }
+
+  const isFavorite = computed(() => {
+    return (songId: string, platform: string) =>
+      favorites.value.some((f) => f.songId === songId && f.platform === platform);
+  });
+
+  const getFavoriteId = computed(() => {
+    return (songId: string, platform: string) =>
+      favorites.value.find((f) => f.songId === songId && f.platform === platform)?.id;
+  });
+
+  function handleWsUpdate(data: { favorites?: Favorite[] }) {
+    if (data.favorites) {
+      favorites.value = data.favorites;
+    }
+  }
+
+  return {
+    favorites,
+    loading,
+    fetchFavorites,
+    addFavorite,
+    removeFavorite,
+    isFavorite,
+    getFavoriteId,
+    handleWsUpdate,
+  };
+});

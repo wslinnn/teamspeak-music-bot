@@ -7,6 +7,7 @@
       <RouterLink to="/" class="nav-link" active-class="active">发现</RouterLink>
       <RouterLink to="/search" class="nav-link" active-class="active">搜索</RouterLink>
       <RouterLink to="/history" class="nav-link" active-class="active">播放历史</RouterLink>
+      <RouterLink to="/favorites" class="nav-link" active-class="active">收藏</RouterLink>
     </div>
 
     <!-- Mobile hamburger -->
@@ -43,6 +44,7 @@
               <span v-else class="bot-offline-badge">离线</span>
             </button>
             <button
+              v-if="authStore.isAdmin"
               class="bot-power-btn"
               :class="{ online: bot.connected }"
               :title="bot.connected ? `停止 ${bot.name}` : `启动 ${bot.name}`"
@@ -51,7 +53,9 @@
             >
               <Icon :icon="bot.connected ? 'mdi:power' : 'mdi:power-off'" />
             </button>
-            <button class="bot-link-btn" :title="`复制 ${bot.name} 的专属链接`" @click.stop="copyBotLink(bot.id)">
+            <button
+              v-if="authStore.isAdmin"
+              class="bot-link-btn" :title="`复制 ${bot.name} 的专属链接`" @click.stop="copyBotLink(bot.id)">
               <Icon icon="mdi:link-variant" />
             </button>
           </div>
@@ -60,7 +64,7 @@
         </div>
       </div>
 
-      <RouterLink to="/settings" class="settings-btn">
+      <RouterLink v-if="authStore.isAdmin" to="/settings" class="settings-btn">
         <Icon icon="mdi:cog" />
       </RouterLink>
     </div>
@@ -79,7 +83,16 @@
         <RouterLink to="/history" class="mobile-nav-link" active-class="active" @click="mobileMenuOpen = false">
           <Icon icon="mdi:history" class="mr-3" /> 播放历史
         </RouterLink>
-        <RouterLink to="/settings" class="mobile-nav-link" active-class="active" @click="mobileMenuOpen = false">
+        <RouterLink to="/favorites" class="mobile-nav-link" active-class="active" @click="mobileMenuOpen = false">
+          <Icon icon="mdi:heart" class="mr-3" /> 收藏
+        </RouterLink>
+        <RouterLink
+          v-if="authStore.isAdmin"
+          to="/settings"
+          class="mobile-nav-link"
+          active-class="active"
+          @click="mobileMenuOpen = false"
+        >
           <Icon icon="mdi:cog" class="mr-3" /> 设置
         </RouterLink>
       </div>
@@ -111,8 +124,10 @@
 import { computed, ref, onMounted, onUnmounted, nextTick, reactive } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../stores/player.js';
+import { useAuthStore } from '../stores/auth';
 
 const store = usePlayerStore();
+const authStore = useAuthStore();
 const activeBot = computed(() => store.activeBot);
 const dropdownOpen = ref(false);
 const mobileMenuOpen = ref(false);

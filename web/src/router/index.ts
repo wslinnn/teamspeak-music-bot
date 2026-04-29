@@ -1,15 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { useAuthStore } from '../stores/auth.js';
+import { useAuthStore } from '../stores/auth';
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    {
-      path: '/login',
-      name: 'login',
-      component: () => import('../views/Login.vue'),
-      meta: { public: true },
-    },
     {
       path: '/',
       name: 'home',
@@ -36,14 +30,25 @@ const router = createRouter({
       component: () => import('../views/History.vue'),
     },
     {
+      path: '/favorites',
+      name: 'favorites',
+      component: () => import('../views/Favorites.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/setup',
       name: 'setup',
       component: () => import('../views/Setup.vue'),
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/Login.vue'),
     },
     {
       path: '/bot/:id',
@@ -58,30 +63,34 @@ const router = createRouter({
   ],
 });
 
-// Track whether we've checked if auth is enabled
-let authCheckDone = false;
-let serverAuthEnabled = false;
-
-router.beforeEach(async (to) => {
-  // Login page is always accessible
-  if (to.meta.public) return true;
-
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore();
 
-  // Check once if the server has auth enabled
-  if (!authCheckDone) {
-    serverAuthEnabled = await authStore.checkAuthEnabled();
-    authCheckDone = true;
+  if (authStore.authEnabled === null) {
+    try {
+      await authStore.checkAuthEnabled();
+    } catch {
+      return next();
+    }
   }
 
-  // If server doesn't require auth, let all routes through
-  if (!serverAuthEnabled) return true;
+  if (!authStore.authEnabled) {
+    return next();
+  }
 
-  // Server requires auth — check if user is logged in
-  if (authStore.isAuthenticated) return true;
+  if (to.path === '/login') {
+    return next();
+  }
 
-  // Not logged in, redirect to login
-  return { name: 'login', query: { redirect: to.fullPath } };
+  if (!authStore.isAuthenticated) {
+    return next({ path: '/login', query: { redirect: to.fullPath } });
+  }
+
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    return next({ path: '/' });
+  }
+
+  next();
 });
 
 export default router;

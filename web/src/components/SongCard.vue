@@ -15,6 +15,13 @@
     <div class="song-album hidden md:block">{{ song.album }}</div>
     <div class="song-duration hidden sm:block">{{ formatDuration(song.duration) }}</div>
     <div class="song-actions">
+      <FavoriteButton
+        :song-id="song.id"
+        :platform="song.platform"
+        :song-name="song.name"
+        :artist="song.artist"
+        :cover-url="song.coverUrl"
+      />
       <button class="action-btn" @click.stop="$emit('play')" title="播放">
         <Icon icon="mdi:play" />
       </button>
@@ -28,6 +35,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue';
 import CoverArt from './CoverArt.vue';
+import FavoriteButton from './FavoriteButton.vue';
 import { Song } from '../stores/player.js';
 
 defineProps<{

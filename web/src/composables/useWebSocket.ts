@@ -1,6 +1,7 @@
 import { ref, onUnmounted } from 'vue';
 import { usePlayerStore } from '../stores/player';
 import { useAuthStore } from '../stores/auth';
+import { useFavoritesStore } from '../stores/favorites';
 import { useToast } from './useToast';
 
 export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
@@ -138,6 +139,12 @@ export function useWebSocket() {
             if (store.activeBotId === data.botId) {
               store.activeBotId = store.bots[0]?.id ?? null;
             }
+          }
+          break;
+        case 'favoritesChanged':
+          if (Array.isArray(data.favorites)) {
+            const favoritesStore = useFavoritesStore();
+            favoritesStore.handleWsUpdate({ favorites: data.favorites as any });
           }
           break;
         default:

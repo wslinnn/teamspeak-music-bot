@@ -35,6 +35,13 @@
               <div class="queue-song-name">{{ song.name }}</div>
               <div class="queue-song-artist">{{ song.artist }}</div>
             </div>
+            <FavoriteButton
+              :song-id="song.id"
+              :platform="song.platform"
+              :song-name="song.name"
+              :artist="song.artist"
+              :cover-url="song.coverUrl"
+            />
             <button class="remove-btn" @click="removeSong(i)" title="移除">
               <Icon icon="mdi:close" />
             </button>
@@ -52,6 +59,7 @@ import draggable from 'vuedraggable';
 import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
+import FavoriteButton from './FavoriteButton.vue';
 
 const props = defineProps<{
   open: boolean;
