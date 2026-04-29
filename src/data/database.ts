@@ -310,6 +310,7 @@ export function createDatabase(dbPath: string): BotDatabase {
     close() {
       if (closed) return;
       closed = true;
+      // better-sqlite3 finalizes all prepared statements automatically on db.close()
       try {
         db.pragma("wal_checkpoint(TRUNCATE)");
       } catch {
