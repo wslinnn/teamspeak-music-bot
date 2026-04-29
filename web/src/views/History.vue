@@ -58,7 +58,7 @@ onMounted(async () => {
 });
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .back-btn {
   display: flex;
   align-items: center;
@@ -67,8 +67,8 @@ onMounted(async () => {
   opacity: 0.7;
   margin-bottom: 16px;
   transition: opacity var(--transition-fast);
-  &:hover { opacity: 1; }
 }
+.back-btn:hover { opacity: 1; }
 
 .page-title {
   font-size: 28px;

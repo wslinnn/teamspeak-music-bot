@@ -213,7 +213,7 @@ function cycleMode() {
 }
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .player-wrapper {
   position: fixed;
   bottom: 0;
@@ -242,12 +242,10 @@ function cycleMode() {
   display: flex;
   align-items: center;
   padding: 0;
-
-  &:hover {
-    .progress-bar-bg { height: 4px; }
-    .progress-bar-thumb { opacity: 1; transform: scale(1); }
-  }
 }
+
+.progress-bar-container:hover .progress-bar-bg { height: 4px; }
+.progress-bar-container:hover .progress-bar-thumb { opacity: 1; transform: scale(1); }
 
 .progress-bar-bg {
   width: 100%;
@@ -265,7 +263,7 @@ function cycleMode() {
   height: 100%;
   background: var(--color-primary);
   border-radius: 1px;
-  // No transition — updated via rAF for smooth movement
+  /* No transition — updated via rAF for smooth movement */
 }
 
 .progress-bar-thumb {
@@ -315,8 +313,8 @@ function cycleMode() {
   color: inherit;
   cursor: pointer;
   transition: opacity var(--transition-fast);
-  &:hover { opacity: 0.8; }
 }
+.player-left:hover { opacity: 0.8; }
 
 .song-info {
   min-width: 0;
@@ -363,9 +361,9 @@ function cycleMode() {
   font-size: 20px;
   opacity: 0.7;
   transition: opacity var(--transition-fast);
-  &:hover { opacity: 1; }
-  &.active { opacity: 1; color: var(--color-primary); }
 }
+.control-btn:hover { opacity: 1; }
+.control-btn.active { opacity: 1; color: var(--color-primary); }
 
 .mode-btn {
   display: flex;
@@ -390,9 +388,9 @@ function cycleMode() {
   font-size: 18px;
   color: white;
   transition: transform var(--transition-fast);
-  &:hover { transform: scale(1.08); }
-  &:active { transform: scale(0.95); }
 }
+.play-btn:hover { transform: scale(1.08); }
+.play-btn:active { transform: scale(0.95); }
 
 .player-right {
   width: 240px;
@@ -414,15 +412,15 @@ function cycleMode() {
   background: var(--border-color);
   border-radius: 2px;
   outline: none;
+}
 
-  &::-webkit-slider-thumb {
-    appearance: none;
-    width: 12px;
-    height: 12px;
-    background: var(--color-primary);
-    border-radius: 50%;
-    cursor: pointer;
-  }
+.volume-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  cursor: pointer;
 }
 
 .lyrics-btn {

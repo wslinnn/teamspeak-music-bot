@@ -105,7 +105,7 @@ async function createBotAndNext() {
 }
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .setup-wizard {
   max-width: 560px;
   margin: 0 auto;
@@ -169,14 +169,14 @@ async function createBotAndNext() {
 
 .form-group {
   margin-bottom: 20px;
+}
 
-  label {
-    display: block;
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 6px;
-    opacity: 0.8;
-  }
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  opacity: 0.8;
 }
 
 .input {
@@ -189,10 +189,10 @@ async function createBotAndNext() {
   color: var(--text-primary);
   outline: none;
   font-family: inherit;
+}
 
-  &:focus {
-    border-color: var(--color-primary);
-  }
+.input:focus {
+  border-color: var(--color-primary);
 }
 
 .btn-primary {
@@ -203,10 +203,9 @@ async function createBotAndNext() {
   font-size: 14px;
   font-weight: 600;
   transition: transform var(--transition-fast);
-
-  &:hover { transform: scale(1.04); }
-  &:active { transform: scale(0.96); }
 }
+.btn-primary:hover { transform: scale(1.04); }
+.btn-primary:active { transform: scale(0.96); }
 
 .btn-secondary {
   padding: 10px 32px;

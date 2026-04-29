@@ -42,7 +42,7 @@ onUnmounted(() => {
 });
 </script>
 
-<style lang="scss">
+<style>
 .app {
   min-height: 100vh;
   background: var(--bg-primary);
@@ -51,8 +51,10 @@ onUnmounted(() => {
 
 .main-content {
   padding: 80px 10vw 80px;
+}
 
-  @media (max-width: 1336px) {
+@media (max-width: 1336px) {
+  .main-content {
     padding: 80px 5vw 80px;
   }
 }

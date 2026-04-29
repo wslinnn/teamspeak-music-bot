@@ -183,7 +183,7 @@ onUnmounted(() => {
 });
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .lyrics-page {
   position: fixed;
   inset: 0;
@@ -212,8 +212,8 @@ onUnmounted(() => {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.7);
   transition: color var(--transition-fast);
-  &:hover { color: white; }
 }
+.back-btn:hover { color: white; }
 
 .lyrics-content {
   position: relative;
@@ -286,38 +286,34 @@ onUnmounted(() => {
   padding: 8px 0;
   cursor: pointer;
   transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
 
-  .lyrics-text {
-    font-size: 18px;
-    line-height: 1.5;
-    color: rgba(255, 255, 255, 0.3);
-    transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-  }
+.lyrics-line .lyrics-text {
+  font-size: 18px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.3);
+  transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
 
-  .lyrics-translation {
-    font-size: 14px;
-    line-height: 1.4;
-    color: rgba(255, 255, 255, 0.15);
-    margin-top: 2px;
-    transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-  }
+.lyrics-line .lyrics-translation {
+  font-size: 14px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.15);
+  margin-top: 2px;
+  transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
 
-  &.active {
-    .lyrics-text {
-      font-size: 22px;
-      font-weight: 600;
-      color: white;
-    }
-    .lyrics-translation {
-      color: rgba(255, 255, 255, 0.5);
-    }
-  }
+.lyrics-line.active .lyrics-text {
+  font-size: 22px;
+  font-weight: 600;
+  color: white;
+}
+.lyrics-line.active .lyrics-translation {
+  color: rgba(255, 255, 255, 0.5);
+}
 
-  &:hover:not(.active) {
-    .lyrics-text {
-      color: rgba(255, 255, 255, 0.5);
-    }
-  }
+.lyrics-line:hover:not(.active) .lyrics-text {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .lyrics-loading,

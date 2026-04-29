@@ -253,7 +253,7 @@ onUnmounted(() => {
 });
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .navbar {
   position: fixed;
   top: 0;
@@ -265,8 +265,10 @@ onUnmounted(() => {
   padding: 0 10vw;
   z-index: 100;
   border-bottom: 1px solid var(--border-color);
+}
 
-  @media (max-width: 1336px) {
+@media (max-width: 1336px) {
+  .navbar {
     padding: 0 5vw;
   }
 }
@@ -288,10 +290,9 @@ onUnmounted(() => {
   font-weight: 600;
   opacity: 0.6;
   transition: opacity var(--transition-fast);
-
-  &:hover { opacity: 0.8; }
-  &.active { opacity: 1; color: var(--color-primary); }
 }
+.nav-link:hover { opacity: 0.8; }
+.nav-link.active { opacity: 1; color: var(--color-primary); }
 
 .nav-right {
   margin-left: auto;
@@ -306,12 +307,12 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   font-size: 12px;
   opacity: 0.6;
+}
 
-  &.online {
-    background: rgba(51, 94, 234, 0.15);
-    color: var(--color-primary);
-    opacity: 1;
-  }
+.bot-status.online {
+  background: rgba(51, 94, 234, 0.15);
+  color: var(--color-primary);
+  opacity: 1;
 }
 
 /* Bot selector dropdown */
@@ -332,27 +333,27 @@ onUnmounted(() => {
   border: 1px solid var(--border-color);
   transition: background var(--transition-fast), border-color var(--transition-fast);
   cursor: pointer;
+}
 
-  &:hover {
-    background: var(--bg-card);
-    border-color: var(--color-primary);
-  }
+.bot-selector-btn:hover {
+  background: var(--bg-card);
+  border-color: var(--color-primary);
 }
 
 .bot-state-mini {
   font-size: 14px;
-  &.playing { color: #22c55e; }
-  &.paused { color: #eab308; }
 }
+.bot-state-mini.playing { color: #22c55e; }
+.bot-state-mini.paused { color: #eab308; }
 
 .bot-chevron {
   font-size: 20px;
   opacity: 0.5;
   transition: transform 0.2s ease;
+}
 
-  &.rotated {
-    transform: rotate(180deg);
-  }
+.bot-chevron.rotated {
+  transform: rotate(180deg);
 }
 
 .bot-dot {
@@ -361,10 +362,10 @@ onUnmounted(() => {
   border-radius: 50%;
   background: var(--text-tertiary);
   flex-shrink: 0;
+}
 
-  &.online {
-    background: #22c55e;
-  }
+.bot-dot.online {
+  background: #22c55e;
 }
 
 .bot-selector-name {
@@ -398,15 +399,15 @@ onUnmounted(() => {
   font-size: 13px;
   cursor: pointer;
   transition: background var(--transition-fast);
+}
 
-  &:hover {
-    background: var(--hover-bg);
-  }
+.bot-dropdown-item:hover {
+  background: var(--hover-bg);
+}
 
-  &.active {
-    background: rgba(51, 94, 234, 0.12);
-    color: var(--color-primary);
-  }
+.bot-dropdown-item.active {
+  background: rgba(51, 94, 234, 0.12);
+  color: var(--color-primary);
 }
 
 .bot-dropdown-row {
@@ -431,11 +432,11 @@ onUnmounted(() => {
   opacity: 0.4;
   transition: opacity var(--transition-fast), background var(--transition-fast);
   cursor: pointer;
+}
 
-  &:hover {
-    opacity: 1;
-    background: var(--hover-bg);
-  }
+.bot-link-btn:hover {
+  opacity: 1;
+  background: var(--hover-bg);
 }
 
 .bot-power-btn {
@@ -447,21 +448,21 @@ onUnmounted(() => {
   color: var(--text-tertiary);
   transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
   cursor: pointer;
+}
 
-  &:hover:not(:disabled) {
-    opacity: 1;
-    background: var(--hover-bg);
-  }
+.bot-power-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--hover-bg);
+}
 
-  &:disabled {
-    opacity: 0.25;
-    cursor: wait;
-  }
+.bot-power-btn:disabled {
+  opacity: 0.25;
+  cursor: wait;
+}
 
-  &.online {
-    color: #22c55e;
-    opacity: 0.9;
-  }
+.bot-power-btn.online {
+  color: #22c55e;
+  opacity: 0.9;
 }
 
 .bot-playing-badge,
@@ -512,8 +513,8 @@ onUnmounted(() => {
   font-size: 22px;
   opacity: 0.6;
   transition: opacity var(--transition-fast);
-  &:hover { opacity: 1; }
 }
+.settings-btn:hover { opacity: 1; }
 
 .link-dialog-backdrop {
   position: fixed;
@@ -558,11 +559,11 @@ onUnmounted(() => {
   color: inherit;
   user-select: all;
   -webkit-user-select: all;
+}
 
-  &:focus {
-    outline: none;
-    border-color: var(--color-primary);
-  }
+.link-dialog-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
 }
 
 .link-dialog-actions {
@@ -582,20 +583,20 @@ onUnmounted(() => {
   color: inherit;
   cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast);
+}
 
-  &:hover {
-    background: var(--bg-card);
-  }
+.link-dialog-btn:hover {
+  background: var(--bg-card);
+}
 
-  &.primary {
-    background: var(--color-primary);
-    border-color: var(--color-primary);
-    color: #fff;
+.link-dialog-btn.primary {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
 
-    &:hover {
-      filter: brightness(1.08);
-    }
-  }
+.link-dialog-btn.primary:hover {
+  filter: brightness(1.08);
 }
 
 .hamburger {
@@ -604,8 +605,8 @@ onUnmounted(() => {
   font-size: 20px;
   opacity: 0.7;
   transition: opacity var(--transition-fast);
-  &:hover { opacity: 1; }
 }
+.hamburger:hover { opacity: 1; }
 
 .mobile-menu-overlay {
   position: fixed;
@@ -638,10 +639,10 @@ onUnmounted(() => {
   font-weight: 500;
   opacity: 0.7;
   transition: background var(--transition-fast), opacity var(--transition-fast);
-
-  &:hover { opacity: 0.9; background: var(--hover-bg); }
-  &.active { opacity: 1; color: var(--color-primary); background: rgba(51, 94, 234, 0.1); }
 }
+
+.mobile-nav-link:hover { opacity: 0.9; background: var(--hover-bg); }
+.mobile-nav-link.active { opacity: 1; color: var(--color-primary); background: rgba(51, 94, 234, 0.1); }
 
 .mobile-menu-enter-active,
 .mobile-menu-leave-active {

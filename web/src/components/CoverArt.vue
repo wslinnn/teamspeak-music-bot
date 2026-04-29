@@ -57,7 +57,7 @@ function onImageError() {
 }
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .cover-art {
   position: relative;
   flex-shrink: 0;

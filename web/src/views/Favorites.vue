@@ -57,7 +57,7 @@ onMounted(() => {
 });
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .page-title {
   font-size: 28px;
   font-weight: 800;

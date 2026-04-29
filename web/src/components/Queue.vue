@@ -98,7 +98,7 @@ async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
 }
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .queue-panel {
   position: fixed;
   top: var(--navbar-height);
@@ -111,10 +111,10 @@ async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
   transition: right var(--transition-normal);
   display: flex;
   flex-direction: column;
+}
 
-  &.open {
-    right: 0;
-  }
+.queue-panel.open {
+  right: 0;
 }
 
 .queue-header {
@@ -140,8 +140,8 @@ async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
   font-size: 18px;
   opacity: 0.6;
   transition: opacity var(--transition-fast);
-  &:hover { opacity: 1; }
 }
+.close-btn:hover { opacity: 1; }
 
 .queue-empty {
   padding: 40px 20px;
@@ -165,16 +165,16 @@ async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
   transition: background var(--transition-fast);
   cursor: pointer;
   user-select: none;
+}
 
-  &:hover {
-    background: var(--hover-bg);
-    .remove-btn { opacity: 1; }
-    .drag-handle { opacity: 0.5 !important; }
-  }
+.queue-item:hover {
+  background: var(--hover-bg);
+}
+.queue-item:hover .remove-btn { opacity: 1; }
+.queue-item:hover .drag-handle { opacity: 0.5 !important; }
 
-  &.active {
-    background: rgba(51, 94, 234, 0.1);
-  }
+.queue-item.active {
+  background: rgba(51, 94, 234, 0.1);
 }
 
 .queue-item-ghost {
@@ -213,8 +213,8 @@ async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
   border-radius: var(--radius-sm);
   transition: opacity var(--transition-fast);
   color: var(--text-tertiary);
-  &:hover { color: var(--text-primary); }
 }
+.remove-btn:hover { color: var(--text-primary); }
 
 .drag-handle {
   font-size: 16px;

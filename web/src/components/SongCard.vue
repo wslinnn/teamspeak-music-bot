@@ -50,7 +50,7 @@ defineEmits<{
 
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .song-card {
   display: flex;
   align-items: center;
@@ -59,15 +59,15 @@ defineEmits<{
   border-radius: var(--radius-md);
   transition: background var(--transition-fast);
   cursor: pointer;
+}
 
-  &:hover {
-    background: var(--hover-bg);
-    .song-actions { opacity: 1; }
-  }
+.song-card:hover {
+  background: var(--hover-bg);
+}
+.song-card:hover .song-actions { opacity: 1; }
 
-  &.active {
-    background: rgba(51, 94, 234, 0.1);
-  }
+.song-card.active {
+  background: rgba(51, 94, 234, 0.1);
 }
 
 .song-index {
@@ -160,8 +160,8 @@ defineEmits<{
   border-radius: var(--radius-sm);
   opacity: 0.7;
   transition: opacity var(--transition-fast);
-  &:hover { opacity: 1; }
 }
+.action-btn:hover { opacity: 1; }
 
 @media (max-width: 640px) {
   .song-card {

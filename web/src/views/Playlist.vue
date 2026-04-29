@@ -94,7 +94,7 @@ onMounted(async () => {
 });
 </script>
 
-<style lang="scss" scoped>
+<style scoped>
 .back-btn {
   display: flex;
   align-items: center;
@@ -103,8 +103,8 @@ onMounted(async () => {
   opacity: 0.7;
   margin-bottom: 16px;
   transition: opacity var(--transition-fast);
-  &:hover { opacity: 1; }
 }
+.back-btn:hover { opacity: 1; }
 
 .playlist-hero {
   display: flex;
@@ -152,10 +152,9 @@ onMounted(async () => {
   font-weight: 600;
   width: fit-content;
   transition: transform var(--transition-fast);
-
-  &:hover { transform: scale(1.04); }
-  &:active { transform: scale(0.96); }
 }
+.play-all-btn:hover { transform: scale(1.04); }
+.play-all-btn:active { transform: scale(0.96); }
 
 .song-list {
   display: flex;
