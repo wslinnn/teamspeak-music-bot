@@ -1,52 +1,90 @@
 <template>
-  <div class="queue-panel" :class="{ open }">
-    <div class="queue-header">
-      <h3 class="queue-title">播放队列</h3>
-      <span class="queue-count">{{ botQueue.length }} 首</span>
-      <button 
-        v-if="botQueue.length > 0"
-        class="clear-btn" 
-        @click="clearAndStop" 
-        title="清空队列并停止播放"
-      >
-        <Icon icon="mdi:stop-circle-outline" />
-      </button>
-      <button class="close-btn" @click="$emit('close')">
-        <Icon icon="mdi:close" />
-      </button>
-    </div>
-
-    <div v-if="botQueue.length === 0" class="queue-empty">
-      队列为空
-    </div>
-
-    <div v-else class="queue-list">
+  <Teleport to="body">
+    <Transition name="queue-backdrop">
       <div
-        v-for="(song, i) in botQueue"
-        :key="`${song.id}-${i}`"
-        class="queue-item"
-        :class="{ active: store.currentSong?.id === song.id }"
-        @dblclick="playAtIndex(i)"
-      >
-        <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
-        <div class="queue-song-info">
-          <div class="queue-song-name">{{ song.name }}</div>
-          <div class="queue-song-artist">{{ song.artist }}</div>
+        v-if="open"
+        class="fixed inset-0 z-[110] bg-black/40"
+        @click="$emit('close')"
+      />
+    </Transition>
+    <div
+      class="fixed top-0 bottom-0 right-0 w-[min(360px,85vw)] z-[111] transition-transform duration-[var(--transition-normal)] flex flex-col"
+      :style="{ background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-elevated)' }"
+      :class="open ? 'translate-x-0' : 'translate-x-full'"
+    >
+      <div class="flex items-center justify-between px-5 py-4" :style="{ marginTop: 'var(--navbar-height)' }">
+        <div class="flex items-center">
+          <h3 class="text-base font-bold">播放队列</h3>
+          <span class="ml-2 text-xs text-text-tertiary">{{ botQueue.length }} 首</span>
         </div>
-        <button class="remove-btn" @click="removeSong(i)" title="移除">
-          <Icon icon="mdi:close" />
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            v-if="botQueue.length > 0"
+            class="text-lg opacity-60 transition-opacity hover:opacity-100"
+            @click="clearAndStop"
+            title="清空队列并停止播放"
+          >
+            <Icon icon="mdi:stop-circle-outline" />
+          </button>
+          <button class="text-lg opacity-60 transition-opacity hover:opacity-100" @click="$emit('close')">
+            <Icon icon="mdi:close" />
+          </button>
+        </div>
+      </div>
+
+      <div v-if="botQueue.length === 0" class="py-10 px-5 text-center text-text-tertiary text-[13px]">
+        队列为空
+      </div>
+
+      <div v-else class="flex-1 overflow-y-auto py-2 px-3" :style="{ paddingBottom: 'var(--player-height)' }">
+        <draggable
+          :model-value="botQueue"
+          item-key="id"
+          handle=".drag-handle"
+          ghost-class="queue-item-ghost"
+          drag-class="queue-item-drag"
+          @end="onDragEnd"
+        >
+          <template #item="{ element: song, index: i }">
+            <div
+              class="flex items-center gap-2 p-2 rounded-[var(--radius-sm)] transition-colors cursor-pointer select-none hover:bg-hover-bg group"
+              :class="{ 'bg-[rgba(51,94,234,0.1)]': store.currentSong?.id === song.id }"
+              @dblclick="playAtIndex(i)"
+            >
+              <span class="drag-handle cursor-grab text-foreground-subtle opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-50 shrink-0 text-base p-0.5">
+                <Icon icon="mdi:drag-vertical" />
+              </span>
+              <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
+              <div class="flex-1 min-w-0">
+                <div class="text-[13px] font-medium truncate">{{ song.name }}</div>
+                <div class="text-[11px] text-text-secondary">{{ song.artist }}</div>
+              </div>
+              <FavoriteButton
+                :song-id="song.id"
+                :platform="song.platform"
+                :song-name="song.name"
+                :artist="song.artist"
+                :cover-url="song.coverUrl"
+              />
+              <button class="text-sm opacity-0 p-1 rounded-[var(--radius-sm)] transition-opacity text-text-tertiary hover:text-text-primary group-hover:opacity-100" @click="removeSong(i)" title="移除">
+                <Icon icon="mdi:close" />
+              </button>
+            </div>
+          </template>
+        </draggable>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { watch, computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import axios from 'axios';
+import draggable from 'vuedraggable';
+import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
+import FavoriteButton from './FavoriteButton.vue';
 
 const props = defineProps<{
   open: boolean;
@@ -72,10 +110,10 @@ async function playAtIndex(index: number) {
 async function removeSong(index: number) {
   if (!store.activeBotId) return;
   try {
-    await axios.delete(`/api/player/${store.activeBotId}/queue/${index + 1}`);
+    await http.delete(`/api/player/${store.activeBotId}/queue/${index + 1}`);
     await store.fetchQueue();
-  } catch {
-    // Ignore
+  } catch (err) {
+    console.warn('Failed to remove song from queue:', err);
   }
 }
 
@@ -87,119 +125,31 @@ async function clearAndStop() {
     // Ignore
   }
 }
+
+async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
+  if (evt.oldIndex === evt.newIndex) return;
+  await store.reorderQueue(evt.oldIndex, evt.newIndex);
+}
 </script>
 
-<style lang="scss" scoped>
-.queue-panel {
-  position: fixed;
-  top: var(--navbar-height);
-  right: -360px;
-  bottom: var(--player-height);
-  width: 360px;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-color);
-  z-index: 90;
-  transition: right var(--transition-normal);
-  display: flex;
-  flex-direction: column;
-
-  &.open {
-    right: 0;
-  }
+<style scoped>
+.queue-backdrop-enter-active,
+.queue-backdrop-leave-active {
+  transition: opacity 0.25s ease;
 }
-
-.queue-header {
-  display: flex;
-  align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.queue-title {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.queue-count {
-  margin-left: 8px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-}
-
-.close-btn {
-  margin-left: auto;
-  font-size: 18px;
-  opacity: 0.6;
-  transition: opacity var(--transition-fast);
-  &:hover { opacity: 1; }
-}
-
-.clear-btn {
-  font-size: 18px;
-  opacity: 0.6;
-  transition: opacity var(--transition-fast);
-  color: var(--text-primary);
-  &:hover { opacity: 1; }
-}
-
-.queue-empty {
-  padding: 40px 20px;
-  text-align: center;
-  color: var(--text-tertiary);
-  font-size: 13px;
-}
-
-.queue-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 12px;
-}
-
-.queue-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border-radius: var(--radius-sm);
-  transition: background var(--transition-fast);
-  cursor: pointer;
-  user-select: none;
-
-  &:hover {
-    background: var(--hover-bg);
-    .remove-btn { opacity: 1; }
-  }
-
-  &.active {
-    background: rgba(51, 94, 234, 0.1);
-  }
-}
-
-.queue-song-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.queue-song-name {
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.queue-song-artist {
-  font-size: 11px;
-  color: var(--text-secondary);
-}
-
-.remove-btn {
-  font-size: 14px;
+.queue-backdrop-enter-from,
+.queue-backdrop-leave-to {
   opacity: 0;
-  padding: 4px;
-  border-radius: var(--radius-sm);
-  transition: opacity var(--transition-fast);
-  color: var(--text-tertiary);
-  &:hover { color: var(--text-primary); }
+}
+
+.queue-item-ghost {
+  opacity: 0.5;
+  background: var(--hover-bg);
+}
+
+.queue-item-drag {
+  opacity: 0.9;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-elevated);
 }
 </style>
