@@ -1,30 +1,5 @@
 import { defineStore } from 'pinia';
-import axios from 'axios';
-import { useAuthStore } from './auth.js';
-import router from '../router/index.js';
-
-// Request interceptor: attach JWT token to all API requests
-axios.interceptors.request.use((config) => {
-  const authStore = useAuthStore();
-  const token = authStore.getToken();
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Response interceptor: on 401, clear token and redirect to login
-axios.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      const authStore = useAuthStore();
-      authStore.logout();
-      router.push({ name: 'login' });
-    }
-    return Promise.reject(error);
-  },
-);
+import { http } from '../utils/http';
 
 export interface Song {
   id: string;
@@ -194,15 +169,15 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async startBotInstance(id: string) {
-      await axios.post(`/api/bot/${id}/start`);
+      await http.post(`/api/bot/${id}/start`);
     },
 
     async stopBotInstance(id: string) {
-      await axios.post(`/api/bot/${id}/stop`);
+      await http.post(`/api/bot/${id}/stop`);
     },
 
     async fetchBots() {
-      const res = await axios.get('/api/bot');
+      const res = await http.get('/api/bot');
       this.bots = res.data.bots;
       if (!this.activeBotId && this.bots.length > 0) {
         this.activeBotId = this.bots[0].id;
@@ -223,7 +198,7 @@ export const usePlayerStore = defineStore('player', {
     async syncElapsed() {
       if (!this.activeBotId || !this.isPlaying) return;
       try {
-        const res = await axios.get(`/api/player/${this.activeBotId}/elapsed`);
+        const res = await http.get(`/api/player/${this.activeBotId}/elapsed`);
         this._setTiming(this.activeBotId, {
           serverElapsed: res.data.elapsed,
           serverSyncTime: Date.now(),
@@ -237,7 +212,7 @@ export const usePlayerStore = defineStore('player', {
     async fetchQueue() {
       if (!this.activeBotId) return;
       try {
-        const res = await axios.get(`/api/player/${this.activeBotId}/queue`);
+        const res = await http.get(`/api/player/${this.activeBotId}/queue`);
         this.queues[this.activeBotId] = res.data.queue ?? [];
       } catch {
         // ignore
@@ -246,10 +221,20 @@ export const usePlayerStore = defineStore('player', {
 
     async fetchQueueForBot(botId: string) {
       try {
-        const res = await axios.get(`/api/player/${botId}/queue`);
+        const res = await http.get(`/api/player/${botId}/queue`);
         this.queues[botId] = res.data.queue ?? [];
       } catch {
         // ignore
+      }
+    },
+
+    async reorderQueue(fromIndex: number, toIndex: number) {
+      if (!this.activeBotId) return;
+      try {
+        await http.post(`/api/player/${this.activeBotId}/queue/reorder`, { fromIndex, toIndex });
+        await this.fetchQueue();
+      } catch (err) {
+        console.error('Queue reorder failed:', err);
       }
     },
 
@@ -265,50 +250,50 @@ export const usePlayerStore = defineStore('player', {
 
     async playAtIndex(index: number) {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/play-at`, { index });
+      await http.post(`/api/player/${this.activeBotId}/play-at`, { index });
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
 
     async play(query: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/play`, { query, platform });
+      await http.post(`/api/player/${this.activeBotId}/play`, { query, platform });
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
 
     async playById(songId: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/play-by-id`, { songId, platform });
+      await http.post(`/api/player/${this.activeBotId}/play-by-id`, { songId, platform });
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
 
     async playSong(song: Song) {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/play-song`, { song });
+      await http.post(`/api/player/${this.activeBotId}/play-song`, { song });
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
 
     async addToQueue(query: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/add`, { query, platform });
+      await http.post(`/api/player/${this.activeBotId}/add`, { query, platform });
     },
 
     async addToQueueById(songId: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/add-by-id`, { songId, platform });
+      await http.post(`/api/player/${this.activeBotId}/add-by-id`, { songId, platform });
     },
 
     async addSong(song: Song) {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/add-song`, { song });
+      await http.post(`/api/player/${this.activeBotId}/add-song`, { song });
     },
 
     async playPlaylist(playlistId: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
+      await http.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
@@ -320,12 +305,12 @@ export const usePlayerStore = defineStore('player', {
         serverElapsed: this.elapsed,
         wasPlaying: false,
       });
-      await axios.post(`/api/player/${this.activeBotId}/pause`);
+      await http.post(`/api/player/${this.activeBotId}/pause`);
     },
 
     async resume() {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/resume`);
+      await http.post(`/api/player/${this.activeBotId}/resume`);
       this._setTiming(this.activeBotId, {
         serverSyncTime: Date.now(),
         wasPlaying: true,
@@ -335,21 +320,21 @@ export const usePlayerStore = defineStore('player', {
 
     async next() {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/next`);
+      await http.post(`/api/player/${this.activeBotId}/next`);
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
 
     async prev() {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/prev`);
+      await http.post(`/api/player/${this.activeBotId}/prev`);
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
     },
 
     async stop() {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/stop`);
+      await http.post(`/api/player/${this.activeBotId}/stop`);
       this._setTiming(this.activeBotId, {
         serverElapsed: 0,
         serverSyncTime: 0,
@@ -359,19 +344,19 @@ export const usePlayerStore = defineStore('player', {
 
     async seek(position: number) {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/seek`, { position });
+      await http.post(`/api/player/${this.activeBotId}/seek`, { position });
       this._setTiming(this.activeBotId, { serverElapsed: position });
       this._syncAfterAction();
     },
 
     async setVolume(volume: number) {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/volume`, { volume });
+      await http.post(`/api/player/${this.activeBotId}/volume`, { volume });
     },
 
     async setMode(mode: string) {
       if (!this.activeBotId) return;
-      await axios.post(`/api/player/${this.activeBotId}/mode`, { mode });
+      await http.post(`/api/player/${this.activeBotId}/mode`, { mode });
     },
 
     async fetchHomeData() {
@@ -380,10 +365,10 @@ export const usePlayerStore = defineStore('player', {
       }
 
       const [playlistRes, dailyRes, userRes, biliRes] = await Promise.allSettled([
-        axios.get('/api/music/recommend/playlists'),
-        axios.get('/api/music/recommend/songs'),
-        axios.get('/api/music/user/playlists'),
-        axios.get('/api/music/bilibili/popular?limit=12'),
+        http.get('/api/music/recommend/playlists'),
+        http.get('/api/music/recommend/songs'),
+        http.get('/api/music/user/playlists'),
+        http.get('/api/music/bilibili/popular?limit=12'),
       ]);
 
       if (playlistRes.status === 'fulfilled') {
@@ -399,7 +384,14 @@ export const usePlayerStore = defineStore('player', {
         this.bilibiliPopular = biliRes.value.data.songs;
       }
 
-      this.lastFetchTime = Date.now();
+      const anySuccess =
+        playlistRes.status === 'fulfilled' ||
+        dailyRes.status === 'fulfilled' ||
+        userRes.status === 'fulfilled' ||
+        biliRes.status === 'fulfilled';
+      if (anySuccess) {
+        this.lastFetchTime = Date.now();
+      }
     },
   },
 });

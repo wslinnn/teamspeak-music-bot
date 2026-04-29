@@ -13,7 +13,9 @@
       "mcp__Claude_Preview__*",
       "mcp__Claude_in_Chrome__*",
       "mcp__scheduled-tasks__*",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__web-reader__webReader"
     ],
     "deny": [
       "Bash(git push * main)",

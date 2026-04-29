@@ -27,7 +27,10 @@
       <div class="player-left" @click="toggleLyrics">
         <CoverArt :url="currentSong.coverUrl" :size="40" />
         <div class="song-info">
-          <div class="song-name">{{ currentSong.name }}</div>
+          <div class="song-name">
+            <PlayingIndicator v-if="store.isPlaying && !store.isPaused" :is-playing="true" class="mr-2 inline-flex" />
+            {{ currentSong.name }}
+          </div>
           <div class="song-artist">
             <span v-if="showBotBadge" class="bot-badge">{{ activeBot?.name }}</span>
             {{ currentSong.artist }}
@@ -36,7 +39,7 @@
       </div>
 
       <div class="player-center">
-        <span class="time-display time-current">{{ formatTime(currentElapsed) }}</span>
+        <span class="time-display time-current hidden sm:inline">{{ formatTime(currentElapsed) }}</span>
         <button class="control-btn" @click="store.prev()">
           <Icon icon="mdi:skip-previous" />
         </button>
@@ -46,27 +49,27 @@
         <button class="control-btn" @click="store.next()">
           <Icon icon="mdi:skip-next" />
         </button>
-        <button class="control-btn mode-btn" @click="cycleMode" :title="modeLabel">
+        <button class="control-btn mode-btn hidden sm:flex" @click="cycleMode" :title="modeLabel">
           <Icon :icon="modeIcon" />
           <span class="mode-label">{{ modeLabel }}</span>
         </button>
-        <span class="time-display time-total">{{ formatTime(currentSong?.duration ?? 0) }}</span>
+        <span class="time-display time-total hidden sm:inline">{{ formatTime(currentSong?.duration ?? 0) }}</span>
       </div>
 
       <div class="player-right">
-        <Icon icon="mdi:volume-high" class="volume-icon" />
+        <Icon icon="mdi:volume-high" class="volume-icon hidden sm:block" />
         <input
           type="range"
           min="0"
           max="100"
           :value="activeBot?.volume ?? 75"
           @change="onVolumeChange"
-          class="volume-slider"
+          class="volume-slider hidden sm:block"
         />
         <button class="control-btn" :class="{ active: showQueue }" @click="showQueue = !showQueue">
           <Icon icon="mdi:playlist-music" />
         </button>
-        <button class="control-btn lyrics-btn" :class="{ active: route.path === '/lyrics' }" @click="toggleLyrics">
+        <button class="control-btn lyrics-btn hidden sm:block" :class="{ active: route.path === '/lyrics' }" @click="toggleLyrics">
           <Icon icon="mdi:microphone" />
         </button>
       </div>
@@ -75,12 +78,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerStore } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
 import Queue from './Queue.vue';
+import PlayingIndicator from './PlayingIndicator.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -121,15 +125,18 @@ function formatTime(seconds: number): string {
 }
 
 function updateProgress() {
-  // Use store.elapsed which interpolates from server ground truth
   currentElapsed.value = store.elapsed;
-
   const duration = currentSong.value?.duration ?? 0;
   progressPercent.value = duration > 0
     ? Math.min((currentElapsed.value / duration) * 100, 100)
     : 0;
 
-  rafId = requestAnimationFrame(updateProgress);
+  // Only schedule next frame if still playing
+  if (store.isPlaying) {
+    rafId = requestAnimationFrame(updateProgress);
+  } else {
+    rafId = null;
+  }
 }
 
 async function onProgressClick(e: MouseEvent) {
@@ -159,6 +166,14 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (rafId !== null) cancelAnimationFrame(rafId);
+});
+
+// Restart/stop rAF when play state changes
+watch(() => store.isPlaying, (playing) => {
+  if (playing && rafId === null) {
+    rafId = requestAnimationFrame(updateProgress);
+  }
+  // When pausing, the next updateProgress tick will stop itself
 });
 
 function togglePlay() {

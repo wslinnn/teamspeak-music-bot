@@ -45,7 +45,7 @@
 import { ref, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
-import axios from 'axios';
+import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import CoverArt from '../components/CoverArt.vue';
 import SongCard from '../components/SongCard.vue';
@@ -79,8 +79,8 @@ onMounted(async () => {
 
   try {
     const [detailRes, songsRes] = await Promise.all([
-      axios.get(`/api/music/playlist/${id}/detail`, { params: { platform } }),
-      axios.get(`/api/music/playlist/${id}`, { params: { platform } }),
+      http.get(`/api/music/playlist/${id}/detail`, { params: { platform } }),
+      http.get(`/api/music/playlist/${id}`, { params: { platform } }),
     ]);
     playlist.value = detailRes.data.playlist;
     songs.value = songsRes.data.songs;

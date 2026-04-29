@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
-import axios from 'axios';
+import { http } from '../utils/http';
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('jwt_token'));
@@ -9,12 +9,16 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!token.value);
 
-  /** Check if auth is enabled on the server */
   async function checkAuthEnabled(): Promise<boolean> {
     try {
-      const res = await axios.get('/api/health');
+      const res = await http.get('/api/health');
       return res.data.authEnabled === true;
-    } catch {
+    } catch (err: unknown) {
+      const status = (err as any)?.response?.status;
+      // Distinguish server unreachable (rethrow) from auth disabled
+      if (!status) {
+        throw err;
+      }
       return false;
     }
   }
@@ -23,7 +27,7 @@ export const useAuthStore = defineStore('auth', () => {
     loading.value = true;
     error.value = null;
     try {
-      const res = await axios.post('/api/auth/login', { password });
+      const res = await http.post('/api/auth/login', { password });
       if (res.data.success) {
         token.value = res.data.token;
         localStorage.setItem('jwt_token', res.data.token);
@@ -32,7 +36,7 @@ export const useAuthStore = defineStore('auth', () => {
       error.value = res.data.error ?? 'Login failed';
       return false;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Login failed';
+      const msg = (err as any)?.response?.data?.error ?? (err instanceof Error ? err.message : 'Login failed');
       error.value = msg;
       return false;
     } finally {

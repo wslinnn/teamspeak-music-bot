@@ -262,3 +262,38 @@ describe("PlayQueue", () => {
     expect(queue.current()?.id).toBe("3");
   });
 });
+
+describe("PlayQueue reorder", () => {
+  it("moves song from front to back", () => {
+    const queue = new PlayQueue();
+    queue.add({ id: "a", name: "A", artist: "", album: "", coverUrl: "", duration: 1, platform: "netease" });
+    queue.add({ id: "b", name: "B", artist: "", album: "", coverUrl: "", duration: 1, platform: "netease" });
+    queue.add({ id: "c", name: "C", artist: "", album: "", coverUrl: "", duration: 1, platform: "netease" });
+    queue.play();
+
+    const ok = queue.reorder(0, 2);
+    expect(ok).toBe(true);
+    expect(queue.list().map((s) => s.name)).toEqual(["B", "C", "A"]);
+    expect(queue.getCurrentIndex()).toBe(2);
+  });
+
+  it("moves song from back to front", () => {
+    const queue = new PlayQueue();
+    queue.add({ id: "a", name: "A", artist: "", album: "", coverUrl: "", duration: 1, platform: "netease" });
+    queue.add({ id: "b", name: "B", artist: "", album: "", coverUrl: "", duration: 1, platform: "netease" });
+    queue.add({ id: "c", name: "C", artist: "", album: "", coverUrl: "", duration: 1, platform: "netease" });
+    queue.playAt(1);
+
+    const ok = queue.reorder(2, 0);
+    expect(ok).toBe(true);
+    expect(queue.list().map((s) => s.name)).toEqual(["C", "A", "B"]);
+    expect(queue.getCurrentIndex()).toBe(2);
+  });
+
+  it("rejects out-of-range indices", () => {
+    const queue = new PlayQueue();
+    queue.add({ id: "a", name: "A", artist: "", album: "", coverUrl: "", duration: 1, platform: "netease" });
+    expect(queue.reorder(0, 5)).toBe(false);
+    expect(queue.reorder(-1, 0)).toBe(false);
+  });
+});

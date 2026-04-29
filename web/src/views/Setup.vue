@@ -75,7 +75,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import axios from 'axios';
+import { http } from '../utils/http';
 
 const currentStep = ref(0);
 const stepLabels = ['欢迎', 'TS 服务器', '音乐账号', '完成'];
@@ -90,7 +90,7 @@ const defaultChannel = ref('');
 
 async function createBotAndNext() {
   try {
-    await axios.post('/api/bot', {
+    await http.post('/api/bot', {
       name: `Bot - ${serverAddress.value}`,
       serverAddress: serverAddress.value,
       serverPort: serverPort.value,

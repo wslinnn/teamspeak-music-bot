@@ -330,6 +330,8 @@ export class BotInstance extends EventEmitter {
         return this.cmdClear();
       case "remove":
         return this.cmdRemove(cmd);
+      case "reorder":
+        return this.cmdReorder(cmd);
       case "mode":
         return this.cmdMode(cmd);
       case "playlist":
@@ -547,6 +549,18 @@ export class BotInstance extends EventEmitter {
     return `Removed: ${removed.name}`;
   }
 
+  private cmdReorder(cmd: ParsedCommand): string {
+    if (!cmd.args) return "Usage: !reorder <from> <to>";
+    const parts = cmd.args.trim().split(/\s+/);
+    if (parts.length !== 2) return "Usage: !reorder <from> <to>";
+    const fromIndex = parseInt(parts[0], 10) - 1;
+    const toIndex = parseInt(parts[1], 10) - 1;
+    if (isNaN(fromIndex) || isNaN(toIndex)) return "Usage: !reorder <from> <to>";
+    const ok = this.queue.reorder(fromIndex, toIndex);
+    if (!ok) return "Invalid reorder positions";
+    return `Reordered: position ${fromIndex + 1} → ${toIndex + 1}`;
+  }
+
   private cmdMode(cmd: ParsedCommand): string {
     const modeMap: Record<string, PlayMode> = {
       seq: PlayMode.Sequential,
@@ -668,6 +682,8 @@ export class BotInstance extends EventEmitter {
       `${p}stop         — Stop and clear queue`,
       `${p}vol <0-100>  — Set volume`,
       `${p}queue        — Show queue`,
+      `${p}remove <num>  — Remove queue item`,
+      `${p}reorder <from> <to> — Move queue item`,
       `${p}mode <seq|loop|random|rloop> — Play mode`,
       `${p}playlist <id> — Load playlist`,
       `${p}album <id>   — Load album`,

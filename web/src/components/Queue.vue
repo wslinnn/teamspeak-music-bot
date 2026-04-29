@@ -13,22 +13,34 @@
     </div>
 
     <div v-else class="queue-list">
-      <div
-        v-for="(song, i) in botQueue"
-        :key="`${song.id}-${i}`"
-        class="queue-item"
-        :class="{ active: store.currentSong?.id === song.id }"
-        @dblclick="playAtIndex(i)"
+      <draggable
+        :model-value="botQueue"
+        item-key="id"
+        handle=".drag-handle"
+        ghost-class="queue-item-ghost"
+        drag-class="queue-item-drag"
+        @end="onDragEnd"
       >
-        <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
-        <div class="queue-song-info">
-          <div class="queue-song-name">{{ song.name }}</div>
-          <div class="queue-song-artist">{{ song.artist }}</div>
-        </div>
-        <button class="remove-btn" @click="removeSong(i)" title="移除">
-          <Icon icon="mdi:close" />
-        </button>
-      </div>
+        <template #item="{ element: song, index: i }">
+          <div
+            class="queue-item"
+            :class="{ active: store.currentSong?.id === song.id }"
+            @dblclick="playAtIndex(i)"
+          >
+            <span class="drag-handle cursor-grab text-foreground-subtle opacity-0 transition-opacity hover:opacity-100">
+              <Icon icon="mdi:drag-vertical" />
+            </span>
+            <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
+            <div class="queue-song-info">
+              <div class="queue-song-name">{{ song.name }}</div>
+              <div class="queue-song-artist">{{ song.artist }}</div>
+            </div>
+            <button class="remove-btn" @click="removeSong(i)" title="移除">
+              <Icon icon="mdi:close" />
+            </button>
+          </div>
+        </template>
+      </draggable>
     </div>
   </div>
 </template>
@@ -36,7 +48,8 @@
 <script setup lang="ts">
 import { watch, computed } from 'vue';
 import { Icon } from '@iconify/vue';
-import axios from 'axios';
+import draggable from 'vuedraggable';
+import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
 
@@ -64,11 +77,16 @@ async function playAtIndex(index: number) {
 async function removeSong(index: number) {
   if (!store.activeBotId) return;
   try {
-    await axios.delete(`/api/player/${store.activeBotId}/queue/${index + 1}`);
+    await http.delete(`/api/player/${store.activeBotId}/queue/${index + 1}`);
     await store.fetchQueue();
   } catch {
     // Ignore
   }
+}
+
+async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
+  if (evt.oldIndex === evt.newIndex) return;
+  await store.reorderQueue(evt.oldIndex, evt.newIndex);
 }
 </script>
 
@@ -133,7 +151,7 @@ async function removeSong(index: number) {
 .queue-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px;
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast);
@@ -143,11 +161,23 @@ async function removeSong(index: number) {
   &:hover {
     background: var(--hover-bg);
     .remove-btn { opacity: 1; }
+    .drag-handle { opacity: 0.5 !important; }
   }
 
   &.active {
     background: rgba(51, 94, 234, 0.1);
   }
+}
+
+.queue-item-ghost {
+  opacity: 0.5;
+  background: var(--hover-bg);
+}
+
+.queue-item-drag {
+  opacity: 0.9;
+  background: var(--bg-card);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .queue-song-info {
@@ -176,5 +206,11 @@ async function removeSong(index: number) {
   transition: opacity var(--transition-fast);
   color: var(--text-tertiary);
   &:hover { color: var(--text-primary); }
+}
+
+.drag-handle {
+  font-size: 16px;
+  padding: 2px;
+  flex-shrink: 0;
 }
 </style>

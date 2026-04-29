@@ -1,22 +1,23 @@
 <template>
-  <div class="login-page">
-    <div class="login-card">
-      <h1 class="login-title">TSMusicBot</h1>
-      <p class="login-subtitle">请输入管理密码</p>
-      <form @submit.prevent="handleLogin">
+  <div class="flex min-h-screen items-center justify-center bg-surface">
+    <div class="w-full max-w-[400px] rounded-xl bg-surface-elevated p-10 shadow-xl">
+      <h1 class="mb-2 text-center text-[28px] font-bold text-foreground">TSMusicBot</h1>
+      <p class="mb-8 text-center text-sm text-foreground-muted">请输入管理密码</p>
+      <form @submit.prevent="handleLogin" class="flex flex-col gap-4">
         <input
           v-model="password"
           type="password"
-          class="login-input"
+          aria-label="管理密码"
+          class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
           placeholder="管理密码"
           autocomplete="current-password"
           :disabled="authStore.loading"
           autofocus
         />
-        <p v-if="authStore.error" class="login-error">{{ authStore.error }}</p>
-        <button type="submit" class="login-btn" :disabled="authStore.loading || !password">
-          {{ authStore.loading ? '登录中...' : '登录' }}
-        </button>
+        <p v-if="authStore.error" role="alert" class="text-sm text-danger">{{ authStore.error }}</p>
+        <BaseButton type="submit" :loading="authStore.loading" :disabled="!password" class="w-full">
+          登录
+        </BaseButton>
       </form>
     </div>
   </div>
@@ -25,7 +26,8 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { useAuthStore } from '../stores/auth.js';
+import { useAuthStore } from '../stores/auth';
+import BaseButton from '../components/common/BaseButton.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -39,87 +41,3 @@ async function handleLogin() {
   }
 }
 </script>
-
-<style scoped lang="scss">
-.login-page {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  background: var(--bg-primary);
-}
-
-.login-card {
-  background: var(--bg-secondary);
-  border-radius: 12px;
-  padding: 48px 40px;
-  width: 100%;
-  max-width: 400px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
-}
-
-.login-title {
-  text-align: center;
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0 0 8px;
-}
-
-.login-subtitle {
-  text-align: center;
-  color: var(--text-secondary);
-  margin: 0 0 32px;
-  font-size: 14px;
-}
-
-.login-input {
-  width: 100%;
-  padding: 12px 16px;
-  border: 1px solid var(--border-color, #444);
-  border-radius: 8px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 16px;
-  box-sizing: border-box;
-  outline: none;
-  transition: border-color 0.2s;
-
-  &:focus {
-    border-color: var(--accent, #6366f1);
-  }
-
-  &:disabled {
-    opacity: 0.6;
-  }
-}
-
-.login-error {
-  color: #ef4444;
-  font-size: 13px;
-  margin: 8px 0 0;
-}
-
-.login-btn {
-  width: 100%;
-  padding: 12px;
-  margin-top: 20px;
-  background: var(--accent, #6366f1);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
-
-  &:hover:not(:disabled) {
-    opacity: 0.9;
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-}
-</style>
