@@ -2,7 +2,7 @@
   <div class="fixed bottom-0 left-0 right-0 z-[100]" v-if="currentSong">
     <Queue :open="showQueue" @close="showQueue = false" />
 
-    <div class="h-[var(--player-height)] flex items-center px-6 border-t border-border-color relative frosted-glass">
+    <div class="h-[var(--player-height)] flex items-center px-6 relative frosted-glass">
       <!-- Progress bar -->
       <div
         class="absolute -top-1.5 left-0 right-0 h-3 cursor-pointer z-[101] flex items-center px-0"
@@ -40,16 +40,16 @@
 
       <div class="flex-1 flex justify-center items-center gap-5">
         <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-right hidden sm:inline">{{ formatTime(currentElapsed) }}</span>
-        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.prev()">
+        <button aria-label="上一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.prev()">
           <Icon icon="mdi:skip-previous" />
         </button>
-        <button class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-lg text-white transition-transform duration-[var(--transition-fast)] hover:scale-[1.08] active:scale-95" @click="togglePlay">
+        <button :aria-label="store.isPlaying ? '暂停' : '播放'" class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-lg text-white transition-transform duration-[var(--transition-fast)] hover:scale-[1.08] active:scale-95" @click="togglePlay">
           <Icon :icon="store.isPlaying ? 'mdi:pause' : 'mdi:play'" />
         </button>
-        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.next()">
+        <button aria-label="下一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.next()">
           <Icon icon="mdi:skip-next" />
         </button>
-        <button class="hidden sm:flex items-center gap-1 text-lg opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="cycleMode" :title="modeLabel">
+        <button :aria-label="`播放模式: ${modeLabel}`" class="hidden sm:flex items-center gap-1 text-lg opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="cycleMode" :title="modeLabel">
           <Icon :icon="modeIcon" />
           <span class="text-[11px] font-medium">{{ modeLabel }}</span>
         </button>
@@ -64,13 +64,10 @@
           max="100"
           :value="activeBot?.volume ?? 75"
           @change="onVolumeChange"
-          class="hidden sm:block w-20 h-[3px] appearance-none bg-border-color rounded-sm outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+          class="volume-slider hidden sm:block"
         />
         <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" :class="{ 'opacity-100 text-primary': showQueue }" @click="showQueue = !showQueue">
           <Icon icon="mdi:playlist-music" />
-        </button>
-        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 ml-2 hidden sm:block" :class="{ 'opacity-100 text-primary': route.path === '/lyrics' }" @click="toggleLyrics">
-          <Icon icon="mdi:microphone" />
         </button>
       </div>
     </div>
@@ -207,3 +204,22 @@ function cycleMode() {
   store.setMode(next);
 }
 </script>
+
+<style scoped>
+.volume-slider {
+  width: 5rem;
+  height: 3px;
+  appearance: none;
+  background: var(--hover-bg);
+  border-radius: 4px;
+  outline: none;
+}
+.volume-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--color-primary);
+  border-radius: 50%;
+  cursor: pointer;
+}
+</style>

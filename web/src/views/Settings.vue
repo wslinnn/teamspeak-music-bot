@@ -160,14 +160,20 @@ async function setQuality(q: string) {
   }
 }
 
-async function savePrefix() {
-  toast.info('命令前缀设置客户端存储');
+async function savePrefix(prefix: string) {
+  try {
+    await http.post('/api/bot/settings', { commandPrefix: prefix });
+    toast.success('命令前缀已保存');
+  } catch {
+    toast.error('保存命令前缀失败');
+  }
 }
 
 async function loadIdleTimeout() {
   try {
     const res = await http.get('/api/bot/settings');
     idleTimeout.value = res.data.idleTimeoutMinutes ?? 0;
+    commandPrefix.value = res.data.commandPrefix ?? '!';
   } catch (err) {
     console.debug('loadIdleTimeout failed:', err);
   }
@@ -338,17 +344,3 @@ onUnmounted(() => {
 });
 </script>
 
-<style scoped>
-.input {
-  width: 100%;
-  padding: 10px 14px;
-  background: var(--hover-bg);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: 13px;
-  outline: none;
-}
-.input:focus { border-color: var(--color-primary); }
-</style>

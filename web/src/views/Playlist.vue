@@ -37,7 +37,11 @@
       </div>
     </template>
 
-    <div v-else class="text-center py-[60px] text-text-secondary">歌单不存在或加载失败</div>
+    <div v-else class="text-center py-[60px]">
+      <Icon icon="mdi:playlist-remove" class="text-4xl text-text-tertiary mb-3" />
+      <p class="text-text-secondary text-sm">歌单不存在或加载失败</p>
+      <button class="mt-4 px-5 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-primary text-white cursor-pointer transition-colors hover:brightness-110" @click="retryLoad">重试</button>
+    </div>
   </div>
 </template>
 
@@ -73,10 +77,10 @@ async function playAll() {
   await store.playPlaylist(id, platform);
 }
 
-onMounted(async () => {
+async function loadPlaylist() {
   const id = route.params.id as string;
   const platform = (route.query.platform as string) || 'netease';
-
+  loading.value = true;
   try {
     const [detailRes, songsRes] = await Promise.all([
       http.get(`/api/music/playlist/${id}/detail`, { params: { platform } }),
@@ -91,5 +95,13 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+}
+
+function retryLoad() {
+  loadPlaylist();
+}
+
+onMounted(() => {
+  loadPlaylist();
 });
 </script>

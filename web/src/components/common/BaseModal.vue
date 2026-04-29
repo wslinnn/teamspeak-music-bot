@@ -3,7 +3,7 @@
     <Transition name="modal">
       <div v-if="modelValue" class="fixed inset-0 z-[200] flex items-center justify-center p-4">
         <div
-          class="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          class="absolute inset-0 bg-black/50"
           @click="close"
         />
         <div
@@ -12,7 +12,8 @@
           aria-modal="true"
           :aria-labelledby="title ? 'modal-title' : undefined"
           tabindex="-1"
-          class="relative w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-xl bg-surface-elevated p-6 shadow-xl"
+          class="relative w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-xl p-6"
+          :style="{ background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-elevated)' }"
           @click.stop
         >
           <div v-if="title" class="mb-5">

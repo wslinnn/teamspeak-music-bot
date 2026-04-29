@@ -1,12 +1,23 @@
 <template>
-  <div
-    class="fixed top-[var(--navbar-height)] right-[-360px] bottom-[var(--player-height)] w-[360px] bg-bg-secondary border-l border-border-color z-[90] transition-[right] duration-[var(--transition-normal)] flex flex-col"
-    :class="{ 'right-0': open }"
-  >
-    <div class="flex items-center px-5 py-4 border-b border-border-color">
-      <h3 class="text-base font-bold">播放队列</h3>
-      <span class="ml-2 text-xs text-text-tertiary">{{ botQueue.length }} 首</span>
-      <button class="ml-auto text-lg opacity-60 transition-opacity hover:opacity-100" @click="$emit('close')">
+  <Teleport to="body">
+    <Transition name="queue-backdrop">
+      <div
+        v-if="open"
+        class="fixed inset-0 z-[110] bg-black/40"
+        @click="$emit('close')"
+      />
+    </Transition>
+    <div
+      class="fixed top-0 bottom-0 right-0 w-[min(360px,85vw)] z-[111] transition-transform duration-[var(--transition-normal)] flex flex-col"
+      :style="{ background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-elevated)' }"
+      :class="open ? 'translate-x-0' : 'translate-x-full'"
+    >
+      <div class="flex items-center justify-between px-5 py-4" :style="{ marginTop: 'var(--navbar-height)' }">
+      <div class="flex items-center">
+        <h3 class="text-base font-bold">播放队列</h3>
+        <span class="ml-2 text-xs text-text-tertiary">{{ botQueue.length }} 首</span>
+      </div>
+      <button class="text-lg opacity-60 transition-opacity hover:opacity-100" @click="$emit('close')">
         <Icon icon="mdi:close" />
       </button>
     </div>
@@ -15,7 +26,7 @@
       队列为空
     </div>
 
-    <div v-else class="flex-1 overflow-y-auto py-2 px-3">
+    <div v-else class="flex-1 overflow-y-auto py-2 px-3" :style="{ paddingBottom: 'var(--player-height)' }">
       <draggable
         :model-value="botQueue"
         item-key="id"
@@ -52,7 +63,8 @@
         </template>
       </draggable>
     </div>
-  </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -102,6 +114,15 @@ async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
 </script>
 
 <style scoped>
+.queue-backdrop-enter-active,
+.queue-backdrop-leave-active {
+  transition: opacity 0.25s ease;
+}
+.queue-backdrop-enter-from,
+.queue-backdrop-leave-to {
+  opacity: 0;
+}
+
 .queue-item-ghost {
   opacity: 0.5;
   background: var(--hover-bg);
@@ -109,7 +130,7 @@ async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
 
 .queue-item-drag {
   opacity: 0.9;
-  background: var(--bg-card);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-elevated);
 }
 </style>

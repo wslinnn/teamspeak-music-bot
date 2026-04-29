@@ -6,21 +6,20 @@
       返回
     </button>
 
-    <div v-if="currentSong" class="relative z-[1] flex gap-[60px] max-w-[1000px] w-full px-10 h-[80vh]">
-      <div class="flex flex-col items-center gap-6 shrink-0">
-        <CoverArt :url="currentSong.coverUrl" :size="280" :radius="14" :show-shadow="true" />
+    <div v-if="currentSong" class="relative z-[1] flex flex-col items-center gap-6 lg:flex-row lg:gap-[60px] max-w-[1000px] w-full px-6 sm:px-10 h-[80vh]">
+      <div class="flex flex-col items-center gap-4 shrink-0">
+        <CoverArt :url="currentSong.coverUrl" :size="180" :radius="14" :show-shadow="true" class="sm:!w-[240px] sm:!h-[240px] lg:!w-[280px] lg:!h-[280px]" />
         <div class="text-center">
           <div class="text-xl font-bold text-white mb-1">{{ currentSong.name }}</div>
           <div class="text-sm text-white/60">{{ currentSong.artist }}</div>
         </div>
       </div>
 
-      <div class="flex-1 overflow-hidden relative" style="mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%); -webkit-mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);">
+      <div class="flex-1 overflow-hidden relative w-full lg:w-auto" style="mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%); -webkit-mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);">
         <div v-if="loading" class="text-white/50 text-sm text-center py-[60px]">加载歌词中...</div>
         <div v-else-if="lines.length === 0" class="text-white/50 text-sm text-center py-[60px]">暂无歌词</div>
-        <div v-else class="h-full overflow-hidden relative" ref="scrollContainer">
-          <div :style="{ transform: `translateY(${scrollOffset}px)`, transition: 'transform 0.6s cubic-bezier(0.25, 0.1, 0.25, 1)' }" style="will-change: transform;">
-            <div class="h-[40%]" />
+        <div v-else class="h-full overflow-y-auto relative scroll-smooth py-[30vh]" ref="scrollContainer">
+          <div>
             <div
               v-for="(line, i) in lines"
               :key="i"
@@ -32,7 +31,6 @@
               <div class="text-lg leading-relaxed transition-all duration-[400ms]" :class="i === activeLine ? 'text-[22px] font-semibold text-white' : 'text-white/30'">{{ line.text }}</div>
               <div v-if="line.translation" class="text-sm leading-snug text-white/15 mt-0.5 transition-all duration-[400ms]" :class="i === activeLine ? 'text-white/50' : ''">{{ line.translation }}</div>
             </div>
-            <div class="h-[40%]" />
           </div>
         </div>
       </div>
@@ -75,8 +73,9 @@ const activeLine = ref(-1);
 const loading = ref(false);
 const scrollContainer = ref<HTMLElement | null>(null);
 const lineRefs = ref<Record<number, HTMLElement>>({});
-const scrollOffset = ref(0);
 let syncTimer: ReturnType<typeof setInterval> | null = null;
+let userScrolling = false;
+let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const bgStyle = computed(() => {
   if (currentSong.value?.coverUrl) {
@@ -122,6 +121,7 @@ function findActiveLine(elapsed: number): number {
 }
 
 function scrollToActiveLine(idx: number) {
+  if (userScrolling) return;
   const el = lineRefs.value[idx];
   const container = scrollContainer.value;
   if (!el || !container) return;
@@ -129,8 +129,8 @@ function scrollToActiveLine(idx: number) {
   const containerHeight = container.clientHeight;
   const lineTop = el.offsetTop;
   const lineHeight = el.offsetHeight;
-  const targetOffset = -(lineTop - containerHeight / 2 + lineHeight / 2);
-  scrollOffset.value = targetOffset;
+  const targetScrollTop = lineTop - containerHeight / 2 + lineHeight / 2;
+  container.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
 }
 
 function syncLyrics() {
@@ -143,7 +143,11 @@ function syncLyrics() {
   }
 }
 
-function seekToLine(index: number) {
+async function seekToLine(index: number) {
+  const time = lines.value[index]?.time;
+  if (time !== undefined) {
+    await store.seek(time);
+  }
   activeLine.value = index;
   scrollToActiveLine(index);
 }
@@ -160,6 +164,14 @@ function stopSync() {
   }
 }
 
+function onScroll() {
+  userScrolling = true;
+  if (scrollTimeout) clearTimeout(scrollTimeout);
+  scrollTimeout = setTimeout(() => {
+    userScrolling = false;
+  }, 3000);
+}
+
 watch(currentSong, () => {
   fetchLyrics();
   lineRefs.value = {};
@@ -173,9 +185,12 @@ watch(() => store.isPlaying, (playing) => {
 onMounted(() => {
   if (currentSong.value) fetchLyrics();
   if (store.isPlaying) startSync();
+  scrollContainer.value?.addEventListener('scroll', onScroll, { passive: true });
 });
 
 onUnmounted(() => {
   stopSync();
+  scrollContainer.value?.removeEventListener('scroll', onScroll);
+  if (scrollTimeout) clearTimeout(scrollTimeout);
 });
 </script>

@@ -15,7 +15,8 @@ import { createAuthRouterWithConfig } from "./api/auth.js";
 import { createFavoritesRouter } from "./api/favorites.js";
 import { setupWebSocket } from "./websocket.js";
 import { deriveSecret, verifyToken } from "../auth/jwt.js";
-import { createRequireAuth, createRequireAdmin } from "../auth/middleware.js";
+import { createRequireAdmin } from "../auth/middleware.js";
+import { saveConfig } from "../data/config.js";
 
 export interface WebServerOptions {
   port: number;
@@ -47,12 +48,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   app.use(express.json());
 
-  const authEnabled = !!(
-    options.config.adminPassword ||
-    options.config.users.length > 0
-  );
+  const authEnabled = !!options.config.adminPassword;
   const jwtSecret = deriveSecret(options.config.adminPassword);
-  const requireAuth = createRequireAuth(jwtSecret);
   const requireAdmin = createRequireAdmin(jwtSecret);
 
   app.get("/api/config/public-url", (_req, res) => {
@@ -65,7 +62,31 @@ export function createWebServer(options: WebServerOptions): WebServer {
       status: "ok",
       version: "0.1.0",
       authEnabled,
+      needsSetup: !options.config.adminPassword,
     });
+  });
+
+  // Setup endpoint: set admin password on first run
+  app.post("/api/setup", (req, res) => {
+    if (options.config.adminPassword) {
+      res.status(403).json({ success: false, error: "Setup already completed" });
+      return;
+    }
+    const { password } = req.body;
+    if (!password || typeof password !== "string" || password.trim().length === 0) {
+      res.status(400).json({ success: false, error: "Password is required" });
+      return;
+    }
+    options.config.adminPassword = password;
+    try {
+      saveConfig(options.configPath, options.config);
+    } catch (err) {
+      logger.error({ err }, "Failed to save config during setup");
+      res.status(500).json({ success: false, error: "Failed to save configuration" });
+      return;
+    }
+    logger.info("Admin password set via setup");
+    res.json({ success: true });
   });
 
   // Global auth middleware for all /api/* except whitelist
@@ -73,12 +94,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
     "/api/auth/login",
     "/api/config/public-url",
     "/api/health",
+    "/api/setup",
   ]);
   app.use((req, res, next) => {
     if (!req.path.startsWith("/api")) return next();
     if (AUTH_WHITELIST.has(req.path)) return next();
     if (!authEnabled) return next();
-    requireAuth(req, res, next);
+    // Only enforce auth on admin-only routes; regular API endpoints are open
+    next();
   });
 
   app.use(
@@ -123,7 +146,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       options.config,
       jwtSecret,
       options.config.jwtExpiresIn,
-      options.cookieStore
+      options.cookieStore,
+      requireAdmin
     )
   );
 

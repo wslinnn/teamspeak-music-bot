@@ -16,10 +16,9 @@ export function deriveSecret(adminPassword: string): string {
 export function signToken(
   role: "admin" | "user",
   secret: string,
-  expiresIn: string = "24h",
-  username?: string
+  expiresIn: string = "7d",
 ): string {
-  return jwt.sign({ role, sub: username ?? role }, secret, { expiresIn } as SignOptions);
+  return jwt.sign({ role, sub: role }, secret, { expiresIn } as SignOptions);
 }
 
 export function verifyToken(token: string, secret: string): JwtPayload | null {

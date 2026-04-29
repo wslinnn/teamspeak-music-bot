@@ -1,5 +1,9 @@
 <template>
-  <div class="cover-art" :style="{ width: size + 'px', height: size + 'px', borderRadius: radius + 'px' }">
+  <div
+    class="cover-art"
+    :class="{ 'cover-fill': fill }"
+    :style="fill ? { borderRadius: radius + 'px' } : { width: size + 'px', height: size + 'px', borderRadius: radius + 'px' }"
+  >
     <img
       v-if="url && !errored"
       :src="url"
@@ -42,10 +46,12 @@ const props = withDefaults(defineProps<{
   size?: number;
   radius?: number;
   showShadow?: boolean;
+  fill?: boolean;
 }>(), {
   size: 48,
   radius: 8,
   showShadow: false,
+  fill: false,
 });
 
 const loaded = ref(false);
@@ -115,6 +121,10 @@ function onImageError() {
   flex-shrink: 0;
   overflow: hidden;
   background: var(--bg-card);
+}
+.cover-art.cover-fill {
+  width: 100%;
+  height: 100%;
 }
 
 .cover-img {

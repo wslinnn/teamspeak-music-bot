@@ -1,12 +1,16 @@
 <template>
   <div class="favorites-page">
-    <h1 class="page-title">我的收藏</h1>
+    <button class="mb-4 flex items-center gap-1.5 text-sm text-foreground-muted opacity-70 transition-opacity hover:opacity-100" @click="$router.back()">
+      <Icon icon="mdi:arrow-left" />
+      返回
+    </button>
+    <h1 class="text-[28px] font-extrabold mb-6">我的收藏</h1>
 
     <SkeletonLoader v-if="store.loading" />
 
     <EmptyState v-else-if="store.favorites.length === 0" message="暂无收藏歌曲" />
 
-    <div v-else class="favorites-list">
+    <div v-else class="flex flex-col gap-0.5">
       <SongCard
         v-for="(item, i) in store.favorites"
         :key="item.id"
@@ -22,6 +26,7 @@
 
 <script setup lang="ts">
 import { onMounted } from 'vue';
+import { Icon } from '@iconify/vue';
 import { useFavoritesStore, type Favorite } from '../stores/favorites';
 import { usePlayerStore, type Song } from '../stores/player';
 import type { Platform } from '../utils/platform';
@@ -56,17 +61,3 @@ onMounted(() => {
   store.fetchFavorites();
 });
 </script>
-
-<style scoped>
-.page-title {
-  font-size: 28px;
-  font-weight: 800;
-  margin-bottom: 24px;
-}
-
-.favorites-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-</style>

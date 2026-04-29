@@ -1,6 +1,6 @@
 <template>
   <div
-    class="flex items-center gap-3 px-3 py-2 rounded-[var(--radius-md)] transition-colors cursor-pointer hover:bg-hover-bg"
+    class="group flex items-center gap-3 px-3 py-2 rounded-[var(--radius-md)] transition-colors cursor-pointer hover:bg-hover-bg"
     :class="{ 'bg-[rgba(51,94,234,0.1)]': active }"
     @dblclick="$emit('play')"
   >
@@ -18,7 +18,7 @@
     </div>
     <div class="w-40 text-xs text-text-secondary truncate hidden md:block">{{ song.album }}</div>
     <div class="w-12 text-xs text-text-tertiary text-right hidden sm:block">{{ formatDuration(song.duration) }}</div>
-    <div class="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 sm:opacity-0">
+    <div class="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
       <FavoriteButton
         :song-id="song.id"
         :platform="song.platform"

@@ -23,6 +23,7 @@ const router = createRouter({
       path: '/lyrics',
       name: 'lyrics',
       component: () => import('../views/Lyrics.vue'),
+      meta: { hideNavbar: true },
     },
     {
       path: '/history',
@@ -66,6 +67,12 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore();
 
+  // 404 始终放行
+  if (to.name === 'not-found') {
+    return next();
+  }
+
+  // 首次加载时检查后端状态
   if (authStore.authEnabled === null) {
     try {
       await authStore.checkAuthEnabled();
@@ -75,18 +82,22 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
-  if (!authStore.authEnabled) {
-    return next();
+  // 需要初始化 → 引导到 /setup
+  if (authStore.needsSetup) {
+    return to.path === '/setup' ? next() : next({ path: '/setup' });
   }
 
+  // 已初始化 → 不允许再访问 /setup
+  if (to.path === '/setup') {
+    return next({ path: '/' });
+  }
+
+  // 已登录用户访问 /login → 重定向首页
   if (to.path === '/login') {
-    return next();
+    return authStore.isAuthenticated ? next({ path: '/' }) : next();
   }
 
-  if (!authStore.isAuthenticated) {
-    return next({ path: '/login', query: { redirect: to.fullPath } });
-  }
-
+  // 管理员专属页
   if (to.meta.requiresAdmin && !authStore.isAdmin) {
     return next({ path: '/' });
   }

@@ -27,9 +27,11 @@ export function createAuthRouterWithConfig(
   config?: BotConfig,
   jwtSecret?: string,
   jwtExpiresIn?: string,
-  cookieStore?: CookieStore
+  cookieStore?: CookieStore,
+  adminOnly?: (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => void,
 ): Router {
   const router = Router();
+  const requireAdmin = adminOnly ?? ((_req, _res, next) => next());
   // YouTube is auth-less; we only use this instance so /auth/status can
   // report whether yt-dlp is actually installed (loggedIn=false otherwise).
   const youtubeProvider: MusicProvider = new YouTubeProvider();
@@ -40,7 +42,7 @@ export function createAuthRouterWithConfig(
     return platform === "qq" ? qqProvider : neteaseProvider;
   }
 
-  router.get("/status", async (req, res) => {
+  router.get("/status", requireAdmin, async (req, res) => {
     try {
       const platform = req.query.platform as string;
       const provider = getProvider(platform);
@@ -53,7 +55,7 @@ export function createAuthRouterWithConfig(
     }
   });
 
-  router.post("/qrcode", async (req, res) => {
+  router.post("/qrcode", requireAdmin, async (req, res) => {
     try {
       const { platform } = req.body;
       const provider = getProvider(platform);
@@ -66,7 +68,7 @@ export function createAuthRouterWithConfig(
     }
   });
 
-  router.get("/qrcode/status", async (req, res) => {
+  router.get("/qrcode/status", requireAdmin, async (req, res) => {
     try {
       const { key, platform } = req.query;
       if (!key) {
@@ -95,7 +97,7 @@ export function createAuthRouterWithConfig(
     }
   });
 
-  router.post("/sms/send", async (req, res) => {
+  router.post("/sms/send", requireAdmin, async (req, res) => {
     try {
       const { phone } = req.body;
       if (!phone) {
@@ -115,7 +117,7 @@ export function createAuthRouterWithConfig(
     }
   });
 
-  router.post("/sms/verify", async (req, res) => {
+  router.post("/sms/verify", requireAdmin, async (req, res) => {
     try {
       const { phone, code } = req.body;
       if (!phone || !code) {
@@ -136,7 +138,7 @@ export function createAuthRouterWithConfig(
     }
   });
 
-  router.post("/cookie", (req, res) => {
+  router.post("/cookie", requireAdmin, (req, res) => {
     const { platform, cookie } = req.body;
     if (!cookie) {
       res.status(400).json({ success: false, error: "cookie is required" });
@@ -172,25 +174,10 @@ export function createAuthRouterWithConfig(
       }
       next();
     }, (req, res) => {
-      const { username, password } = req.body;
+      const { password } = req.body;
 
-      // Legacy single-admin mode (password only)
-      if (
-        !username &&
-        password === config.adminPassword &&
-        config.adminPassword
-      ) {
-        const token = signToken("admin", jwtSecret, jwtExpiresIn, "admin");
-        res.json({ success: true, token, expiresIn: jwtExpiresIn });
-        return;
-      }
-
-      // User array mode
-      const user = config.users.find(
-        (u) => u.username === username && u.password === password
-      );
-      if (user) {
-        const token = signToken(user.role, jwtSecret, jwtExpiresIn, user.username);
+      if (password && password === config.adminPassword) {
+        const token = signToken("admin", jwtSecret, jwtExpiresIn);
         res.json({ success: true, token, expiresIn: jwtExpiresIn });
         return;
       }

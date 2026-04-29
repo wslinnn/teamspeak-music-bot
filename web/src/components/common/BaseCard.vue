@@ -1,7 +1,6 @@
 <template>
   <div
-    class="rounded-xl bg-surface-card transition-shadow duration-200"
-    :class="{ 'hover:shadow-lg': hoverable }"
+    class="rounded-xl bg-surface-card"
   >
     <slot />
   </div>

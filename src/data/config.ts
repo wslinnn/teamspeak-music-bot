@@ -56,8 +56,7 @@ export interface BotConfig {
   // (nginx/Caddy/Cloudflare). Required for correct protocol/host detection
   // behind HTTPS-terminating proxies.
   trustProxy: boolean;
-  users: Array<{ username: string; password: string; role: "admin" | "user" }>;
-  /** JWT token expiration time (e.g. "24h", "7d"). Default: "24h" */
+  /** JWT token expiration time (e.g. "24h", "7d"). Default: "7d" */
   jwtExpiresIn: string;
 }
 
@@ -77,8 +76,7 @@ export function getDefaultConfig(): BotConfig {
     idleTimeoutMinutes: 0,
     publicUrl: "",
     trustProxy: false,
-    users: [],
-    jwtExpiresIn: "24h",
+    jwtExpiresIn: "7d",
   };
 }
 

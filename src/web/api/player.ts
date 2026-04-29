@@ -103,7 +103,7 @@ export function createPlayerRouter(
   router.post("/:botId/stop", adminOnly ?? noOp, simpleCommand("!stop"));
   router.post("/:botId/clear", adminOnly ?? noOp, simpleCommand("!clear"));
 
-  router.post("/:botId/volume", adminOnly ?? noOp, async (req, res) => {
+  router.post("/:botId/volume", async (req, res) => {
     try {
       const bot = req.bot!;
       const { volume } = req.body;
@@ -131,7 +131,7 @@ export function createPlayerRouter(
 
   const VALID_MODES = new Set(["seq", "loop", "random", "rloop"]);
 
-  router.post("/:botId/mode", adminOnly ?? noOp, async (req, res) => {
+  router.post("/:botId/mode", async (req, res) => {
     try {
       const bot = req.bot!;
       const { mode } = req.body;

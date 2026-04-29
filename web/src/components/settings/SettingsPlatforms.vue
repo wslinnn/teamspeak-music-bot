@@ -19,7 +19,7 @@
         <BaseButton
           size="sm"
           :variant="loginModes[platform.key] === 'qr' ? 'primary' : 'secondary'"
-          @click="$emit('startQr', platform.key)"
+          @click="loginModes[platform.key] = 'qr'; $emit('startQr', platform.key)"
         >
           <Icon icon="mdi:qrcode" class="mr-1" /> 扫码登录
         </BaseButton>

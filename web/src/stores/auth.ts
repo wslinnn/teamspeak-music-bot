@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { http } from '../utils/http';
 
-function parseJwt(token: string): { role?: string } | null {
+function parseJwt(token: string): { role?: string; sub?: string; exp?: number } | null {
   try {
     const base64 = token.split('.')[1];
     const json = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
@@ -12,14 +12,27 @@ function parseJwt(token: string): { role?: string } | null {
   }
 }
 
+function isTokenExpired(token: string): boolean {
+  const payload = parseJwt(token);
+  if (!payload || !payload.exp) return true;
+  return Date.now() >= payload.exp * 1000;
+}
+
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string | null>(localStorage.getItem('jwt_token'));
-  const username = ref('');
+  const rawToken = localStorage.getItem('jwt_token');
+  const token = ref<string | null>(rawToken && !isTokenExpired(rawToken) ? rawToken : null);
+  if (rawToken && !token.value) {
+    localStorage.removeItem('jwt_token');
+  }
   const loading = ref(false);
   const error = ref<string | null>(null);
   const authEnabled = ref<boolean | null>(null);
+  const needsSetup = ref<boolean | null>(null);
 
-  const isAuthenticated = computed(() => !!token.value);
+  const isAuthenticated = computed(() => {
+    if (!token.value) return false;
+    return !isTokenExpired(token.value);
+  });
 
   const role = computed(() => {
     if (!token.value) return null;
@@ -32,23 +45,22 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await http.get('/api/health');
       authEnabled.value = res.data.authEnabled === true;
+      needsSetup.value = res.data.needsSetup === true;
       return authEnabled.value;
     } catch (err: unknown) {
       const status = (err as any)?.response?.status;
       if (!status) throw err;
       authEnabled.value = false;
+      needsSetup.value = false;
       return false;
     }
   }
 
-  async function login(password: string, user?: string): Promise<boolean> {
+  async function login(password: string): Promise<boolean> {
     loading.value = true;
     error.value = null;
     try {
-      const res = await http.post('/api/auth/login', {
-        password,
-        username: user || undefined,
-      });
+      const res = await http.post('/api/auth/login', { password });
       if (res.data.success) {
         token.value = res.data.token;
         localStorage.setItem('jwt_token', res.data.token);
@@ -67,6 +79,28 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function setup(password: string): Promise<boolean> {
+    loading.value = true;
+    error.value = null;
+    try {
+      const res = await http.post('/api/setup', { password });
+      if (res.data.success) {
+        needsSetup.value = false;
+        return true;
+      }
+      error.value = res.data.error ?? 'Setup failed';
+      return false;
+    } catch (err: unknown) {
+      const msg =
+        (err as any)?.response?.data?.error ??
+        (err instanceof Error ? err.message : 'Setup failed');
+      error.value = msg;
+      return false;
+    } finally {
+      loading.value = false;
+    }
+  }
+
   function logout(): void {
     token.value = null;
     localStorage.removeItem('jwt_token');
@@ -76,17 +110,26 @@ export const useAuthStore = defineStore('auth', () => {
     return token.value;
   }
 
+  // Clear stale token when auth is disabled
+  watch(token, (t) => {
+    if (t && !parseJwt(t)) {
+      token.value = null;
+      localStorage.removeItem('jwt_token');
+    }
+  });
+
   return {
     token,
-    username,
     loading,
     error,
     authEnabled,
+    needsSetup,
     isAuthenticated,
     role,
     isAdmin,
     checkAuthEnabled,
     login,
+    setup,
     logout,
     getToken,
   };

@@ -28,10 +28,10 @@ const iconName = computed(() => {
 
 const typeClasses = computed(() => {
   switch (props.item.type) {
-    case 'success': return 'bg-green-500/15 text-green-500 border border-green-500/20';
-    case 'error': return 'bg-red-500/15 text-red-500 border border-red-500/20';
-    case 'warning': return 'bg-yellow-500/15 text-yellow-500 border border-yellow-500/20';
-    default: return 'bg-blue-500/15 text-blue-500 border border-blue-500/20';
+    case 'success': return 'bg-success/15 text-success border border-success/20';
+    case 'error': return 'bg-danger/15 text-danger border border-danger/20';
+    case 'warning': return 'bg-warning/15 text-warning border border-warning/20';
+    default: return 'bg-primary/15 text-primary border border-primary/20';
   }
 });
 </script>
