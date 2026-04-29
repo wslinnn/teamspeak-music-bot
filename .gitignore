@@ -9,3 +9,4 @@ cookies/
 .worktrees/
 /bin/
 scripts/navbar_bigger.png
+*.log
