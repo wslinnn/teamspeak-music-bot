@@ -12,8 +12,8 @@
       </div>
       <div class="song-artist">{{ song.artist }}</div>
     </div>
-    <div class="song-album">{{ song.album }}</div>
-    <div class="song-duration">{{ formatDuration(song.duration) }}</div>
+    <div class="song-album hidden md:block">{{ song.album }}</div>
+    <div class="song-duration hidden sm:block">{{ formatDuration(song.duration) }}</div>
     <div class="song-actions">
       <button class="action-btn" @click.stop="$emit('play')" title="播放">
         <Icon icon="mdi:play" />
@@ -159,5 +159,22 @@ function formatDuration(seconds: number): string {
   opacity: 0.7;
   transition: opacity var(--transition-fast);
   &:hover { opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  .song-card {
+    gap: 8px;
+    padding: 6px 10px;
+  }
+  .song-index {
+    width: 18px;
+    font-size: 11px;
+  }
+  .song-name {
+    font-size: 13px;
+  }
+  .song-actions {
+    opacity: 1;
+  }
 }
 </style>
