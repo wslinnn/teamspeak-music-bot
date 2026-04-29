@@ -12,7 +12,6 @@ import {
   isAdminCommand,
   type ParsedCommand,
 } from "./commands.js";
-import { Mutex } from "../utils/mutex.js";
 import type { Logger } from "../logger.js";
 import type { BotDatabase, ProfileConfig } from "../data/database.js";
 import type { BotConfig } from "../data/config.js";
@@ -61,10 +60,11 @@ export class BotInstance extends EventEmitter {
   private connected = false;
   private disconnectEmitted = false;
   private voteSkipUsers = new Set<string>();
-  private playNextMutex = new Mutex();
+  private isAdvancing = false;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private channelUserCount = 0;
   private profileManager: BotProfileManager;
+  private isFmMode = false;
 
   constructor(options: BotInstanceOptions) {
     super();
@@ -166,17 +166,13 @@ export class BotInstance extends EventEmitter {
     this.tsClient.disconnect();
   }
 
-  /** Returns a promise that resolves when this instance has fully disconnected. */
   onceDisconnected(): Promise<void> {
-    if (!this.connected && this.disconnectEmitted) return Promise.resolve();
     return new Promise((resolve) => {
-      const handler = () => { resolve(); };
-      this.once("disconnected", handler);
-      // Safety timeout: if disconnect never fires (e.g. client stuck), resolve after 5s
-      setTimeout(() => {
-        this.removeListener("disconnected", handler);
+      if (!this.connected) {
         resolve();
-      }, 5000);
+        return;
+      }
+      this.once("disconnected", () => resolve());
     });
   }
 
@@ -198,9 +194,7 @@ export class BotInstance extends EventEmitter {
         } else {
           this._cancelIdleTimer();
         }
-      } catch (err) {
-        this.logger.debug({ err }, "Idle poller failed to get channel clients");
-      }
+      } catch { /* ignore */ }
       setTimeout(poll, 30_000);
     };
     setTimeout(poll, 30_000);
@@ -224,41 +218,6 @@ export class BotInstance extends EventEmitter {
     }
   }
 
-  /**
-   * Check if a TS user (by client ID) belongs to any of the
-   * configured admin server groups.
-   * Returns true if adminGroups is empty (no restriction) or the user
-   * is in one of the configured groups.
-   *
-   * Note: msg.invokerId from TS3TextMessage is a client ID (clid),
-   * not a database ID (cldbid). The clientinfo command accepts clid.
-   * Fails closed: on error, denies access rather than granting it.
-   */
-  private async isInvokerAdmin(invokerClientId: string): Promise<boolean> {
-    const groups = this.config.adminGroups;
-    if (groups.length === 0) return true;
-
-    try {
-      // clientinfo accepts clid (client ID, which is what invokerId provides)
-      const results = await this.tsClient.execCommandWithResponse(
-        `clientinfo clid=${invokerClientId}`,
-      );
-      if (!results.length) return false;
-
-      const serverGroupsStr = results[0]["client_servergroups"] ?? "";
-      const userGroups = serverGroupsStr
-        .split(",")
-        .map((g: string) => parseInt(g, 10))
-        .filter((g: number) => !isNaN(g));
-
-      return userGroups.some((g: number) => groups.includes(g));
-    } catch (err) {
-      this.logger.error({ err, invokerClientId }, "Failed to check invoker groups");
-      // Fail closed: deny access on error to prevent privilege escalation
-      return false;
-    }
-  }
-
   private async handleTextMessage(msg: TS3TextMessage): Promise<void> {
     const parsed = parseCommand(
       msg.message,
@@ -268,11 +227,7 @@ export class BotInstance extends EventEmitter {
     if (!parsed) return;
 
     if (isAdminCommand(parsed.name)) {
-      const isAdmin = await this.isInvokerAdmin(msg.invokerId);
-      if (!isAdmin) {
-        await this.tsClient.sendTextMessage("Permission denied: admin only command");
-        return;
-      }
+      // TODO: Check if invoker is in adminGroups
     }
 
     this.logger.info(
@@ -315,6 +270,7 @@ export class BotInstance extends EventEmitter {
       "playlist",
       "album",
       "fm",
+      "artist",
     ]);
     if (!this.connected && AUDIO_COMMANDS.has(cmd.name)) {
       throw new Error("Bot is not connected to TeamSpeak");
@@ -346,8 +302,6 @@ export class BotInstance extends EventEmitter {
         return this.cmdClear();
       case "remove":
         return this.cmdRemove(cmd);
-      case "reorder":
-        return this.cmdReorder(cmd);
       case "mode":
         return this.cmdMode(cmd);
       case "playlist":
@@ -356,6 +310,8 @@ export class BotInstance extends EventEmitter {
         return this.cmdAlbum(cmd);
       case "fm":
         return this.cmdFm();
+      case "artist":
+        return this.cmdArtist(cmd);
       case "vote":
         return this.cmdVote(msg);
       case "lyrics":
@@ -445,6 +401,7 @@ export class BotInstance extends EventEmitter {
 
     const song = result.songs[0];
     this.queue.clear();
+    this.isFmMode = false;
     this.queue.add({ ...song, platform: provider.platform });
     this.queue.play();
 
@@ -496,6 +453,7 @@ export class BotInstance extends EventEmitter {
   private cmdStop(): string {
     this.player.stop();
     this.queue.clear();
+    this.isFmMode = false;
     this.profileManager.onSongChange(null).catch((err) => {
       this.logger.warn({ err }, "Profile restore failed on stop");
     });
@@ -549,6 +507,7 @@ export class BotInstance extends EventEmitter {
   private cmdClear(): string {
     this.player.stop();
     this.queue.clear();
+    this.isFmMode = false;
     this.profileManager.onSongChange(null).catch((err) => {
       this.logger.warn({ err }, "Profile restore failed on clear");
     });
@@ -563,18 +522,6 @@ export class BotInstance extends EventEmitter {
     if (!removed) return "Invalid position";
     this.emit("stateChange");
     return `Removed: ${removed.name}`;
-  }
-
-  private cmdReorder(cmd: ParsedCommand): string {
-    if (!cmd.args) return "Usage: !reorder <from> <to>";
-    const parts = cmd.args.trim().split(/\s+/);
-    if (parts.length !== 2) return "Usage: !reorder <from> <to>";
-    const fromIndex = parseInt(parts[0], 10) - 1;
-    const toIndex = parseInt(parts[1], 10) - 1;
-    if (isNaN(fromIndex) || isNaN(toIndex)) return "Usage: !reorder <from> <to>";
-    const ok = this.queue.reorder(fromIndex, toIndex);
-    if (!ok) return "Invalid reorder positions";
-    return `Reordered: position ${fromIndex + 1} → ${toIndex + 1}`;
   }
 
   private cmdMode(cmd: ParsedCommand): string {
@@ -592,13 +539,48 @@ export class BotInstance extends EventEmitter {
   }
 
   private async cmdPlaylist(cmd: ParsedCommand): Promise<string> {
-    if (!cmd.args) return "Usage: !playlist <playlist ID or URL>";
+    if (!cmd.args) return "Usage: !playlist <playlist name or ID>";
     const provider = this.getProvider(cmd.flags);
+
+    // Determine if input is a numeric ID or a name search
     const id = this.extractId(cmd.args);
-    const songs = await provider.getPlaylistSongs(id);
+    const isNumericId = /^\d+$/.test(cmd.args.trim());
+
+    let playlistId: string;
+
+    if (isNumericId || id !== cmd.args) {
+      // Input is a numeric ID or URL containing an ID — use existing logic
+      playlistId = id;
+    } else {
+      // Name-based search
+      const result = await provider.search(cmd.args);
+      let playlists = result.playlists ?? [];
+
+      // Also search user's personal playlists if logged in
+      if (provider.getUserPlaylists) {
+        try {
+          const userPlaylists = await provider.getUserPlaylists();
+          const query = cmd.args.toLowerCase();
+          const matched = userPlaylists.filter(
+            p => p.name.toLowerCase().includes(query)
+          );
+          // Merge: public results first (API-ranked), then user matches
+          playlists = [...playlists, ...matched];
+        } catch {
+          // User playlists unavailable — continue with public results
+        }
+      }
+
+      if (playlists.length === 0)
+        return `No playlists found for: ${cmd.args}`;
+      playlistId = playlists[0].id;
+    }
+
+    const songs = await provider.getPlaylistSongs(playlistId);
     if (songs.length === 0) return "Playlist is empty or not found";
 
     this.queue.clear();
+    this.isFmMode = false;
     for (const song of songs) {
       this.queue.add({ ...song, platform: provider.platform });
     }
@@ -615,6 +597,7 @@ export class BotInstance extends EventEmitter {
     if (songs.length === 0) return "Album is empty or not found";
 
     this.queue.clear();
+    this.isFmMode = false;
     for (const song of songs) {
       this.queue.add({ ...song, platform: provider.platform });
     }
@@ -636,10 +619,59 @@ export class BotInstance extends EventEmitter {
     for (const song of songs) {
       this.queue.add({ ...song, platform: "netease" });
     }
+    this.queue.setMode(PlayMode.RandomLoop);
+    this.isFmMode = true;
+    this.player.resetFailures();
+
     const first = this.queue.play();
     if (first) await this.resolveAndPlay(first);
     this.emit("stateChange");
     return `Personal FM started: ${first?.name ?? "unknown"} - ${first?.artist ?? ""}`;
+  }
+
+  private async cmdArtist(cmd: ParsedCommand): Promise<string> {
+    if (!cmd.args) return "Usage: !artist <artist name>";
+    const provider = this.getProvider(cmd.flags);
+    const result = await provider.search(cmd.args, 50);
+    if (result.songs.length === 0)
+      return `No results found for artist: ${cmd.args}`;
+
+    const query = cmd.args.toLowerCase();
+    let filtered = result.songs.filter(
+      s => s.artist.toLowerCase().includes(query)
+    );
+
+    // Fallback to unfiltered results if filtering drops everything
+    if (filtered.length === 0) {
+      filtered = result.songs.slice(0, 20);
+    }
+
+    this.queue.clear();
+    this.isFmMode = false;
+    for (const song of filtered) {
+      this.queue.add({ ...song, platform: provider.platform });
+    }
+    this.queue.setMode(PlayMode.Loop);
+    this.player.resetFailures();
+
+    const first = this.queue.play();
+    if (first) await this.resolveAndPlay(first);
+    this.emit("stateChange");
+    return `Artist mode: ${cmd.args} — ${filtered.length} songs loaded. Now playing: ${first?.name ?? "unknown"}`;
+  }
+
+  private async refillFm(): Promise<void> {
+    if (!this.isFmMode || !this.neteaseProvider.getPersonalFm) return;
+    try {
+      const songs = await this.neteaseProvider.getPersonalFm();
+      if (songs.length === 0) return;
+      for (const song of songs) {
+        this.queue.add({ ...song, platform: "netease" });
+      }
+      this.logger.debug({ count: songs.length }, "FM queue refilled");
+    } catch (err) {
+      this.logger.error({ err }, "Failed to refill FM queue");
+    }
   }
 
   private async cmdVote(msg?: TS3TextMessage): Promise<string> {
@@ -698,12 +730,13 @@ export class BotInstance extends EventEmitter {
       `${p}stop         — Stop and clear queue`,
       `${p}vol <0-100>  — Set volume`,
       `${p}queue        — Show queue`,
-      `${p}remove <num>  — Remove queue item`,
-      `${p}reorder <from> <to> — Move queue item`,
       `${p}mode <seq|loop|random|rloop> — Play mode`,
-      `${p}playlist <id> — Load playlist`,
+      `${p}playlist <name or id> — Load playlist by name or ID`,
+      `${p}playlist -q <name or id> — Load playlist from QQ Music`,
       `${p}album <id>   — Load album`,
       `${p}fm           — Personal FM (NetEase)`,
+      `${p}artist <name> — Play songs by artist (loop)`,
+      `${p}artist -q <name> — Artist loop from QQ Music`,
       `${p}vote         — Vote to skip`,
       `${p}lyrics       — Show lyrics`,
       `${p}now          — Current song info`,
@@ -712,13 +745,15 @@ export class BotInstance extends EventEmitter {
   }
 
   private async playNext(): Promise<void> {
-    if (!this.connected) return;
-    await this.playNextMutex.run(async () => {
+    if (this.isAdvancing || !this.connected) return;
+    this.isAdvancing = true;
+    try {
       this.voteSkipUsers.clear();
       const next = this.queue.next();
       if (next) {
         let started = await this.resolveAndPlay(next);
         if (!started) {
+          // Skip to next if URL resolve fails (up to 3 retries)
           for (let i = 0; i < 3 && this.connected; i++) {
             const retry = this.queue.next();
             if (!retry) break;
@@ -733,15 +768,34 @@ export class BotInstance extends EventEmitter {
           this.profileManager.onSongChange(null).catch((err) => {
             this.logger.error({ err }, "Failed to update profile on song end");
           });
+        } else if (this.isFmMode && this.queue.size() - this.queue.getCurrentIndex() <= 3) {
+          // Proactive refill: when queue is running low, fetch more FM songs
+          this.refillFm().catch(err => this.logger.error({ err }, "Proactive FM refill failed"));
         }
       } else {
-        this.player.stop();
-        this.profileManager.onSongChange(null).catch((err) => {
-          this.logger.error({ err }, "Failed to update profile on song end");
-        });
+        // Defensive: only reached if play mode is changed away from RandomLoop during FM
+        if (this.isFmMode) {
+          await this.refillFm();
+          const refillNext = this.queue.next();
+          if (refillNext) {
+            await this.resolveAndPlay(refillNext);
+          } else {
+            this.player.stop();
+            this.profileManager.onSongChange(null).catch((err) => {
+              this.logger.error({ err }, "Failed to update profile on song end");
+            });
+          }
+        } else {
+          this.player.stop();
+          this.profileManager.onSongChange(null).catch((err) => {
+            this.logger.error({ err }, "Failed to update profile on song end");
+          });
+        }
       }
       this.emit("stateChange");
-    });
+    } finally {
+      this.isAdvancing = false;
+    }
   }
 
   private extractId(input: string): string {

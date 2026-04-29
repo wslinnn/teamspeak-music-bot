@@ -13,56 +13,66 @@
       :class="open ? 'translate-x-0' : 'translate-x-full'"
     >
       <div class="flex items-center justify-between px-5 py-4" :style="{ marginTop: 'var(--navbar-height)' }">
-      <div class="flex items-center">
-        <h3 class="text-base font-bold">播放队列</h3>
-        <span class="ml-2 text-xs text-text-tertiary">{{ botQueue.length }} 首</span>
-      </div>
-      <button class="text-lg opacity-60 transition-opacity hover:opacity-100" @click="$emit('close')">
-        <Icon icon="mdi:close" />
-      </button>
-    </div>
-
-    <div v-if="botQueue.length === 0" class="py-10 px-5 text-center text-text-tertiary text-[13px]">
-      队列为空
-    </div>
-
-    <div v-else class="flex-1 overflow-y-auto py-2 px-3" :style="{ paddingBottom: 'var(--player-height)' }">
-      <draggable
-        :model-value="botQueue"
-        item-key="id"
-        handle=".drag-handle"
-        ghost-class="queue-item-ghost"
-        drag-class="queue-item-drag"
-        @end="onDragEnd"
-      >
-        <template #item="{ element: song, index: i }">
-          <div
-            class="flex items-center gap-2 p-2 rounded-[var(--radius-sm)] transition-colors cursor-pointer select-none hover:bg-hover-bg group"
-            :class="{ 'bg-[rgba(51,94,234,0.1)]': store.currentSong?.id === song.id }"
-            @dblclick="playAtIndex(i)"
+        <div class="flex items-center">
+          <h3 class="text-base font-bold">播放队列</h3>
+          <span class="ml-2 text-xs text-text-tertiary">{{ botQueue.length }} 首</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            v-if="botQueue.length > 0"
+            class="text-lg opacity-60 transition-opacity hover:opacity-100"
+            @click="clearAndStop"
+            title="清空队列并停止播放"
           >
-            <span class="drag-handle cursor-grab text-foreground-subtle opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-50 shrink-0 text-base p-0.5">
-              <Icon icon="mdi:drag-vertical" />
-            </span>
-            <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
-            <div class="flex-1 min-w-0">
-              <div class="text-[13px] font-medium truncate">{{ song.name }}</div>
-              <div class="text-[11px] text-text-secondary">{{ song.artist }}</div>
+            <Icon icon="mdi:stop-circle-outline" />
+          </button>
+          <button class="text-lg opacity-60 transition-opacity hover:opacity-100" @click="$emit('close')">
+            <Icon icon="mdi:close" />
+          </button>
+        </div>
+      </div>
+
+      <div v-if="botQueue.length === 0" class="py-10 px-5 text-center text-text-tertiary text-[13px]">
+        队列为空
+      </div>
+
+      <div v-else class="flex-1 overflow-y-auto py-2 px-3" :style="{ paddingBottom: 'var(--player-height)' }">
+        <draggable
+          :model-value="botQueue"
+          item-key="id"
+          handle=".drag-handle"
+          ghost-class="queue-item-ghost"
+          drag-class="queue-item-drag"
+          @end="onDragEnd"
+        >
+          <template #item="{ element: song, index: i }">
+            <div
+              class="flex items-center gap-2 p-2 rounded-[var(--radius-sm)] transition-colors cursor-pointer select-none hover:bg-hover-bg group"
+              :class="{ 'bg-[rgba(51,94,234,0.1)]': store.currentSong?.id === song.id }"
+              @dblclick="playAtIndex(i)"
+            >
+              <span class="drag-handle cursor-grab text-foreground-subtle opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-50 shrink-0 text-base p-0.5">
+                <Icon icon="mdi:drag-vertical" />
+              </span>
+              <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
+              <div class="flex-1 min-w-0">
+                <div class="text-[13px] font-medium truncate">{{ song.name }}</div>
+                <div class="text-[11px] text-text-secondary">{{ song.artist }}</div>
+              </div>
+              <FavoriteButton
+                :song-id="song.id"
+                :platform="song.platform"
+                :song-name="song.name"
+                :artist="song.artist"
+                :cover-url="song.coverUrl"
+              />
+              <button class="text-sm opacity-0 p-1 rounded-[var(--radius-sm)] transition-opacity text-text-tertiary hover:text-text-primary group-hover:opacity-100" @click="removeSong(i)" title="移除">
+                <Icon icon="mdi:close" />
+              </button>
             </div>
-            <FavoriteButton
-              :song-id="song.id"
-              :platform="song.platform"
-              :song-name="song.name"
-              :artist="song.artist"
-              :cover-url="song.coverUrl"
-            />
-            <button class="text-sm opacity-0 p-1 rounded-[var(--radius-sm)] transition-opacity text-text-tertiary hover:text-text-primary group-hover:opacity-100" @click="removeSong(i)" title="移除">
-              <Icon icon="mdi:close" />
-            </button>
-          </div>
-        </template>
-      </draggable>
-    </div>
+          </template>
+        </draggable>
+      </div>
     </div>
   </Teleport>
 </template>
@@ -110,6 +120,15 @@ async function removeSong(index: number) {
 async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
   if (evt.oldIndex === evt.newIndex) return;
   await store.reorderQueue(evt.oldIndex, evt.newIndex);
+}
+
+async function clearAndStop() {
+  try {
+    await store.stop();
+    await store.fetchQueue();
+  } catch {
+    // Ignore
+  }
 }
 </script>
 

@@ -85,6 +85,8 @@ export interface BotDatabase {
 
 function migrateSchema(db: Database.Database): void {
   const columns = db.prepare("PRAGMA table_info(bot_instances)").all() as Array<{ name: string }>;
+  // Fresh database: initTables will create tables with all current columns
+  if (columns.length === 0) return;
   const names = columns.map((c) => c.name);
   if (!names.includes("identity")) {
     db.exec("ALTER TABLE bot_instances ADD COLUMN identity TEXT");
@@ -147,7 +149,13 @@ function initTables(db: Database.Database): void {
       serverProtocol TEXT NOT NULL DEFAULT '',
       ts6ApiKey TEXT NOT NULL DEFAULT '',
       serverPassword TEXT NOT NULL DEFAULT '',
-      identity TEXT
+      identity TEXT,
+      profile_avatar_enabled INTEGER NOT NULL DEFAULT 1,
+      profile_description_enabled INTEGER NOT NULL DEFAULT 1,
+      profile_nickname_enabled INTEGER NOT NULL DEFAULT 1,
+      profile_away_enabled INTEGER NOT NULL DEFAULT 1,
+      profile_channel_desc_enabled INTEGER NOT NULL DEFAULT 1,
+      profile_now_playing_enabled INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS favorites (
@@ -168,8 +176,8 @@ function initTables(db: Database.Database): void {
 export function createDatabase(dbPath: string): BotDatabase {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
-  migrateSchema(db);
   initTables(db);
+  migrateSchema(db);
 
   let closed = false;
 
