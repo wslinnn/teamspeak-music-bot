@@ -2,25 +2,15 @@
   <div class="favorites-page">
     <h1 class="page-title">我的收藏</h1>
 
-    <div v-if="store.loading" class="loading">加载中...</div>
+    <SkeletonLoader v-if="store.loading" />
 
-    <div v-else-if="store.favorites.length === 0" class="empty">
-      暂无收藏歌曲
-    </div>
+    <EmptyState v-else-if="store.favorites.length === 0" message="暂无收藏歌曲" />
 
     <div v-else class="favorites-list">
       <SongCard
         v-for="(item, i) in store.favorites"
         :key="item.id"
-        :song="{
-          id: item.songId,
-          name: item.title,
-          artist: item.artist,
-          album: '',
-          duration: 0,
-          coverUrl: item.coverUrl,
-          platform: item.platform as any,
-        }"
+        :song="toSong(item)"
         :index="i + 1"
         :active="playerStore.currentSong?.id === item.songId"
         @play="play(item)"
@@ -33,11 +23,26 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { useFavoritesStore, type Favorite } from '../stores/favorites';
-import { usePlayerStore } from '../stores/player';
+import { usePlayerStore, type Song } from '../stores/player';
+import type { Platform } from '../utils/platform';
 import SongCard from '../components/SongCard.vue';
+import EmptyState from '../components/common/EmptyState.vue';
+import SkeletonLoader from '../components/common/SkeletonLoader.vue';
 
 const store = useFavoritesStore();
 const playerStore = usePlayerStore();
+
+function toSong(item: Favorite): Song {
+  return {
+    id: item.songId,
+    name: item.title,
+    artist: item.artist,
+    album: '',
+    duration: 0,
+    coverUrl: item.coverUrl,
+    platform: item.platform as Platform,
+  };
+}
 
 function play(item: Favorite) {
   playerStore.playById(item.songId, item.platform);
@@ -63,18 +68,5 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-.loading {
-  text-align: center;
-  padding: 60px;
-  color: var(--text-secondary);
-}
-
-.empty {
-  text-align: center;
-  padding: 80px;
-  color: var(--text-tertiary);
-  font-size: 14px;
 }
 </style>

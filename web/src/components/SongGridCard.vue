@@ -54,31 +54,12 @@ import { Icon } from '@iconify/vue';
 import { Song } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
 import FavoriteButton from './FavoriteButton.vue';
+import { formatDuration } from '../utils/format';
+import { getPlatformLabel, getPlatformTailwindClass } from '../utils/platform';
 
 const props = defineProps<{ song: Song }>();
 defineEmits<{ play: []; add: [] }>();
 
-const platformLabel = computed(() => {
-  switch (props.song.platform) {
-    case 'bilibili': return 'B站';
-    case 'qq': return 'QQ';
-    case 'youtube': return 'YouTube';
-    default: return '网易云';
-  }
-});
-
-const platformBadgeClass = computed(() => {
-  switch (props.song.platform) {
-    case 'bilibili': return 'bg-[#00a1d6]/90 text-white';
-    case 'qq': return 'bg-[#12b76a]/90 text-white';
-    case 'youtube': return 'bg-[#ff0000]/90 text-white';
-    default: return 'bg-[#e81123]/90 text-white';
-  }
-});
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
+const platformLabel = computed(() => getPlatformLabel(props.song.platform));
+const platformBadgeClass = computed(() => getPlatformTailwindClass(props.song.platform));
 </script>

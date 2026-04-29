@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import { http } from '../utils/http';
 
 export interface Favorite {
@@ -58,15 +58,13 @@ export const useFavoritesStore = defineStore('favorites', () => {
     }
   }
 
-  const isFavorite = computed(() => {
-    return (songId: string, platform: string) =>
-      favorites.value.some((f) => f.songId === songId && f.platform === platform);
-  });
+  function isFavorite(songId: string, platform: string): boolean {
+    return favorites.value.some((f) => f.songId === songId && f.platform === platform);
+  }
 
-  const getFavoriteId = computed(() => {
-    return (songId: string, platform: string) =>
-      favorites.value.find((f) => f.songId === songId && f.platform === platform)?.id;
-  });
+  function getFavoriteId(songId: string, platform: string): number | undefined {
+    return favorites.value.find((f) => f.songId === songId && f.platform === platform)?.id;
+  }
 
   function handleWsUpdate(data: { favorites?: Favorite[] }) {
     if (data.favorites) {

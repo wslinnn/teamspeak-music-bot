@@ -5,10 +5,7 @@
     <div class="song-info">
       <div class="song-name-row">
         <span class="song-name">{{ song.name }}</span>
-        <span
-          class="platform-badge"
-          :class="song.platform === 'bilibili' ? 'badge-bilibili' : song.platform === 'qq' ? 'badge-qq' : song.platform === 'youtube' ? 'badge-youtube' : 'badge-netease'"
-        >{{ song.platform === 'bilibili' ? 'B站' : song.platform === 'qq' ? 'QQ' : song.platform === 'youtube' ? 'YouTube' : '网易云' }}</span>
+        <span class="platform-badge" :class="getPlatformBadgeClass(song.platform)">{{ getPlatformLabel(song.platform) }}</span>
       </div>
       <div class="song-artist">{{ song.artist }}</div>
     </div>
@@ -37,6 +34,8 @@ import { Icon } from '@iconify/vue';
 import CoverArt from './CoverArt.vue';
 import FavoriteButton from './FavoriteButton.vue';
 import { Song } from '../stores/player.js';
+import { formatDuration } from '../utils/format';
+import { getPlatformLabel, getPlatformBadgeClass } from '../utils/platform';
 
 defineProps<{
   song: Song;
@@ -49,11 +48,6 @@ defineEmits<{
   add: [];
 }>();
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 </script>
 
 <style lang="scss" scoped>

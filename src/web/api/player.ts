@@ -411,7 +411,7 @@ export function createPlayerRouter(
 
   router.post("/:botId/queue/reorder", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { fromIndex, toIndex } = req.body;
       if (
         typeof fromIndex !== "number" ||
@@ -421,18 +421,18 @@ export function createPlayerRouter(
         fromIndex < 0 ||
         toIndex < 0
       ) {
-        res.status(400).json({ error: "fromIndex and toIndex must be non-negative numbers" });
+        res.status(400).json({ success: false, error: "fromIndex and toIndex must be non-negative numbers" });
         return;
       }
       const queue = bot.getQueueManager();
       const ok = queue.reorder(fromIndex, toIndex);
       if (!ok) {
-        res.status(400).json({ error: "Invalid reorder indices" });
+        res.status(400).json({ success: false, error: "Invalid reorder indices" });
         return;
       }
-      res.json({ message: "Queue reordered", queue: queue.list() });
+      res.json({ success: true, queue: queue.list() });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 

@@ -1,4 +1,4 @@
-import { ref, onUnmounted } from 'vue';
+import { ref, computed, onUnmounted } from 'vue';
 import { usePlayerStore } from '../stores/player';
 import { useAuthStore } from '../stores/auth';
 import { useFavoritesStore } from '../stores/favorites';
@@ -37,8 +37,8 @@ function cleanupWebSocket(ws: WebSocket | null) {
 export function useWebSocket() {
   const store = usePlayerStore();
   const authStore = useAuthStore();
-  const connected = ref(false);
   const connectionState = ref<ConnectionState>('disconnected');
+  const connected = computed(() => connectionState.value === 'connected');
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let retryCount = 0;
@@ -71,7 +71,6 @@ export function useWebSocket() {
     ws = new WebSocket(url);
 
     ws.onopen = () => {
-      connected.value = true;
       connectionState.value = 'connected';
       retryCount = 0;
     };
@@ -153,8 +152,6 @@ export function useWebSocket() {
     };
 
     ws.onclose = (event) => {
-      connected.value = false;
-
       // Auth failure — stop reconnecting
       if (event.code === 4001) {
         connectionState.value = 'disconnected';

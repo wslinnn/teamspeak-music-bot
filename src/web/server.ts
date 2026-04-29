@@ -106,14 +106,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
   });
 
   // Global auth middleware for all /api/* except whitelist
-  const AUTH_WHITELIST = [
+  const AUTH_WHITELIST = new Set([
     "/api/auth/login",
     "/api/config/public-url",
     "/api/health",
-  ];
+  ]);
   app.use((req, res, next) => {
     if (!req.path.startsWith("/api")) return next();
-    if (AUTH_WHITELIST.includes(req.path)) return next();
+    if (AUTH_WHITELIST.has(req.path)) return next();
     if (!authEnabled) return next();
     requireAuth(req, res, next);
   });

@@ -36,7 +36,7 @@ export function createBotRouter(
     for (const bot of botManager.getAllBots()) {
       bot.updateIdleTimeout(idleTimeoutMinutes);
     }
-    res.json({ ok: true });
+    res.json({ success: true });
   });
 
   // Middleware: validate :id param for all /:id routes below

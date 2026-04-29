@@ -85,6 +85,7 @@ import { usePlayerStore } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
 import Queue from './Queue.vue';
 import PlayingIndicator from './PlayingIndicator.vue';
+import { formatDuration } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
@@ -119,9 +120,7 @@ let rafId: number | null = null;
 
 function formatTime(seconds: number): string {
   if (!seconds || seconds < 0) return '0:00';
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
+  return formatDuration(Math.floor(seconds));
 }
 
 function updateProgress() {

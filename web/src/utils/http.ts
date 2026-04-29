@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance } from 'axios';
 import { useToastStore } from '../stores/toast';
+import { useAuthStore } from '../stores/auth';
 
 export const http: AxiosInstance = axios.create({
   timeout: 30000,
@@ -8,7 +9,8 @@ export const http: AxiosInstance = axios.create({
 
 http.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('jwt_token');
+    const authStore = useAuthStore();
+    const token = authStore.getToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -21,8 +23,8 @@ http.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('jwt_token');
-      window.location.href = '/login';
+      const authStore = useAuthStore();
+      authStore.logout();
       return Promise.reject(error);
     }
 

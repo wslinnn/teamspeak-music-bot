@@ -45,9 +45,6 @@ export function getDefaultConfig(): BotConfig {
   };
 }
 
-/**
- * Validate config values. Throws on invalid values.
- */
 export function validateConfig(config: BotConfig): void {
   const errors: string[] = [];
 
