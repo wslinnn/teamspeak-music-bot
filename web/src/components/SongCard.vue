@@ -1,17 +1,24 @@
 <template>
-  <div class="song-card" :class="{ active }" @dblclick="$emit('play')">
-    <div class="song-index">{{ index }}</div>
+  <div
+    class="flex items-center gap-3 px-3 py-2 rounded-[var(--radius-md)] transition-colors cursor-pointer hover:bg-hover-bg"
+    :class="{ 'bg-[rgba(51,94,234,0.1)]': active }"
+    @dblclick="$emit('play')"
+  >
+    <div class="w-6 text-center text-[13px] text-text-tertiary">{{ index }}</div>
     <CoverArt :url="song.coverUrl" :size="36" :radius="6" />
-    <div class="song-info">
-      <div class="song-name-row">
-        <span class="song-name">{{ song.name }}</span>
-        <span class="platform-badge" :class="getPlatformBadgeClass(song.platform)">{{ getPlatformLabel(song.platform) }}</span>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-1.5 min-w-0">
+        <span class="text-sm font-medium truncate">{{ song.name }}</span>
+        <span
+          class="shrink-0 text-[10px] font-semibold px-[5px] py-px rounded-[3px] leading-[1.4]"
+          :class="getPlatformBadgeClass(song.platform)"
+        >{{ getPlatformLabel(song.platform) }}</span>
       </div>
-      <div class="song-artist">{{ song.artist }}</div>
+      <div class="text-xs text-text-secondary">{{ song.artist }}</div>
     </div>
-    <div class="song-album hidden md:block">{{ song.album }}</div>
-    <div class="song-duration hidden sm:block">{{ formatDuration(song.duration) }}</div>
-    <div class="song-actions">
+    <div class="w-40 text-xs text-text-secondary truncate hidden md:block">{{ song.album }}</div>
+    <div class="w-12 text-xs text-text-tertiary text-right hidden sm:block">{{ formatDuration(song.duration) }}</div>
+    <div class="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 sm:opacity-0">
       <FavoriteButton
         :song-id="song.id"
         :platform="song.platform"
@@ -19,10 +26,10 @@
         :artist="song.artist"
         :cover-url="song.coverUrl"
       />
-      <button class="action-btn" @click.stop="$emit('play')" title="播放">
+      <button class="text-lg p-1 rounded-[var(--radius-sm)] opacity-70 transition-opacity hover:opacity-100" @click.stop="$emit('play')" title="播放">
         <Icon icon="mdi:play" />
       </button>
-      <button class="action-btn" @click.stop="$emit('add')" title="添加到队列">
+      <button class="text-lg p-1 rounded-[var(--radius-sm)] opacity-70 transition-opacity hover:opacity-100" @click.stop="$emit('add')" title="添加到队列">
         <Icon icon="mdi:playlist-plus" />
       </button>
     </div>
@@ -49,134 +56,3 @@ defineEmits<{
 }>();
 
 </script>
-
-<style scoped>
-.song-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  transition: background var(--transition-fast);
-  cursor: pointer;
-}
-
-.song-card:hover {
-  background: var(--hover-bg);
-}
-.song-card:hover .song-actions { opacity: 1; }
-
-.song-card.active {
-  background: rgba(51, 94, 234, 0.1);
-}
-
-.song-index {
-  width: 24px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-tertiary);
-}
-
-.song-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.song-name-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.song-name {
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.platform-badge {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 1px 5px;
-  border-radius: 3px;
-  line-height: 1.4;
-}
-
-.badge-netease {
-  background: rgba(232, 17, 35, 0.15);
-  color: #e81123;
-}
-
-.badge-qq {
-  background: rgba(18, 183, 106, 0.15);
-  color: #12b76a;
-}
-
-.badge-bilibili {
-  background: rgba(0, 161, 214, 0.15);
-  color: #00a1d6;
-}
-
-.badge-youtube {
-  background: rgba(255, 0, 0, 0.12);
-  color: #ff0000;
-}
-
-.song-artist {
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.song-album {
-  width: 160px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.song-duration {
-  width: 48px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  text-align: right;
-}
-
-.song-actions {
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
-.action-btn {
-  font-size: 18px;
-  padding: 4px;
-  border-radius: var(--radius-sm);
-  opacity: 0.7;
-  transition: opacity var(--transition-fast);
-}
-.action-btn:hover { opacity: 1; }
-
-@media (max-width: 640px) {
-  .song-card {
-    gap: 8px;
-    padding: 6px 10px;
-  }
-  .song-index {
-    width: 18px;
-    font-size: 11px;
-  }
-  .song-name {
-    font-size: 13px;
-  }
-  .song-actions {
-    opacity: 1;
-  }
-}
-</style>

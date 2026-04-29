@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import type { BotManager } from "../../bot/manager.js";
 import type { BotDatabase } from "../../data/database.js";
 import type { MusicProvider } from "../../music/provider.js";
@@ -19,8 +19,10 @@ export function createPlayerRouter(
   neteaseProvider?: MusicProvider,
   qqProvider?: MusicProvider,
   bilibiliProvider?: MusicProvider,
+  adminOnly?: (req: Request, res: Response, next: NextFunction) => void,
 ): Router {
   const router = Router();
+  const noOp = (_req: Request, _res: Response, next: NextFunction) => next();
 
   router.use("/:botId", (req, res, next) => {
     let botId: string;
@@ -98,10 +100,10 @@ export function createPlayerRouter(
   router.post("/:botId/resume", simpleCommand("!resume"));
   router.post("/:botId/next", simpleCommand("!next"));
   router.post("/:botId/prev", simpleCommand("!prev"));
-  router.post("/:botId/stop", simpleCommand("!stop"));
-  router.post("/:botId/clear", simpleCommand("!clear"));
+  router.post("/:botId/stop", adminOnly ?? noOp, simpleCommand("!stop"));
+  router.post("/:botId/clear", adminOnly ?? noOp, simpleCommand("!clear"));
 
-  router.post("/:botId/volume", async (req, res) => {
+  router.post("/:botId/volume", adminOnly ?? noOp, async (req, res) => {
     try {
       const bot = req.bot!;
       const { volume } = req.body;
@@ -129,7 +131,7 @@ export function createPlayerRouter(
 
   const VALID_MODES = new Set(["seq", "loop", "random", "rloop"]);
 
-  router.post("/:botId/mode", async (req, res) => {
+  router.post("/:botId/mode", adminOnly ?? noOp, async (req, res) => {
     try {
       const bot = req.bot!;
       const { mode } = req.body;
@@ -375,7 +377,7 @@ export function createPlayerRouter(
     res.json(bot.getProfileManager().getConfig());
   });
 
-  router.put("/:botId/profile", (req, res) => {
+  router.put("/:botId/profile", adminOnly ?? noOp, (req, res) => {
     try {
       const bot = req.bot!;
       const pm = bot.getProfileManager();

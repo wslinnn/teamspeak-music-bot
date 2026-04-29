@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import type { MusicProvider } from "../../music/provider.js";
 import { YouTubeProvider } from "../../music/youtube.js";
 import type { Logger } from "../../logger.js";
@@ -8,9 +8,11 @@ export function createMusicRouter(
   neteaseProvider: MusicProvider,
   qqProvider: MusicProvider,
   bilibiliProvider: MusicProvider,
-  logger: Logger
+  logger: Logger,
+  adminOnly?: (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => void,
 ): Router {
   const router = Router();
+  const noOp = (_req: Request, _res: Response, next: NextFunction) => next();
   const youtubeProvider: MusicProvider = new YouTubeProvider();
 
   function getProvider(platform?: string): MusicProvider {
@@ -211,7 +213,7 @@ export function createMusicRouter(
   });
 
   // Set quality
-  router.post("/quality", (req, res) => {
+  router.post("/quality", adminOnly ?? noOp, (req, res) => {
     const { quality, platform } = req.body;
     if (!quality) {
       res.status(400).json({ success: false, error: "quality is required" });

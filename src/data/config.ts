@@ -1,5 +1,39 @@
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, renameSync, openSync, closeSync, unlinkSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+
+function acquireFileLock(lockPath: string): void {
+  const maxRetries = 100;
+  const retryDelayMs = 10;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const fd = openSync(lockPath, "wx");
+      closeSync(fd);
+      return;
+    } catch {
+      // Check for stale lock (> 5s)
+      try {
+        const stat = statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > 5000) {
+          unlinkSync(lockPath);
+        }
+      } catch {
+        // ignore
+      }
+      if (i < maxRetries - 1) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryDelayMs);
+      }
+    }
+  }
+  throw new Error(`Could not acquire file lock: ${lockPath}`);
+}
+
+function releaseFileLock(lockPath: string): void {
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    // ignore
+  }
+}
 
 export interface BotConfig {
   webPort: number;
@@ -73,6 +107,14 @@ export function validateConfig(config: BotConfig): void {
     errors.push(`theme must be 'dark' or 'light', got '${config.theme}'`);
   }
 
+  // Non-empty string validations
+  if (!config.commandPrefix || typeof config.commandPrefix !== "string" || config.commandPrefix.trim().length === 0) {
+    errors.push(`commandPrefix must be a non-empty string`);
+  }
+  if (!config.jwtExpiresIn || typeof config.jwtExpiresIn !== "string" || config.jwtExpiresIn.trim().length === 0) {
+    errors.push(`jwtExpiresIn must be a non-empty string`);
+  }
+
   if (errors.length > 0) {
     throw new Error(`Invalid configuration:\n  ${errors.join("\n  ")}`);
   }
@@ -95,9 +137,15 @@ export function loadConfig(path: string): BotConfig {
 }
 
 export function saveConfig(path: string, config: BotConfig): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmpPath = join(dirname(path), `.tmp-${Date.now()}.json`);
-  writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
-  renameSync(tmpPath, path);
+  const lockPath = `${path}.lock`;
+  acquireFileLock(lockPath);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmpPath = join(dirname(path), `.tmp-${Date.now()}.json`);
+    writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
+    renameSync(tmpPath, path);
+  } finally {
+    releaseFileLock(lockPath);
+  }
 }
 

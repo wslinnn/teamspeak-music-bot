@@ -49,6 +49,7 @@ export interface FavoriteEntry {
   title: string;
   artist: string;
   coverUrl: string;
+  userId: string;
 }
 
 export interface FavoriteRecord extends FavoriteEntry {
@@ -75,9 +76,9 @@ export interface BotDatabase {
   getProfileConfig(botId: string): ProfileConfig;
   saveProfileConfig(botId: string, config: ProfileConfig): void;
   addFavorite(entry: Omit<FavoriteEntry, "id">): void;
-  getFavorites(): FavoriteRecord[];
-  deleteFavorite(id: number): boolean;
-  isFavorite(songId: string, platform: string): boolean;
+  getFavorites(userId: string): FavoriteRecord[];
+  deleteFavorite(id: number, userId: string): boolean;
+  isFavorite(songId: string, platform: string, userId: string): boolean;
   healthCheck(): boolean;
   close(): void;
 }
@@ -110,6 +111,13 @@ function migrateSchema(db: Database.Database): void {
     if (!names.includes(col)) {
       db.exec(`ALTER TABLE bot_instances ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 1`);
     }
+  }
+
+  // Favorites user_id migration
+  const favColumns = db.prepare("PRAGMA table_info(favorites)").all() as Array<{ name: string }>;
+  const favNames = favColumns.map((c) => c.name);
+  if (!favNames.includes("userId")) {
+    db.exec("ALTER TABLE favorites ADD COLUMN userId TEXT NOT NULL DEFAULT 'admin'");
   }
 }
 
@@ -149,18 +157,19 @@ function initTables(db: Database.Database): void {
       title TEXT NOT NULL,
       artist TEXT NOT NULL,
       coverUrl TEXT NOT NULL,
+      userId TEXT NOT NULL DEFAULT 'admin',
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_song ON favorites(songId, platform);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_song_user ON favorites(songId, platform, userId);
   `);
 }
 
 export function createDatabase(dbPath: string): BotDatabase {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
-  initTables(db);
   migrateSchema(db);
+  initTables(db);
 
   let closed = false;
 
@@ -213,18 +222,18 @@ export function createDatabase(dbPath: string): BotDatabase {
   `);
 
   const insertFavorite = db.prepare(`
-    INSERT INTO favorites (songId, platform, title, artist, coverUrl)
-    VALUES (@songId, @platform, @title, @artist, @coverUrl)
+    INSERT INTO favorites (songId, platform, title, artist, coverUrl, userId)
+    VALUES (@songId, @platform, @title, @artist, @coverUrl, @userId)
   `);
 
   const selectFavorites = db.prepare(`
-    SELECT * FROM favorites ORDER BY id DESC
+    SELECT * FROM favorites WHERE userId = ? ORDER BY id DESC
   `);
 
-  const deleteFavorite = db.prepare(`DELETE FROM favorites WHERE id = ?`);
+  const deleteFavorite = db.prepare(`DELETE FROM favorites WHERE id = ? AND userId = ?`);
 
   const checkFavorite = db.prepare(`
-    SELECT 1 FROM favorites WHERE songId = ? AND platform = ? LIMIT 1
+    SELECT 1 FROM favorites WHERE songId = ? AND platform = ? AND userId = ? LIMIT 1
   `);
 
   return {
@@ -294,17 +303,17 @@ export function createDatabase(dbPath: string): BotDatabase {
       insertFavorite.run(entry);
     },
 
-    getFavorites() {
-      return selectFavorites.all() as FavoriteRecord[];
+    getFavorites(userId) {
+      return selectFavorites.all(userId) as FavoriteRecord[];
     },
 
-    deleteFavorite(id) {
-      const result = deleteFavorite.run(id);
+    deleteFavorite(id, userId) {
+      const result = deleteFavorite.run(id, userId);
       return result.changes > 0;
     },
 
-    isFavorite(songId, platform) {
-      const row = checkFavorite.get(songId, platform);
+    isFavorite(songId, platform, userId) {
+      const row = checkFavorite.get(songId, platform, userId);
       return !!row;
     },
 

@@ -1,44 +1,44 @@
 <template>
-  <div class="lyrics-page" :style="bgStyle">
-    <div class="lyrics-overlay" />
-    <button class="back-btn" @click="goBack">
+  <div class="fixed inset-0 z-50 flex items-center justify-center" :style="bgStyle">
+    <div class="absolute inset-0 bg-black/75 backdrop-blur-[60px]" />
+    <button class="absolute top-6 left-6 z-[2] flex items-center gap-1.5 text-sm text-white/70 transition-colors hover:text-white" @click="goBack">
       <Icon icon="mdi:arrow-left" />
       返回
     </button>
 
-    <div v-if="currentSong" class="lyrics-content">
-      <div class="lyrics-left">
+    <div v-if="currentSong" class="relative z-[1] flex gap-[60px] max-w-[1000px] w-full px-10 h-[80vh]">
+      <div class="flex flex-col items-center gap-6 shrink-0">
         <CoverArt :url="currentSong.coverUrl" :size="280" :radius="14" :show-shadow="true" />
-        <div class="song-meta">
-          <div class="song-name">{{ currentSong.name }}</div>
-          <div class="song-artist">{{ currentSong.artist }}</div>
+        <div class="text-center">
+          <div class="text-xl font-bold text-white mb-1">{{ currentSong.name }}</div>
+          <div class="text-sm text-white/60">{{ currentSong.artist }}</div>
         </div>
       </div>
 
-      <div class="lyrics-right">
-        <div v-if="loading" class="lyrics-loading">加载歌词中...</div>
-        <div v-else-if="lines.length === 0" class="lyrics-empty">暂无歌词</div>
-        <div v-else class="lyrics-scroll" ref="scrollContainer">
-          <div class="lyrics-inner" :style="{ transform: `translateY(${scrollOffset}px)`, transition: 'transform 0.6s cubic-bezier(0.25, 0.1, 0.25, 1)' }">
-            <div class="lyrics-spacer" />
+      <div class="flex-1 overflow-hidden relative" style="mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%); -webkit-mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);">
+        <div v-if="loading" class="text-white/50 text-sm text-center py-[60px]">加载歌词中...</div>
+        <div v-else-if="lines.length === 0" class="text-white/50 text-sm text-center py-[60px]">暂无歌词</div>
+        <div v-else class="h-full overflow-hidden relative" ref="scrollContainer">
+          <div :style="{ transform: `translateY(${scrollOffset}px)`, transition: 'transform 0.6s cubic-bezier(0.25, 0.1, 0.25, 1)' }" style="will-change: transform;">
+            <div class="h-[40%]" />
             <div
               v-for="(line, i) in lines"
               :key="i"
               :ref="el => { if (el) lineRefs[i] = el as HTMLElement }"
-              class="lyrics-line"
-              :class="{ active: i === activeLine }"
+              class="py-2 cursor-pointer transition-all duration-[400ms]"
+              :class="i === activeLine ? 'active' : ''"
               @click="seekToLine(i)"
             >
-              <div class="lyrics-text">{{ line.text }}</div>
-              <div v-if="line.translation" class="lyrics-translation">{{ line.translation }}</div>
+              <div class="text-lg leading-relaxed transition-all duration-[400ms]" :class="i === activeLine ? 'text-[22px] font-semibold text-white' : 'text-white/30'">{{ line.text }}</div>
+              <div v-if="line.translation" class="text-sm leading-snug text-white/15 mt-0.5 transition-all duration-[400ms]" :class="i === activeLine ? 'text-white/50' : ''">{{ line.translation }}</div>
             </div>
-            <div class="lyrics-spacer" />
+            <div class="h-[40%]" />
           </div>
         </div>
       </div>
     </div>
 
-    <div v-else class="no-song">
+    <div v-else class="relative z-[1] text-white/50 text-base">
       当前没有正在播放的歌曲
     </div>
   </div>
@@ -100,7 +100,8 @@ async function fetchLyrics() {
       params: { platform: currentSong.value.platform },
     });
     lines.value = res.data.lyrics || [];
-  } catch {
+  } catch (err) {
+    console.warn('Failed to load lyrics:', err);
     lines.value = [];
   } finally {
     loading.value = false;
@@ -109,7 +110,6 @@ async function fetchLyrics() {
 
 function findActiveLine(elapsed: number): number {
   if (lines.value.length === 0) return -1;
-  // Find the last line whose time <= elapsed
   let idx = -1;
   for (let i = 0; i < lines.value.length; i++) {
     if (lines.value[i].time <= elapsed) {
@@ -126,7 +126,6 @@ function scrollToActiveLine(idx: number) {
   const container = scrollContainer.value;
   if (!el || !container) return;
 
-  // Use CSS transform for smooth, jank-free scrolling
   const containerHeight = container.clientHeight;
   const lineTop = el.offsetTop;
   const lineHeight = el.offsetHeight;
@@ -138,7 +137,6 @@ function syncLyrics() {
   if (!store.isPlaying || lines.value.length === 0) return;
   const elapsed = store.elapsed;
   const idx = findActiveLine(elapsed);
-  // Only update when the active line actually changes
   if (idx !== activeLine.value && idx >= 0) {
     activeLine.value = idx;
     scrollToActiveLine(idx);
@@ -146,7 +144,6 @@ function syncLyrics() {
 }
 
 function seekToLine(index: number) {
-  // Can't actually seek server-side playback, just highlight
   activeLine.value = index;
   scrollToActiveLine(index);
 }
@@ -182,152 +179,3 @@ onUnmounted(() => {
   stopSync();
 });
 </script>
-
-<style scoped>
-.lyrics-page {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.lyrics-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(60px);
-  -webkit-backdrop-filter: blur(60px);
-}
-
-.back-btn {
-  position: absolute;
-  top: 24px;
-  left: 24px;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.7);
-  transition: color var(--transition-fast);
-}
-.back-btn:hover { color: white; }
-
-.lyrics-content {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  gap: 60px;
-  max-width: 1000px;
-  width: 100%;
-  padding: 40px;
-  height: 80vh;
-}
-
-.lyrics-left {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 24px;
-  flex-shrink: 0;
-}
-
-.song-meta {
-  text-align: center;
-}
-
-.song-name {
-  font-size: 20px;
-  font-weight: 700;
-  color: white;
-  margin-bottom: 4px;
-}
-
-.song-artist {
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.lyrics-right {
-  flex: 1;
-  overflow: hidden;
-  position: relative;
-  mask-image: linear-gradient(
-    transparent 0%,
-    black 15%,
-    black 85%,
-    transparent 100%
-  );
-  -webkit-mask-image: linear-gradient(
-    transparent 0%,
-    black 15%,
-    black 85%,
-    transparent 100%
-  );
-}
-
-.lyrics-scroll {
-  height: 100%;
-  overflow: hidden;
-  position: relative;
-}
-
-.lyrics-inner {
-  will-change: transform;
-}
-
-.lyrics-spacer {
-  height: 40%;
-}
-
-.lyrics-line {
-  padding: 8px 0;
-  cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-}
-
-.lyrics-line .lyrics-text {
-  font-size: 18px;
-  line-height: 1.5;
-  color: rgba(255, 255, 255, 0.3);
-  transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-}
-
-.lyrics-line .lyrics-translation {
-  font-size: 14px;
-  line-height: 1.4;
-  color: rgba(255, 255, 255, 0.15);
-  margin-top: 2px;
-  transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
-}
-
-.lyrics-line.active .lyrics-text {
-  font-size: 22px;
-  font-weight: 600;
-  color: white;
-}
-.lyrics-line.active .lyrics-translation {
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.lyrics-line:hover:not(.active) .lyrics-text {
-  color: rgba(255, 255, 255, 0.5);
-}
-
-.lyrics-loading,
-.lyrics-empty {
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 14px;
-  text-align: center;
-  padding: 60px 0;
-}
-
-.no-song {
-  position: relative;
-  z-index: 1;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 16px;
-}
-</style>

@@ -69,7 +69,8 @@ router.beforeEach(async (to, from, next) => {
   if (authStore.authEnabled === null) {
     try {
       await authStore.checkAuthEnabled();
-    } catch {
+    } catch (err) {
+      console.warn('Failed to check auth status:', err);
       return next();
     }
   }

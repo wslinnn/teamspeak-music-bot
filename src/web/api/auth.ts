@@ -3,12 +3,30 @@ import type { MusicProvider } from "../../music/provider.js";
 import { YouTubeProvider } from "../../music/youtube.js";
 import type { CookieStore } from "../../music/auth.js";
 import type { Logger } from "../../logger.js";
+import type { BotConfig } from "../../data/config.js";
+import { signToken } from "../../auth/jwt.js";
+import { createRateLimiter } from "../../auth/rate-limit.js";
 
 export function createAuthRouter(
   neteaseProvider: MusicProvider,
   qqProvider: MusicProvider,
   bilibiliProvider: MusicProvider,
   logger: Logger,
+  cookieStore?: CookieStore
+): Router {
+  return createAuthRouterWithConfig(
+    neteaseProvider, qqProvider, bilibiliProvider, logger, undefined, undefined, undefined, cookieStore
+  );
+}
+
+export function createAuthRouterWithConfig(
+  neteaseProvider: MusicProvider,
+  qqProvider: MusicProvider,
+  bilibiliProvider: MusicProvider,
+  logger: Logger,
+  config?: BotConfig,
+  jwtSecret?: string,
+  jwtExpiresIn?: string,
   cookieStore?: CookieStore
 ): Router {
   const router = Router();
@@ -141,6 +159,48 @@ export function createAuthRouter(
     }
     res.json({ success: true });
   });
+
+  // Admin login endpoint
+  if (config && jwtSecret && jwtExpiresIn) {
+    const loginLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5000 });
+
+    router.post("/login", (req, res, next) => {
+      const ip = req.ip ?? "unknown";
+      if (loginLimiter.isLimited(ip)) {
+        res.status(429).json({ success: false, error: "Too many login attempts" });
+        return;
+      }
+      next();
+    }, (req, res) => {
+      const { username, password } = req.body;
+
+      // Legacy single-admin mode (password only)
+      if (
+        !username &&
+        password === config.adminPassword &&
+        config.adminPassword
+      ) {
+        const token = signToken("admin", jwtSecret, jwtExpiresIn, "admin");
+        res.json({ success: true, token, expiresIn: jwtExpiresIn });
+        return;
+      }
+
+      // User array mode
+      const user = config.users.find(
+        (u) => u.username === username && u.password === password
+      );
+      if (user) {
+        const token = signToken(user.role, jwtSecret, jwtExpiresIn, user.username);
+        res.json({ success: true, token, expiresIn: jwtExpiresIn });
+        return;
+      }
+
+      const clientIp = req.ip ?? "unknown";
+      loginLimiter.recordFailure(clientIp);
+      logger.warn({ ip: clientIp }, "Login failed");
+      res.status(401).json({ success: false, error: "Invalid credentials" });
+    });
+  }
 
   return router;
 }

@@ -67,10 +67,9 @@ export const useFavoritesStore = defineStore('favorites', () => {
     return favorites.value.find((f) => f.songId === songId && f.platform === platform)?.id;
   }
 
-  function handleWsUpdate(data: { favorites?: Favorite[] }) {
-    if (data.favorites) {
-      favorites.value = data.favorites;
-    }
+  function handleWsUpdate() {
+    // Re-fetch from server to ensure we show the current user's favorites
+    fetchFavorites();
   }
 
   return {

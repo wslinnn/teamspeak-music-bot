@@ -11,11 +11,10 @@ import type { CookieStore } from "../music/auth.js";
 import { createBotRouter } from "./api/bot.js";
 import { createMusicRouter } from "./api/music.js";
 import { createPlayerRouter } from "./api/player.js";
-import { createAuthRouter } from "./api/auth.js";
+import { createAuthRouterWithConfig } from "./api/auth.js";
 import { createFavoritesRouter } from "./api/favorites.js";
 import { setupWebSocket } from "./websocket.js";
-import { deriveSecret, signToken, verifyToken } from "../auth/jwt.js";
-import { createRateLimiter } from "../auth/rate-limit.js";
+import { deriveSecret, verifyToken } from "../auth/jwt.js";
 import { createRequireAuth, createRequireAdmin } from "../auth/middleware.js";
 
 export interface WebServerOptions {
@@ -61,45 +60,6 @@ export function createWebServer(options: WebServerOptions): WebServer {
     res.json({ publicUrl: raw ? raw.replace(/\/+$/, "") : null });
   });
 
-  const loginLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5000 });
-
-  app.post("/api/auth/login", (req, res, next) => {
-    const ip = req.ip ?? "unknown";
-    if (loginLimiter.isLimited(ip)) {
-      res.status(429).json({ success: false, error: "Too many login attempts" });
-      return;
-    }
-    next();
-  }, (req, res) => {
-    const { username, password } = req.body;
-
-    // Legacy single-admin mode (password only)
-    if (
-      !username &&
-      password === options.config.adminPassword &&
-      options.config.adminPassword
-    ) {
-      const token = signToken("admin", jwtSecret, options.config.jwtExpiresIn);
-      res.json({ success: true, token, expiresIn: options.config.jwtExpiresIn });
-      return;
-    }
-
-    // User array mode
-    const user = options.config.users.find(
-      (u) => u.username === username && u.password === password
-    );
-    if (user) {
-      const token = signToken(user.role, jwtSecret, options.config.jwtExpiresIn);
-      res.json({ success: true, token, expiresIn: options.config.jwtExpiresIn });
-      return;
-    }
-
-    const clientIp = req.ip ?? "unknown";
-    loginLimiter.recordFailure(clientIp);
-    logger.warn({ ip: clientIp }, "Login failed");
-    res.status(401).json({ success: false, error: "Invalid credentials" });
-  });
-
   app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
@@ -137,7 +97,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       options.neteaseProvider,
       options.qqProvider,
       options.bilibiliProvider,
-      logger
+      logger,
+      requireAdmin
     )
   );
   app.use(
@@ -148,16 +109,20 @@ export function createWebServer(options: WebServerOptions): WebServer {
       options.database,
       options.neteaseProvider,
       options.qqProvider,
-      options.bilibiliProvider
+      options.bilibiliProvider,
+      requireAdmin
     )
   );
   app.use(
     "/api/auth",
-    createAuthRouter(
+    createAuthRouterWithConfig(
       options.neteaseProvider,
       options.qqProvider,
       options.bilibiliProvider,
       logger,
+      options.config,
+      jwtSecret,
+      options.config.jwtExpiresIn,
       options.cookieStore
     )
   );

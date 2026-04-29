@@ -1,75 +1,75 @@
 <template>
-  <div class="player-wrapper" v-if="currentSong">
+  <div class="fixed bottom-0 left-0 right-0 z-[100]" v-if="currentSong">
     <Queue :open="showQueue" @close="showQueue = false" />
 
-    <div class="player-bar frosted-glass">
+    <div class="h-[var(--player-height)] flex items-center px-6 border-t border-border-color relative frosted-glass">
       <!-- Progress bar -->
       <div
-        class="progress-bar-container"
+        class="absolute -top-1.5 left-0 right-0 h-3 cursor-pointer z-[101] flex items-center px-0"
         ref="progressBarRef"
         @click="onProgressClick"
         @mousemove="onProgressHover"
         @mouseleave="progressTooltipVisible = false"
       >
-        <div class="progress-bar-bg">
-          <div class="progress-bar-fill" :style="{ width: progressPercent + '%' }" />
-          <div class="progress-bar-thumb" :style="{ left: progressPercent + '%' }" />
+        <div class="w-full h-0.5 bg-border-color transition-[height] duration-150 relative rounded-sm group">
+          <div class="absolute top-0 left-0 h-full bg-primary rounded-sm" :style="{ width: progressPercent + '%' }" />
+          <div class="absolute top-1/2 w-2.5 h-2.5 bg-primary rounded-full -ml-[5px] -mt-[5px] opacity-0 scale-0 transition-all duration-150 group-hover:opacity-100 group-hover:scale-100" :style="{ left: progressPercent + '%' }" />
         </div>
         <div
           v-if="progressTooltipVisible"
-          class="progress-tooltip"
+          class="absolute -top-7 -translate-x-1/2 bg-bg-secondary border border-border-color rounded-[var(--radius-sm)] px-2 py-0.5 text-[11px] text-text-secondary whitespace-nowrap pointer-events-none"
           :style="{ left: progressTooltipX + 'px' }"
         >
           {{ progressTooltipTime }}
         </div>
       </div>
 
-      <div class="player-left" @click="toggleLyrics">
-        <CoverArt :url="currentSong.coverUrl" :size="40" />
-        <div class="song-info">
-          <div class="song-name">
+      <div class="flex items-center gap-3 w-[240px] no-underline text-inherit cursor-pointer transition-opacity duration-[var(--transition-fast)] hover:opacity-80" @click="toggleLyrics">
+        <CoverArt :url="currentSong.coverUrl" :size="40" :show-shadow="true" />
+        <div class="min-w-0">
+          <div class="text-[13px] font-medium truncate">
             <PlayingIndicator v-if="store.isPlaying && !store.isPaused" :is-playing="true" class="mr-2 inline-flex" />
             {{ currentSong.name }}
           </div>
-          <div class="song-artist">
-            <span v-if="showBotBadge" class="bot-badge">{{ activeBot?.name }}</span>
+          <div class="text-[11px] text-text-secondary flex items-center gap-1">
+            <span v-if="showBotBadge" class="inline-block text-[10px] font-semibold px-[5px] bg-[rgba(51,94,234,0.15)] text-primary rounded-[3px] leading-4 whitespace-nowrap shrink-0">{{ activeBot?.name }}</span>
             {{ currentSong.artist }}
           </div>
         </div>
       </div>
 
-      <div class="player-center">
-        <span class="time-display time-current hidden sm:inline">{{ formatTime(currentElapsed) }}</span>
-        <button class="control-btn" @click="store.prev()">
+      <div class="flex-1 flex justify-center items-center gap-5">
+        <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-right hidden sm:inline">{{ formatTime(currentElapsed) }}</span>
+        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.prev()">
           <Icon icon="mdi:skip-previous" />
         </button>
-        <button class="play-btn" @click="togglePlay">
+        <button class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-lg text-white transition-transform duration-[var(--transition-fast)] hover:scale-[1.08] active:scale-95" @click="togglePlay">
           <Icon :icon="store.isPlaying ? 'mdi:pause' : 'mdi:play'" />
         </button>
-        <button class="control-btn" @click="store.next()">
+        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.next()">
           <Icon icon="mdi:skip-next" />
         </button>
-        <button class="control-btn mode-btn hidden sm:flex" @click="cycleMode" :title="modeLabel">
+        <button class="hidden sm:flex items-center gap-1 text-lg opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="cycleMode" :title="modeLabel">
           <Icon :icon="modeIcon" />
-          <span class="mode-label">{{ modeLabel }}</span>
+          <span class="text-[11px] font-medium">{{ modeLabel }}</span>
         </button>
-        <span class="time-display time-total hidden sm:inline">{{ formatTime(currentSong?.duration ?? 0) }}</span>
+        <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-left hidden sm:inline">{{ formatTime(currentSong?.duration ?? 0) }}</span>
       </div>
 
-      <div class="player-right">
-        <Icon icon="mdi:volume-high" class="volume-icon hidden sm:block" />
+      <div class="w-[240px] flex items-center justify-end gap-2">
+        <Icon icon="mdi:volume-high" class="text-lg opacity-60 hidden sm:block" />
         <input
           type="range"
           min="0"
           max="100"
           :value="activeBot?.volume ?? 75"
           @change="onVolumeChange"
-          class="volume-slider hidden sm:block"
+          class="hidden sm:block w-20 h-[3px] appearance-none bg-border-color rounded-sm outline-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
         />
-        <button class="control-btn" :class="{ active: showQueue }" @click="showQueue = !showQueue">
+        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" :class="{ 'opacity-100 text-primary': showQueue }" @click="showQueue = !showQueue">
           <Icon icon="mdi:playlist-music" />
         </button>
-        <button class="control-btn lyrics-btn hidden sm:block" :class="{ active: route.path === '/lyrics' }" @click="toggleLyrics">
+        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 ml-2 hidden sm:block" :class="{ 'opacity-100 text-primary': route.path === '/lyrics' }" @click="toggleLyrics">
           <Icon icon="mdi:microphone" />
         </button>
       </div>
@@ -98,7 +98,6 @@ const showBotBadge = computed(() => store.bots.length > 1);
 
 function toggleLyrics() {
   if (route.path === '/lyrics') {
-    // Go back if there's history, otherwise go home
     if (window.history.length > 1) {
       router.back();
     } else {
@@ -109,7 +108,6 @@ function toggleLyrics() {
   }
 }
 
-// Progress — use manual timer instead of relying on reactive getters
 const currentElapsed = ref(0);
 const progressPercent = ref(0);
 const progressTooltipVisible = ref(false);
@@ -130,7 +128,6 @@ function updateProgress() {
     ? Math.min((currentElapsed.value / duration) * 100, 100)
     : 0;
 
-  // Only schedule next frame if still playing
   if (store.isPlaying) {
     rafId = requestAnimationFrame(updateProgress);
   } else {
@@ -167,12 +164,10 @@ onUnmounted(() => {
   if (rafId !== null) cancelAnimationFrame(rafId);
 });
 
-// Restart/stop rAF when play state changes
 watch(() => store.isPlaying, (playing) => {
   if (playing && rafId === null) {
     rafId = requestAnimationFrame(updateProgress);
   }
-  // When pausing, the next updateProgress tick will stop itself
 });
 
 function togglePlay() {
@@ -212,218 +207,3 @@ function cycleMode() {
   store.setMode(next);
 }
 </script>
-
-<style scoped>
-.player-wrapper {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-}
-
-.player-bar {
-  height: var(--player-height);
-  display: flex;
-  align-items: center;
-  padding: 0 24px;
-  border-top: 1px solid var(--border-color);
-  position: relative;
-}
-
-.progress-bar-container {
-  position: absolute;
-  top: -6px;
-  left: 0;
-  right: 0;
-  height: 12px;
-  cursor: pointer;
-  z-index: 101;
-  display: flex;
-  align-items: center;
-  padding: 0;
-}
-
-.progress-bar-container:hover .progress-bar-bg { height: 4px; }
-.progress-bar-container:hover .progress-bar-thumb { opacity: 1; transform: scale(1); }
-
-.progress-bar-bg {
-  width: 100%;
-  height: 2px;
-  background: var(--border-color);
-  transition: height 0.15s ease;
-  position: relative;
-  border-radius: 1px;
-}
-
-.progress-bar-fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background: var(--color-primary);
-  border-radius: 1px;
-  /* No transition — updated via rAF for smooth movement */
-}
-
-.progress-bar-thumb {
-  position: absolute;
-  top: 50%;
-  width: 10px;
-  height: 10px;
-  background: var(--color-primary);
-  border-radius: 50%;
-  transform: scale(0);
-  opacity: 0;
-  transition: opacity 0.15s, transform 0.15s;
-  margin-left: -5px;
-  margin-top: -5px;
-}
-
-.progress-tooltip {
-  position: absolute;
-  top: -28px;
-  transform: translateX(-50%);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.time-display {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-  min-width: 36px;
-}
-
-.time-current { text-align: right; }
-.time-total { text-align: left; }
-
-.player-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 240px;
-  text-decoration: none;
-  color: inherit;
-  cursor: pointer;
-  transition: opacity var(--transition-fast);
-}
-.player-left:hover { opacity: 0.8; }
-
-.song-info {
-  min-width: 0;
-}
-
-.song-name {
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.song-artist {
-  font-size: 11px;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.bot-badge {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 600;
-  padding: 0 5px;
-  background: rgba(51, 94, 234, 0.15);
-  color: var(--color-primary);
-  border-radius: 3px;
-  line-height: 16px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.player-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 20px;
-}
-
-.control-btn {
-  font-size: 20px;
-  opacity: 0.7;
-  transition: opacity var(--transition-fast);
-}
-.control-btn:hover { opacity: 1; }
-.control-btn.active { opacity: 1; color: var(--color-primary); }
-
-.mode-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 18px;
-}
-
-.mode-label {
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.play-btn {
-  width: 32px;
-  height: 32px;
-  background: var(--color-primary);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  color: white;
-  transition: transform var(--transition-fast);
-}
-.play-btn:hover { transform: scale(1.08); }
-.play-btn:active { transform: scale(0.95); }
-
-.player-right {
-  width: 240px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.volume-icon {
-  font-size: 18px;
-  opacity: 0.6;
-}
-
-.volume-slider {
-  width: 80px;
-  height: 3px;
-  appearance: none;
-  background: var(--border-color);
-  border-radius: 2px;
-  outline: none;
-}
-
-.volume-slider::-webkit-slider-thumb {
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  background: var(--color-primary);
-  border-radius: 50%;
-  cursor: pointer;
-}
-
-.lyrics-btn {
-  margin-left: 8px;
-}
-</style>

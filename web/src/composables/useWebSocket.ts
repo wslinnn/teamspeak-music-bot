@@ -141,9 +141,9 @@ export function useWebSocket() {
           }
           break;
         case 'favoritesChanged':
-          if (Array.isArray(data.favorites)) {
+          {
             const favoritesStore = useFavoritesStore();
-            favoritesStore.handleWsUpdate({ favorites: data.favorites as any });
+            favoritesStore.handleWsUpdate();
           }
           break;
         default:

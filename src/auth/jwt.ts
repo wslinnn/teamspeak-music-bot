@@ -3,6 +3,7 @@ import jwt, { type SignOptions } from "jsonwebtoken";
 
 export interface JwtPayload {
   role: "admin" | "user";
+  sub: string;
 }
 
 export function deriveSecret(adminPassword: string): string {
@@ -15,9 +16,10 @@ export function deriveSecret(adminPassword: string): string {
 export function signToken(
   role: "admin" | "user",
   secret: string,
-  expiresIn: string = "24h"
+  expiresIn: string = "24h",
+  username?: string
 ): string {
-  return jwt.sign({ role }, secret, { expiresIn } as SignOptions);
+  return jwt.sign({ role, sub: username ?? role }, secret, { expiresIn } as SignOptions);
 }
 
 export function verifyToken(token: string, secret: string): JwtPayload | null {
