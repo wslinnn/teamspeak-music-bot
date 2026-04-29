@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { join } from "node:path";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { getDefaultConfig, loadConfig, saveConfig } from "./config.js";
+import { getDefaultConfig, loadConfig, saveConfig, validateConfig } from "./config.js";
 
 describe("config", () => {
   const dirs: string[] = [];
@@ -50,5 +50,37 @@ describe("config", () => {
     expect(loaded.theme).toBe("dark");
     expect(loaded.commandPrefix).toBe("!");
     expect(loaded.autoPauseOnEmpty).toBe(true);
+  });
+});
+
+describe("validateConfig", () => {
+  it("accepts valid config", () => {
+    const config = getDefaultConfig();
+    expect(() => validateConfig(config)).not.toThrow();
+  });
+
+  it("rejects port below 1", () => {
+    const config = { ...getDefaultConfig(), webPort: 0 };
+    expect(() => validateConfig(config)).toThrow(/webPort/);
+  });
+
+  it("rejects port above 65535", () => {
+    const config = { ...getDefaultConfig(), webPort: 70000 };
+    expect(() => validateConfig(config)).toThrow(/webPort/);
+  });
+
+  it("rejects negative autoReturnDelay", () => {
+    const config = { ...getDefaultConfig(), autoReturnDelay: -1 };
+    expect(() => validateConfig(config)).toThrow(/autoReturnDelay/);
+  });
+
+  it("rejects invalid locale", () => {
+    const config = { ...getDefaultConfig(), locale: "fr" as "zh" | "en" };
+    expect(() => validateConfig(config)).toThrow(/locale/);
+  });
+
+  it("rejects invalid theme", () => {
+    const config = { ...getDefaultConfig(), theme: "neon" as "dark" | "light" };
+    expect(() => validateConfig(config)).toThrow(/theme/);
   });
 });

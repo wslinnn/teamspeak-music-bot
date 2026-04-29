@@ -6,8 +6,10 @@ import type { Logger } from "../logger.js";
 export function setupWebSocket(
   wss: WebSocketServer,
   botManager: BotManager,
-  logger: Logger
-): () => void {
+  logger: Logger,
+  jwtSecret: string,
+  authEnabled: boolean,
+): { cleanup: () => void; broadcast: (data: object) => void } {
   const clients = new Set<WebSocket>();
 
   /** Track which bot instances have listeners attached (keyed by id, storing ref) */
@@ -43,6 +45,7 @@ export function setupWebSocket(
         try {
           client.send(message);
         } catch {
+          client.terminate();
           clients.delete(client);
         }
       }
@@ -136,13 +139,16 @@ export function setupWebSocket(
   }, 5000);
   ensureAllBotsAttached();
 
-  return () => {
-    clearInterval(intervalId);
-    botManager.removeListener("botInstance", onBotInstance);
-    botManager.removeListener("botInstanceRemoved", onBotInstanceRemoved);
-    // Clean up all attached listeners (detach from stored bot refs, not live map)
-    for (const id of Array.from(attachedBots.keys())) {
-      detachBotListener(id);
-    }
+  return {
+    cleanup: () => {
+      clearInterval(intervalId);
+      botManager.removeListener("botInstance", onBotInstance);
+      botManager.removeListener("botInstanceRemoved", onBotInstanceRemoved);
+      // Clean up all attached listeners (detach from stored bot refs, not live map)
+      for (const id of Array.from(attachedBots.keys())) {
+        detachBotListener(id);
+      }
+    },
+    broadcast,
   };
 }

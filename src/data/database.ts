@@ -42,6 +42,21 @@ export interface ProfileConfig {
   nowPlayingMsgEnabled: boolean;
 }
 
+export interface FavoriteEntry {
+  id?: number;
+  songId: string;
+  platform: string;
+  title: string;
+  artist: string;
+  coverUrl: string;
+  userId: string;
+}
+
+export interface FavoriteRecord extends FavoriteEntry {
+  id: number;
+  createdAt: string;
+}
+
 export const DEFAULT_PROFILE_CONFIG: ProfileConfig = {
   avatarEnabled: true,
   descriptionEnabled: true,
@@ -60,6 +75,11 @@ export interface BotDatabase {
   deleteBotInstance(id: string): boolean;
   getProfileConfig(botId: string): ProfileConfig;
   saveProfileConfig(botId: string, config: ProfileConfig): void;
+  addFavorite(entry: Omit<FavoriteEntry, "id">): void;
+  getFavorites(userId: string): FavoriteRecord[];
+  deleteFavorite(id: number, userId: string): boolean;
+  isFavorite(songId: string, platform: string, userId: string): boolean;
+  healthCheck(): boolean;
   close(): void;
 }
 
@@ -92,6 +112,13 @@ function migrateSchema(db: Database.Database): void {
       db.exec(`ALTER TABLE bot_instances ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 1`);
     }
   }
+
+  // Favorites user_id migration
+  const favColumns = db.prepare("PRAGMA table_info(favorites)").all() as Array<{ name: string }>;
+  const favNames = favColumns.map((c) => c.name);
+  if (!favNames.includes("userId")) {
+    db.exec("ALTER TABLE favorites ADD COLUMN userId TEXT NOT NULL DEFAULT 'admin'");
+  }
 }
 
 function initTables(db: Database.Database): void {
@@ -122,14 +149,29 @@ function initTables(db: Database.Database): void {
       serverPassword TEXT NOT NULL DEFAULT '',
       identity TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS favorites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      songId TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      coverUrl TEXT NOT NULL,
+      userId TEXT NOT NULL DEFAULT 'admin',
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_song_user ON favorites(songId, platform, userId);
   `);
 }
 
 export function createDatabase(dbPath: string): BotDatabase {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
-  initTables(db);
   migrateSchema(db);
+  initTables(db);
+
+  let closed = false;
 
   const insertHistory = db.prepare(`
     INSERT INTO play_history (botId, songId, songName, artist, album, platform, coverUrl)
@@ -177,6 +219,21 @@ export function createDatabase(dbPath: string): BotDatabase {
       profile_channel_desc_enabled = @channelDesc,
       profile_now_playing_enabled = @nowPlaying
     WHERE id = @id
+  `);
+
+  const insertFavorite = db.prepare(`
+    INSERT INTO favorites (songId, platform, title, artist, coverUrl, userId)
+    VALUES (@songId, @platform, @title, @artist, @coverUrl, @userId)
+  `);
+
+  const selectFavorites = db.prepare(`
+    SELECT * FROM favorites WHERE userId = ? ORDER BY id DESC
+  `);
+
+  const deleteFavorite = db.prepare(`DELETE FROM favorites WHERE id = ? AND userId = ?`);
+
+  const checkFavorite = db.prepare(`
+    SELECT 1 FROM favorites WHERE songId = ? AND platform = ? AND userId = ? LIMIT 1
   `);
 
   return {
@@ -242,7 +299,42 @@ export function createDatabase(dbPath: string): BotDatabase {
       });
     },
 
+    addFavorite(entry) {
+      insertFavorite.run(entry);
+    },
+
+    getFavorites(userId) {
+      return selectFavorites.all(userId) as FavoriteRecord[];
+    },
+
+    deleteFavorite(id, userId) {
+      const result = deleteFavorite.run(id, userId);
+      return result.changes > 0;
+    },
+
+    isFavorite(songId, platform, userId) {
+      const row = checkFavorite.get(songId, platform, userId);
+      return !!row;
+    },
+
+    healthCheck() {
+      try {
+        db.pragma("quick_check");
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
     close() {
+      if (closed) return;
+      closed = true;
+      // better-sqlite3 finalizes all prepared statements automatically on db.close()
+      try {
+        db.pragma("wal_checkpoint(TRUNCATE)");
+      } catch {
+        // Checkpoint may fail if WAL wasn't used — ignore
+      }
       db.close();
     },
   };
