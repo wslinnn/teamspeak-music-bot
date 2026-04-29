@@ -8,3 +8,4 @@ cookies/
 .superpowers/
 /bin/
 scripts/navbar_bigger.png
+*.log
