@@ -42,6 +42,20 @@ export interface ProfileConfig {
   nowPlayingMsgEnabled: boolean;
 }
 
+export interface FavoriteEntry {
+  id?: number;
+  songId: string;
+  platform: string;
+  title: string;
+  artist: string;
+  coverUrl: string;
+}
+
+export interface FavoriteRecord extends FavoriteEntry {
+  id: number;
+  createdAt: string;
+}
+
 export const DEFAULT_PROFILE_CONFIG: ProfileConfig = {
   avatarEnabled: true,
   descriptionEnabled: true,
@@ -60,6 +74,10 @@ export interface BotDatabase {
   deleteBotInstance(id: string): boolean;
   getProfileConfig(botId: string): ProfileConfig;
   saveProfileConfig(botId: string, config: ProfileConfig): void;
+  addFavorite(entry: Omit<FavoriteEntry, "id">): void;
+  getFavorites(): FavoriteRecord[];
+  deleteFavorite(id: number): boolean;
+  isFavorite(songId: string, platform: string): boolean;
   close(): void;
 }
 
@@ -122,6 +140,18 @@ function initTables(db: Database.Database): void {
       serverPassword TEXT NOT NULL DEFAULT '',
       identity TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS favorites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      songId TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      coverUrl TEXT NOT NULL,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_song ON favorites(songId, platform);
   `);
 }
 
@@ -179,6 +209,21 @@ export function createDatabase(dbPath: string): BotDatabase {
       profile_channel_desc_enabled = @channelDesc,
       profile_now_playing_enabled = @nowPlaying
     WHERE id = @id
+  `);
+
+  const insertFavorite = db.prepare(`
+    INSERT INTO favorites (songId, platform, title, artist, coverUrl)
+    VALUES (@songId, @platform, @title, @artist, @coverUrl)
+  `);
+
+  const selectFavorites = db.prepare(`
+    SELECT * FROM favorites ORDER BY id DESC
+  `);
+
+  const deleteFavorite = db.prepare(`DELETE FROM favorites WHERE id = ?`);
+
+  const checkFavorite = db.prepare(`
+    SELECT 1 FROM favorites WHERE songId = ? AND platform = ? LIMIT 1
   `);
 
   return {
@@ -242,6 +287,24 @@ export function createDatabase(dbPath: string): BotDatabase {
         channelDesc: config.channelDescEnabled ? 1 : 0,
         nowPlaying: config.nowPlayingMsgEnabled ? 1 : 0,
       });
+    },
+
+    addFavorite(entry) {
+      insertFavorite.run(entry);
+    },
+
+    getFavorites() {
+      return selectFavorites.all() as FavoriteRecord[];
+    },
+
+    deleteFavorite(id) {
+      const result = deleteFavorite.run(id);
+      return result.changes > 0;
+    },
+
+    isFavorite(songId, platform) {
+      const row = checkFavorite.get(songId, platform);
+      return !!row;
     },
 
     close() {
