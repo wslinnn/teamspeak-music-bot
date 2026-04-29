@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 export interface BotConfig {
   webPort: number;
@@ -23,6 +23,8 @@ export interface BotConfig {
   // behind HTTPS-terminating proxies.
   trustProxy: boolean;
   users: Array<{ username: string; password: string; role: "admin" | "user" }>;
+  /** JWT token expiration time (e.g. "24h", "7d"). Default: "24h" */
+  jwtExpiresIn: string;
 }
 
 export function getDefaultConfig(): BotConfig {
@@ -42,6 +44,7 @@ export function getDefaultConfig(): BotConfig {
     publicUrl: "",
     trustProxy: false,
     users: [],
+    jwtExpiresIn: "24h",
   };
 }
 
@@ -93,6 +96,8 @@ export function loadConfig(path: string): BotConfig {
 
 export function saveConfig(path: string, config: BotConfig): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+  const tmpPath = join(dirname(path), `.tmp-${Date.now()}.json`);
+  writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
+  renameSync(tmpPath, path);
 }
 

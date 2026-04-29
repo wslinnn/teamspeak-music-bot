@@ -198,7 +198,9 @@ export class BotInstance extends EventEmitter {
         } else {
           this._cancelIdleTimer();
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        this.logger.debug({ err }, "Idle poller failed to get channel clients");
+      }
       setTimeout(poll, 30_000);
     };
     setTimeout(poll, 30_000);

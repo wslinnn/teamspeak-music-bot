@@ -79,8 +79,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       password === options.config.adminPassword &&
       options.config.adminPassword
     ) {
-      const token = signToken("admin", jwtSecret);
-      res.json({ success: true, token, expiresIn: 86400 });
+      const token = signToken("admin", jwtSecret, options.config.jwtExpiresIn);
+      res.json({ success: true, token, expiresIn: options.config.jwtExpiresIn });
       return;
     }
 
@@ -89,11 +89,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
       (u) => u.username === username && u.password === password
     );
     if (user) {
-      const token = signToken(user.role, jwtSecret);
-      res.json({ success: true, token, expiresIn: 86400 });
+      const token = signToken(user.role, jwtSecret, options.config.jwtExpiresIn);
+      res.json({ success: true, token, expiresIn: options.config.jwtExpiresIn });
       return;
     }
 
+    const clientIp = req.ip ?? "unknown";
+    loginLimiter.recordFailure(clientIp);
+    logger.warn({ ip: clientIp }, "Login failed");
     res.status(401).json({ success: false, error: "Invalid credentials" });
   });
 
@@ -124,7 +127,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
       options.botManager,
       options.config,
       options.configPath,
-      logger
+      logger,
+      requireAdmin
     )
   );
   app.use(

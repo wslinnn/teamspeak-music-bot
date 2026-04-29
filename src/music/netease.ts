@@ -291,8 +291,9 @@ export class NeteaseProvider implements MusicProvider {
           avatarUrl: profile.avatarUrl,
         };
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      // Network or API errors during auth status check are benign
+      console.debug("getAuthStatus failed:", err);
     }
     return { loggedIn: false };
   }

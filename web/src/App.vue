@@ -30,7 +30,7 @@ const { connect } = useWebSocket();
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
-  authStore.checkAuthEnabled().catch(() => {});
+  authStore.checkAuthEnabled().catch((err) => console.warn('checkAuthEnabled failed:', err));
   playerStore.loadTheme();
   connect();
   playerStore.fetchBots();

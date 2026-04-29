@@ -204,8 +204,8 @@ export const usePlayerStore = defineStore('player', {
           serverSyncTime: Date.now(),
           wasPlaying: true,
         });
-      } catch {
-        // ignore
+      } catch (err) {
+        console.debug('syncElapsed failed:', err);
       }
     },
 
@@ -214,8 +214,8 @@ export const usePlayerStore = defineStore('player', {
       try {
         const res = await http.get(`/api/player/${this.activeBotId}/queue`);
         this.queues[this.activeBotId] = res.data.queue ?? [];
-      } catch {
-        // ignore
+      } catch (err) {
+        console.debug('fetchQueue failed:', err);
       }
     },
 
@@ -223,8 +223,8 @@ export const usePlayerStore = defineStore('player', {
       try {
         const res = await http.get(`/api/player/${botId}/queue`);
         this.queues[botId] = res.data.queue ?? [];
-      } catch {
-        // ignore
+      } catch (err) {
+        console.debug('fetchQueueForBot failed:', err);
       }
     },
 

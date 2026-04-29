@@ -193,7 +193,7 @@ export class AudioPlayer extends EventEmitter {
         process.kill(pid, "SIGKILL");
         this.logger.warn({ pid }, "FFmpeg required SIGKILL");
       } catch {
-        // Process already gone — nothing to do
+        this.logger.debug({ pid }, "SIGKILL target already exited");
       }
       if (this.activePid === pid) this.activePid = null;
     }, 3000);

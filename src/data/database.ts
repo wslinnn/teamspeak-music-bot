@@ -78,6 +78,7 @@ export interface BotDatabase {
   getFavorites(): FavoriteRecord[];
   deleteFavorite(id: number): boolean;
   isFavorite(songId: string, platform: string): boolean;
+  healthCheck(): boolean;
   close(): void;
 }
 
@@ -305,6 +306,15 @@ export function createDatabase(dbPath: string): BotDatabase {
     isFavorite(songId, platform) {
       const row = checkFavorite.get(songId, platform);
       return !!row;
+    },
+
+    healthCheck() {
+      try {
+        db.pragma("quick_check");
+        return true;
+      } catch {
+        return false;
+      }
     },
 
     close() {

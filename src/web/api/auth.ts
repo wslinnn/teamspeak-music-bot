@@ -31,7 +31,7 @@ export function createAuthRouter(
       res.json({ platform: provider.platform, ...status });
     } catch (err) {
       logger.error({ err }, "Auth status check failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -44,7 +44,7 @@ export function createAuthRouter(
       res.json(qr);
     } catch (err) {
       logger.error({ err }, "QR code generation failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -52,7 +52,7 @@ export function createAuthRouter(
     try {
       const { key, platform } = req.query;
       if (!key) {
-        res.status(400).json({ error: "key is required" });
+        res.status(400).json({ success: false, error: "key is required" });
         return;
       }
       const provider = getProvider(platform as string);
@@ -73,7 +73,7 @@ export function createAuthRouter(
       res.json({ status });
     } catch (err) {
       logger.error({ err }, "QR status check failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -81,19 +81,19 @@ export function createAuthRouter(
     try {
       const { phone } = req.body;
       if (!phone) {
-        res.status(400).json({ error: "phone is required" });
+        res.status(400).json({ success: false, error: "phone is required" });
         return;
       }
       if (!neteaseProvider.sendSmsCode) {
         res
           .status(400)
-          .json({ error: "SMS login not supported for this platform" });
+          .json({ success: false, error: "SMS login not supported for this platform" });
         return;
       }
       const success = await neteaseProvider.sendSmsCode(phone);
       res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -101,11 +101,11 @@ export function createAuthRouter(
     try {
       const { phone, code } = req.body;
       if (!phone || !code) {
-        res.status(400).json({ error: "phone and code are required" });
+        res.status(400).json({ success: false, error: "phone and code are required" });
         return;
       }
       if (!neteaseProvider.loginWithSms) {
-        res.status(400).json({ error: "SMS login not supported" });
+        res.status(400).json({ success: false, error: "SMS login not supported" });
         return;
       }
       const success = await neteaseProvider.loginWithSms(phone, code);
@@ -114,14 +114,14 @@ export function createAuthRouter(
       }
       res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.post("/cookie", (req, res) => {
     const { platform, cookie } = req.body;
     if (!cookie) {
-      res.status(400).json({ error: "cookie is required" });
+      res.status(400).json({ success: false, error: "cookie is required" });
       return;
     }
     // YouTube has no cookie concept — reject instead of falling through and

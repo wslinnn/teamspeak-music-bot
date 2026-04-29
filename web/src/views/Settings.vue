@@ -145,7 +145,9 @@ async function loadQuality() {
   try {
     const res = await http.get('/api/music/quality');
     currentQuality.value = res.data.netease || 'exhigh';
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.debug('loadQuality failed:', err);
+  }
 }
 
 async function setQuality(q: string) {
@@ -166,7 +168,9 @@ async function loadIdleTimeout() {
   try {
     const res = await http.get('/api/bot/settings');
     idleTimeout.value = res.data.idleTimeoutMinutes ?? 0;
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.debug('loadIdleTimeout failed:', err);
+  }
 }
 
 async function saveIdleTimeout(minutes: number) {
@@ -266,7 +270,9 @@ async function checkAuthStatus() {
     Object.assign(neteaseAuth, nRes.data);
     Object.assign(qqAuth, qRes.data);
     Object.assign(bilibiliAuth, bRes.data);
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.debug('checkAuthStatus failed:', err);
+  }
 }
 
 async function startQrLogin(platform: string) {
@@ -302,7 +308,9 @@ async function pollQrStatus(platform: string) {
       if (qr.pollTimer) clearInterval(qr.pollTimer);
       qr.pollTimer = null;
     }
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.debug('pollQrStatus failed:', err);
+  }
 }
 
 async function saveCookie(platform: string, cookie: string) {

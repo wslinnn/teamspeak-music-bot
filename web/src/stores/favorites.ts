@@ -21,7 +21,8 @@ export const useFavoritesStore = defineStore('favorites', () => {
     try {
       const res = await http.get('/api/favorites');
       favorites.value = res.data.favorites ?? [];
-    } catch {
+    } catch (err) {
+      console.warn('fetchFavorites failed:', err);
       favorites.value = [];
     } finally {
       loading.value = false;
