@@ -8,6 +8,53 @@ import type {
   QrCodeResult,
   AuthStatus,
 } from "./provider.js";
+import type {
+  NeteaseArtist,
+  NeteaseAlbum,
+  NeteaseSong,
+  NeteasePlaylist,
+  NeteaseSearchSongResponse,
+  NeteaseSearchPlaylistResponse,
+  NeteaseSongDetailResponse,
+  NeteaseSongUrlResponse,
+  NeteasePersonalizedResponse,
+  NeteasePlaylistTrackResponse,
+  NeteaseAlbumResponse,
+  NeteasePersonalFmResponse,
+  NeteaseDailyRecommendResponse,
+  NeteaseLyricResponse,
+  NeteaseQrKeyResponse,
+  NeteaseQrCreateResponse,
+  NeteaseQrCheckResponse,
+  NeteaseLoginStatusResponse,
+  NeteaseCaptchaResponse,
+  NeteaseUserPlaylistResponse,
+  NeteasePlaylistDetailResponse,
+} from "./netease-types.js";
+
+function mapSong(s: NeteaseSong): Song {
+  const artists = (s.ar ?? s.artists ?? []) as NeteaseArtist[];
+  const album = (s.al ?? s.album) as NeteaseAlbum | undefined;
+  return {
+    id: String(s.id),
+    name: s.name,
+    artist: artists.map((a) => a.name).join(" / "),
+    album: album?.name ?? "",
+    duration: Math.round((s.dt ?? s.duration ?? 0) / 1000),
+    coverUrl: album?.picUrl ?? "",
+    platform: "netease",
+  };
+}
+
+function mapPlaylist(p: NeteasePlaylist): Playlist {
+  return {
+    id: String(p.id),
+    name: p.name,
+    coverUrl: p.coverImgUrl ?? p.picUrl ?? "",
+    songCount: p.trackCount ?? 0,
+    platform: "netease",
+  };
+}
 
 export function parseLyrics(lrc: string, tlyric?: string): LyricLine[] {
   if (!lrc) return [];
@@ -91,10 +138,10 @@ export class NeteaseProvider implements MusicProvider {
 
   async search(query: string, limit = 20): Promise<SearchResult> {
     const [songRes, playlistRes] = await Promise.all([
-      this.api.get("/cloudsearch", {
+      this.api.get<NeteaseSearchSongResponse>("/cloudsearch", {
         params: { keywords: query, type: 1, limit, ...this.cookieParams },
       }),
-      this.api.get("/cloudsearch", {
+      this.api.get<NeteaseSearchPlaylistResponse>("/cloudsearch", {
         params: {
           keywords: query,
           type: 1000,
@@ -104,101 +151,57 @@ export class NeteaseProvider implements MusicProvider {
       }),
     ]);
 
-    const songs: Song[] = (songRes.data?.result?.songs ?? []).map(
-      (s: any) => ({
-        id: String(s.id),
-        name: s.name,
-        artist: (s.ar ?? []).map((a: any) => a.name).join(" / "),
-        album: s.al?.name ?? "",
-        duration: Math.round((s.dt ?? 0) / 1000),
-        coverUrl: s.al?.picUrl ?? "",
-        platform: "netease",
-      })
-    );
+    const songs: Song[] = (songRes.data?.result?.songs ?? []).map(mapSong);
 
     const playlists: Playlist[] = (
       playlistRes.data?.result?.playlists ?? []
-    ).map((p: any) => ({
-      id: String(p.id),
-      name: p.name,
-      coverUrl: p.coverImgUrl ?? "",
-      songCount: p.trackCount ?? 0,
-      platform: "netease",
-    }));
+    ).map(mapPlaylist);
 
     return { songs, playlists, albums: [] };
   }
 
   async getSongUrl(songId: string, quality?: string): Promise<string | null> {
     const level = quality ?? this.quality;
-    const res = await this.api.get("/song/url/v1", {
+    const res = await this.api.get<NeteaseSongUrlResponse>("/song/url/v1", {
       params: { id: songId, level, ...this.cookieParams },
     });
     return res.data?.data?.[0]?.url ?? null;
   }
 
   async getSongDetail(songId: string): Promise<Song | null> {
-    const res = await this.api.get("/song/detail", {
+    const res = await this.api.get<NeteaseSongDetailResponse>("/song/detail", {
       params: { ids: songId, ...this.cookieParams },
     });
     const s = res.data?.songs?.[0];
     if (!s) return null;
-    return {
-      id: String(s.id),
-      name: s.name,
-      artist: (s.ar ?? []).map((a: any) => a.name).join(" / "),
-      album: s.al?.name ?? "",
-      duration: Math.round((s.dt ?? 0) / 1000),
-      coverUrl: s.al?.picUrl ?? "",
-      platform: "netease",
-    };
+    return mapSong(s);
   }
 
   async getPlaylistSongs(playlistId: string): Promise<Song[]> {
-    const res = await this.api.get("/playlist/track/all", {
-      params: { id: playlistId, ...this.cookieParams },
-    });
-    return (res.data?.songs ?? []).map((s: any) => ({
-      id: String(s.id),
-      name: s.name,
-      artist: (s.ar ?? []).map((a: any) => a.name).join(" / "),
-      album: s.al?.name ?? "",
-      duration: Math.round((s.dt ?? 0) / 1000),
-      coverUrl: s.al?.picUrl ?? "",
-      platform: "netease",
-    }));
+    const res = await this.api.get<NeteasePlaylistTrackResponse>(
+      "/playlist/track/all",
+      { params: { id: playlistId, ...this.cookieParams } }
+    );
+    return (res.data?.songs ?? []).map(mapSong);
   }
 
   async getRecommendPlaylists(): Promise<Playlist[]> {
-    const res = await this.api.get("/personalized", {
-      params: { limit: 10, ...this.cookieParams },
-    });
-    return (res.data?.result ?? []).map((p: any) => ({
-      id: String(p.id),
-      name: p.name,
-      coverUrl: p.picUrl ?? "",
-      songCount: p.trackCount ?? 0,
-      platform: "netease",
-    }));
+    const res = await this.api.get<NeteasePersonalizedResponse>(
+      "/personalized",
+      { params: { limit: 10, ...this.cookieParams } }
+    );
+    return (res.data?.result ?? []).map(mapPlaylist);
   }
 
   async getAlbumSongs(albumId: string): Promise<Song[]> {
-    const res = await this.api.get("/album", {
+    const res = await this.api.get<NeteaseAlbumResponse>("/album", {
       params: { id: albumId, ...this.cookieParams },
     });
-    return (res.data?.songs ?? []).map((s: any) => ({
-      id: String(s.id),
-      name: s.name,
-      artist: (s.ar ?? []).map((a: any) => a.name).join(" / "),
-      album: s.al?.name ?? "",
-      duration: Math.round((s.dt ?? 0) / 1000),
-      coverUrl: s.al?.picUrl ?? "",
-      platform: "netease",
-    }));
+    return (res.data?.songs ?? []).map(mapSong);
   }
 
   async getLyrics(songId: string): Promise<LyricLine[]> {
-    const res = await this.api.get("/lyric", {
+    const res = await this.api.get<NeteaseLyricResponse>("/lyric", {
       params: { id: songId, ...this.cookieParams },
     });
     return parseLyrics(
@@ -208,13 +211,15 @@ export class NeteaseProvider implements MusicProvider {
   }
 
   async getQrCode(): Promise<QrCodeResult> {
-    const keyRes = await this.api.get("/login/qr/key", {
-      params: { timestamp: Date.now() },
-    });
+    const keyRes = await this.api.get<NeteaseQrKeyResponse>(
+      "/login/qr/key",
+      { params: { timestamp: Date.now() } }
+    );
     const key = keyRes.data?.data?.unikey ?? "";
-    const createRes = await this.api.get("/login/qr/create", {
-      params: { key, qrimg: true },
-    });
+    const createRes = await this.api.get<NeteaseQrCreateResponse>(
+      "/login/qr/create",
+      { params: { key, qrimg: true } }
+    );
     return {
       qrUrl: createRes.data?.data?.qrurl ?? "",
       qrImg: createRes.data?.data?.qrimg ?? "",
@@ -225,9 +230,10 @@ export class NeteaseProvider implements MusicProvider {
   async checkQrCodeStatus(
     key: string
   ): Promise<"waiting" | "scanned" | "confirmed" | "expired"> {
-    const res = await this.api.get("/login/qr/check", {
-      params: { key, timestamp: Date.now() },
-    });
+    const res = await this.api.get<NeteaseQrCheckResponse>(
+      "/login/qr/check",
+      { params: { key, timestamp: Date.now() } }
+    );
     const code = res.data?.code;
     switch (code) {
       case 801:
@@ -245,16 +251,17 @@ export class NeteaseProvider implements MusicProvider {
   }
 
   async sendSmsCode(phone: string): Promise<boolean> {
-    const res = await this.api.get("/captcha/sent", {
+    const res = await this.api.get<NeteaseCaptchaResponse>("/captcha/sent", {
       params: { phone },
     });
     return res.data?.code === 200;
   }
 
   async loginWithSms(phone: string, code: string): Promise<boolean> {
-    const res = await this.api.get("/captcha/verify", {
-      params: { phone, captcha: code },
-    });
+    const res = await this.api.get<NeteaseCaptchaResponse>(
+      "/captcha/verify",
+      { params: { phone, captcha: code } }
+    );
     if (res.data?.cookie) {
       this.cookie = res.data.cookie;
     }
@@ -272,9 +279,10 @@ export class NeteaseProvider implements MusicProvider {
   async getAuthStatus(): Promise<AuthStatus> {
     if (!this.cookie) return { loggedIn: false };
     try {
-      const res = await this.api.get("/login/status", {
-        params: { ...this.cookieParams },
-      });
+      const res = await this.api.get<NeteaseLoginStatusResponse>(
+        "/login/status",
+        { params: { ...this.cookieParams } }
+      );
       const profile = res.data?.data?.profile;
       if (profile) {
         return {
@@ -290,53 +298,33 @@ export class NeteaseProvider implements MusicProvider {
   }
 
   async getPersonalFm(): Promise<Song[]> {
-    const res = await this.api.get("/personal_fm", {
+    const res = await this.api.get<NeteasePersonalFmResponse>("/personal_fm", {
       params: { ...this.cookieParams },
     });
-    return (res.data?.data ?? []).map((s: any) => ({
-      id: String(s.id),
-      name: s.name,
-      artist: (s.artists ?? []).map((a: any) => a.name).join(" / "),
-      album: s.album?.name ?? "",
-      duration: Math.round((s.duration ?? 0) / 1000),
-      coverUrl: s.album?.picUrl ?? "",
-      platform: "netease",
-    }));
+    return (res.data?.data ?? []).map(mapSong);
   }
 
   async getDailyRecommendSongs(): Promise<Song[]> {
-    const res = await this.api.get("/recommend/songs", {
-      params: { ...this.cookieParams },
-    });
-    return (res.data?.data?.dailySongs ?? []).map((s: any) => ({
-      id: String(s.id),
-      name: s.name,
-      artist: (s.ar ?? []).map((a: any) => a.name).join(" / "),
-      album: s.al?.name ?? "",
-      duration: Math.round((s.dt ?? 0) / 1000),
-      coverUrl: s.al?.picUrl ?? "",
-      platform: "netease",
-    }));
+    const res = await this.api.get<NeteaseDailyRecommendResponse>(
+      "/recommend/songs",
+      { params: { ...this.cookieParams } }
+    );
+    return (res.data?.data?.dailySongs ?? []).map(mapSong);
   }
 
   async getUserPlaylists(): Promise<Playlist[]> {
-    // First get user ID from login status
-    const statusRes = await this.api.get("/login/status", {
-      params: { ...this.cookieParams },
-    });
+    const statusRes = await this.api.get<NeteaseLoginStatusResponse>(
+      "/login/status",
+      { params: { ...this.cookieParams } }
+    );
     const uid = statusRes.data?.data?.profile?.userId;
     if (!uid) return [];
 
-    const res = await this.api.get("/user/playlist", {
-      params: { uid, ...this.cookieParams },
-    });
-    return (res.data?.playlist ?? []).map((p: any) => ({
-      id: String(p.id),
-      name: p.name,
-      coverUrl: p.coverImgUrl ?? "",
-      songCount: p.trackCount ?? 0,
-      platform: "netease",
-    }));
+    const res = await this.api.get<NeteaseUserPlaylistResponse>(
+      "/user/playlist",
+      { params: { uid, ...this.cookieParams } }
+    );
+    return (res.data?.playlist ?? []).map(mapPlaylist);
   }
 
   async getPlaylistDetail(playlistId: string): Promise<{
@@ -346,10 +334,10 @@ export class NeteaseProvider implements MusicProvider {
     coverUrl: string;
     songCount: number;
   }> {
-    const cookieParams = this.cookieParams;
-    const detailRes = await this.api.get("/playlist/detail", {
-      params: { id: playlistId, ...cookieParams },
-    });
+    const detailRes = await this.api.get<NeteasePlaylistDetailResponse>(
+      "/playlist/detail",
+      { params: { id: playlistId, ...this.cookieParams } }
+    );
     const p = detailRes.data?.playlist;
     return {
       id: String(p?.id ?? ""),
