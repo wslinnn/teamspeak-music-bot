@@ -1,0 +1,206 @@
+@import "tailwindcss";
+
+/* ── Theme tokens (migrated from variables.scss) ── */
+@theme {
+  /* Colors */
+  --color-primary: #335eea;
+  --color-primary-bg: #eaeffd;
+  --color-success: #22c55e;
+  --color-warning: #eab308;
+  --color-danger: #ef4444;
+
+  /* Surfaces (bound to existing CSS variables for dark/light toggle compatibility) */
+  --color-surface: var(--bg-primary);
+  --color-surface-elevated: var(--bg-secondary);
+  --color-surface-card: var(--bg-card);
+  --color-surface-navbar: var(--bg-navbar);
+
+  /* Foreground */
+  --color-foreground: var(--text-primary);
+  --color-foreground-muted: var(--text-secondary);
+  --color-foreground-subtle: var(--text-tertiary);
+
+  /* Legacy aliases used throughout components */
+  --color-bg-primary: var(--bg-primary);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-card: var(--bg-card);
+  --color-bg-navbar: var(--bg-navbar);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-border-color: var(--border-color);
+  --color-hover-bg: var(--hover-bg);
+
+  /* Font */
+  --font-family-sans: 'Barlow', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Animation */
+  --transition-fast: 0.2s ease;
+  --transition-normal: 0.3s ease;
+}
+
+/* Dark mode variant driven by [data-theme="dark"] */
+@variant dark (&:where([data-theme="dark"] *));
+
+/* ── CSS custom properties for dark/light theming ── */
+:root {
+  --font-primary: 'Barlow', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --navbar-height: 56px;
+  --player-height: 56px;
+}
+
+[data-theme='dark'] {
+  --bg-primary: #222222;
+  --bg-secondary: #323232;
+  --bg-card: rgba(255, 255, 255, 0.04);
+  --bg-navbar: rgba(34, 34, 34, 0.86);
+  --bg-elevated: #383838;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.58);
+  --text-tertiary: rgba(255, 255, 255, 0.38);
+  --border-color: rgba(255, 255, 255, 0.06);
+  --hover-bg: rgba(255, 255, 255, 0.08);
+  --shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme='light'] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f7;
+  --bg-card: rgba(0, 0, 0, 0.02);
+  --bg-navbar: rgba(255, 255, 255, 0.86);
+  --bg-elevated: #ffffff;
+  --text-primary: #000000;
+  --text-secondary: rgba(0, 0, 0, 0.68);
+  --text-tertiary: rgba(0, 0, 0, 0.52);
+  --border-color: rgba(0, 0, 0, 0.06);
+  --hover-bg: rgba(0, 0, 0, 0.04);
+  --shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+/* ── Global reset (from global.scss) ── */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    font-size: 16px;
+  }
+
+  body {
+    font-family: var(--font-family-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  button {
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-family: inherit;
+    color: inherit;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--text-tertiary);
+    border-radius: 4px;
+  }
+}
+
+/* ── Utility classes previously in global.scss ── */
+@layer utilities {
+  .frosted-glass {
+    background: var(--bg-navbar);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+  }
+
+  .hover-scale {
+    transition: transform var(--transition-fast);
+  }
+  .hover-scale:hover {
+    transform: translateY(-2px);
+  }
+  .hover-scale:active {
+    transform: translateY(0);
+  }
+
+  .input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--hover-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+  }
+  .input:focus {
+    border-color: var(--color-primary);
+  }
+}
+
+/* ── Route transition ── */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 150ms ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Staggered list enter animation */
+.stagger-enter-active {
+  transition: all 0.3s ease;
+}
+.stagger-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+@keyframes bar-bounce {
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .hover-scale,
+  .hover-scale:hover,
+  .hover-scale:active {
+    transform: none !important;
+    box-shadow: none !important;
+    transition: none !important;
+  }
+
+  .stagger-enter-active {
+    transition: none !important;
+  }
+  .stagger-enter-from {
+    transform: none !important;
+  }
+}

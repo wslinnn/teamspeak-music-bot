@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -22,6 +23,7 @@ const router = createRouter({
       path: '/lyrics',
       name: 'lyrics',
       component: () => import('../views/Lyrics.vue'),
+      meta: { hideNavbar: true },
     },
     {
       path: '/history',
@@ -29,9 +31,15 @@ const router = createRouter({
       component: () => import('../views/History.vue'),
     },
     {
+      path: '/favorites',
+      name: 'favorites',
+      component: () => import('../views/Favorites.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/setup',
@@ -39,12 +47,62 @@ const router = createRouter({
       component: () => import('../views/Setup.vue'),
     },
     {
-      // Per-bot URL: /bot/:id — sets active bot then redirects to home
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/Login.vue'),
+    },
+    {
       path: '/bot/:id',
       name: 'bot',
       component: () => import('../views/BotRedirect.vue'),
     },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/NotFound.vue'),
+    },
   ],
+});
+
+router.beforeEach(async (to, from, next) => {
+  const authStore = useAuthStore();
+
+  // 404 始终放行
+  if (to.name === 'not-found') {
+    return next();
+  }
+
+  // 首次加载时检查后端状态
+  if (authStore.authEnabled === null) {
+    try {
+      await authStore.checkAuthEnabled();
+    } catch (err) {
+      console.warn('Failed to check auth status:', err);
+      return next();
+    }
+  }
+
+  // 需要初始化 → 引导到 /setup
+  if (authStore.needsSetup) {
+    return to.path === '/setup' ? next() : next({ path: '/setup' });
+  }
+
+  // 已初始化 → 不允许再访问 /setup
+  if (to.path === '/setup') {
+    return next({ path: '/' });
+  }
+
+  // 已登录用户访问 /login → 重定向首页
+  if (to.path === '/login') {
+    return authStore.isAuthenticated ? next({ path: '/' }) : next();
+  }
+
+  // 管理员专属页
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    return next({ path: '/' });
+  }
+
+  next();
 });
 
 export default router;
