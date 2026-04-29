@@ -7,7 +7,8 @@ describe("JWT utility", () => {
   it("signs and verifies a token", () => {
     const token = signToken({ role: "admin" }, secret, "1h");
     const payload = verifyToken(token, secret);
-    expect(payload.role).toBe("admin");
+    expect(payload).not.toBeNull();
+    expect(payload!.role).toBe("admin");
   });
 
   it("rejects a token signed with wrong secret", () => {
@@ -25,6 +26,7 @@ describe("JWT utility", () => {
   it("includes role in payload", () => {
     const token = signToken({ role: "user" }, secret, "1h");
     const payload = verifyToken(token, secret);
-    expect(payload.role).toBe("user");
+    expect(payload).not.toBeNull();
+    expect(payload!.role).toBe("user");
   });
 });

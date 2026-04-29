@@ -6,16 +6,16 @@ import type { BotManager } from "../bot/manager.js";
 import type { MusicProvider } from "../music/provider.js";
 import type { BotDatabase } from "../data/database.js";
 import type { BotConfig } from "../data/config.js";
-import { getJwtSecret } from "../data/config.js";
 import type { Logger } from "../logger.js";
 import type { CookieStore } from "../music/auth.js";
 import { createBotRouter } from "./api/bot.js";
 import { createMusicRouter } from "./api/music.js";
 import { createPlayerRouter } from "./api/player.js";
 import { createAuthRouter } from "./api/auth.js";
-import { createAdminLoginHandler } from "../auth/login.js";
-import { createRequireAuth } from "../auth/middleware.js";
-import { setupAuthenticatedWebSocket } from "./websocket.js";
+import { createFavoritesRouter } from "./api/favorites.js";
+import { setupWebSocket } from "./websocket.js";
+import { deriveSecret, signToken, verifyToken } from "../auth/jwt.js";
+import { createRequireAuth, createRequireAdmin } from "../auth/middleware.js";
 
 export interface WebServerOptions {
   port: number;
@@ -40,8 +40,6 @@ export function createWebServer(options: WebServerOptions): WebServer {
   const app = express();
   const server = http.createServer(app);
   const logger = options.logger.child({ component: "web" });
-  const jwtSecret = getJwtSecret(options.config.adminPassword);
-  const authEnabled = jwtSecret.length > 0;
 
   if (options.config.trustProxy) {
     app.set("trust proxy", true);
@@ -49,55 +47,150 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   app.use(express.json());
 
-  // --- Public routes (no auth required, per spec) ---
-  // These MUST be registered BEFORE the auth middleware below.
-  // Do NOT move them after the createRequireAuth() calls.
+  const authEnabled = !!(
+    options.config.adminPassword ||
+    options.config.users.length > 0
+  );
+  const jwtSecret = deriveSecret(options.config.adminPassword);
+  const requireAuth = createRequireAuth(jwtSecret);
+  const requireAdmin = createRequireAdmin(jwtSecret);
+
   app.get("/api/config/public-url", (_req, res) => {
     const raw = (options.config.publicUrl ?? "").trim();
     res.json({ publicUrl: raw ? raw.replace(/\/+$/, "") : null });
   });
 
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", version: "0.1.0", authEnabled });
+  app.post("/api/auth/login", (req, res) => {
+    const { username, password } = req.body;
+
+    // Legacy single-admin mode (password only)
+    if (
+      !username &&
+      password === options.config.adminPassword &&
+      options.config.adminPassword
+    ) {
+      const token = signToken("admin", jwtSecret);
+      res.json({ success: true, token, expiresIn: 86400 });
+      return;
+    }
+
+    // User array mode
+    const user = options.config.users.find(
+      (u) => u.username === username && u.password === password
+    );
+    if (user) {
+      const token = signToken(user.role, jwtSecret);
+      res.json({ success: true, token, expiresIn: 86400 });
+      return;
+    }
+
+    res.status(401).json({ success: false, error: "Invalid credentials" });
   });
 
-  // Login endpoint — always public (registered before auth middleware)
-  if (authEnabled) {
-    app.post(
-      "/api/auth/login",
-      createAdminLoginHandler(options.config.adminPassword, jwtSecret, logger),
-    );
-  }
+  app.get("/api/health", (_req, res) => {
+    res.json({
+      status: "ok",
+      version: "0.1.0",
+      authEnabled,
+    });
+  });
 
-  // --- Protected routes (auth required when enabled) ---
-  // IMPORTANT: All routes below this point require JWT authentication when
-  // adminPassword is set. To add a new public endpoint, register it ABOVE.
-  if (authEnabled) {
-    app.use("/api/bot", createRequireAuth(jwtSecret));
-    app.use("/api/music", createRequireAuth(jwtSecret));
-    app.use("/api/player", createRequireAuth(jwtSecret));
-    app.use("/api/auth", createRequireAuth(jwtSecret));
-    logger.info("Authentication enabled — all API endpoints require JWT");
-  } else {
-    logger.warn("No adminPassword set — authentication DISABLED, all endpoints are public");
-  }
+  // Global auth middleware for all /api/* except whitelist
+  const AUTH_WHITELIST = [
+    "/api/auth/login",
+    "/api/config/public-url",
+    "/api/health",
+  ];
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api")) return next();
+    if (AUTH_WHITELIST.includes(req.path)) return next();
+    if (!authEnabled) return next();
+    requireAuth(req, res, next);
+  });
 
-  // Route handlers
   app.use(
     "/api/bot",
-    createBotRouter(options.botManager, options.config, options.configPath, logger),
+    createBotRouter(
+      options.botManager,
+      options.config,
+      options.configPath,
+      logger
+    )
   );
   app.use(
     "/api/music",
-    createMusicRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger),
+    createMusicRouter(
+      options.neteaseProvider,
+      options.qqProvider,
+      options.bilibiliProvider,
+      logger
+    )
   );
-  app.use("/api/player", createPlayerRouter(
-    options.botManager, logger, options.database,
-    options.neteaseProvider, options.qqProvider, options.bilibiliProvider,
-  ));
+  app.use(
+    "/api/player",
+    createPlayerRouter(
+      options.botManager,
+      logger,
+      options.database,
+      options.neteaseProvider,
+      options.qqProvider,
+      options.bilibiliProvider
+    )
+  );
   app.use(
     "/api/auth",
-    createAuthRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger, options.cookieStore),
+    createAuthRouter(
+      options.neteaseProvider,
+      options.qqProvider,
+      options.bilibiliProvider,
+      logger,
+      options.cookieStore
+    )
+  );
+
+  server.on("error", (err) => {
+    logger.error({ err }, "HTTP server error");
+  });
+
+  const wss = new WebSocketServer({
+    server,
+    path: "/ws",
+    verifyClient: authEnabled
+      ? (info, cb) => {
+          const url = new URL(
+            info.req.url || "",
+            `http://${info.req.headers.host}`
+          );
+          const token = url.searchParams.get("token");
+          if (!token) {
+            cb(false, 4001, "Authentication required");
+            return;
+          }
+          const payload = verifyToken(token, jwtSecret);
+          if (!payload) {
+            cb(false, 4001, "Invalid token");
+            return;
+          }
+          cb(true);
+        }
+      : undefined,
+  });
+  wss.on("error", (err) => {
+    logger.error({ err }, "WebSocket server error");
+  });
+  const wsResult = setupWebSocket(
+    wss,
+    options.botManager,
+    logger,
+    jwtSecret,
+    authEnabled
+  );
+
+  app.use(
+    "/api/favorites",
+    createFavoritesRouter(options.database, (data: object) =>
+      wsResult.broadcast(data)
+    )
   );
 
   if (options.staticDir) {
@@ -114,18 +207,6 @@ export function createWebServer(options: WebServerOptions): WebServer {
     res.status(500).json({ success: false, error: "Internal server error" });
   });
 
-  server.on("error", (err) => {
-    logger.error({ err }, "HTTP server error");
-  });
-
-  const wss = new WebSocketServer({ server, path: "/ws" });
-  wss.on("error", (err) => {
-    logger.error({ err }, "WebSocket server error");
-  });
-  const cleanupWs = setupAuthenticatedWebSocket(
-    wss, options.botManager, logger, jwtSecret,
-  );
-
   return {
     async start(): Promise<void> {
       return new Promise((resolve) => {
@@ -136,7 +217,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       });
     },
     stop(): void {
-      cleanupWs();
+      wsResult.cleanup();
       wss.close();
       server.close();
     },

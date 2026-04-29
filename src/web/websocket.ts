@@ -4,12 +4,13 @@ import type { BotInstance } from "../bot/instance.js";
 import type { Logger } from "../logger.js";
 import { verifyToken } from "../auth/jwt.js";
 
-export function setupAuthenticatedWebSocket(
+export function setupWebSocket(
   wss: WebSocketServer,
   botManager: BotManager,
   logger: Logger,
   jwtSecret: string,
-): () => void {
+  authEnabled: boolean,
+): { cleanup: () => void; broadcast: (data: object) => void } {
   const clients = new Set<WebSocket>();
 
   /** Track which bot instances have listeners attached (keyed by id, storing ref) */
@@ -22,7 +23,7 @@ export function setupAuthenticatedWebSocket(
 
   wss.on("connection", (ws, req) => {
     // --- Token validation ---
-    if (jwtSecret) {
+    if (authEnabled && jwtSecret) {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       const token = url.searchParams.get("token");
       if (!token) {
@@ -30,9 +31,8 @@ export function setupAuthenticatedWebSocket(
         ws.close(4001, "Authentication required");
         return;
       }
-      try {
-        verifyToken(token, jwtSecret);
-      } catch {
+      const payload = verifyToken(token, jwtSecret);
+      if (!payload) {
         logger.warn("WebSocket connection rejected: invalid token");
         ws.close(4001, "Invalid or expired token");
         return;
@@ -156,13 +156,16 @@ export function setupAuthenticatedWebSocket(
   }, 5000);
   ensureAllBotsAttached();
 
-  return () => {
-    clearInterval(intervalId);
-    botManager.removeListener("botInstance", onBotInstance);
-    botManager.removeListener("botInstanceRemoved", onBotInstanceRemoved);
-    // Clean up all attached listeners (detach from stored bot refs, not live map)
-    for (const id of Array.from(attachedBots.keys())) {
-      detachBotListener(id);
-    }
+  return {
+    cleanup: () => {
+      clearInterval(intervalId);
+      botManager.removeListener("botInstance", onBotInstance);
+      botManager.removeListener("botInstanceRemoved", onBotInstanceRemoved);
+      // Clean up all attached listeners (detach from stored bot refs, not live map)
+      for (const id of Array.from(attachedBots.keys())) {
+        detachBotListener(id);
+      }
+    },
+    broadcast,
   };
 }

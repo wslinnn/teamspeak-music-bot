@@ -23,6 +23,7 @@ export interface BotConfig {
   // (nginx/Caddy/Cloudflare). Required for correct protocol/host detection
   // behind HTTPS-terminating proxies.
   trustProxy: boolean;
+  users: Array<{ username: string; password: string; role: "admin" | "user" }>;
 }
 
 export function getDefaultConfig(): BotConfig {
@@ -41,6 +42,7 @@ export function getDefaultConfig(): BotConfig {
     idleTimeoutMinutes: 0,
     publicUrl: "",
     trustProxy: false,
+    users: [],
   };
 }
 
