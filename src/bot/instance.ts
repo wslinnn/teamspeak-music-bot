@@ -166,6 +166,20 @@ export class BotInstance extends EventEmitter {
     this.tsClient.disconnect();
   }
 
+  /** Returns a promise that resolves when this instance has fully disconnected. */
+  onceDisconnected(): Promise<void> {
+    if (!this.connected && this.disconnectEmitted) return Promise.resolve();
+    return new Promise((resolve) => {
+      const handler = () => { resolve(); };
+      this.once("disconnected", handler);
+      // Safety timeout: if disconnect never fires (e.g. client stuck), resolve after 5s
+      setTimeout(() => {
+        this.removeListener("disconnected", handler);
+        resolve();
+      }, 5000);
+    });
+  }
+
   /** 外部更新 idleTimeoutMinutes（由 API 保存时调用） */
   updateIdleTimeout(minutes: number): void {
     this.config.idleTimeoutMinutes = minutes;

@@ -203,8 +203,7 @@ export class BotManager extends EventEmitter {
     // Calling disconnect() is idempotent (disconnectEmitted guards event
     // emission), so this is safe in all states.
     oldBot.disconnect();
-    // Wait for audio pipeline to fully stop before starting new bot
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await oldBot.onceDisconnected();
 
     // Reload config from database so updated settings (channel, nickname, etc.) take effect
     const saved = this.database.getBotInstances().find((i) => i.id === id);
