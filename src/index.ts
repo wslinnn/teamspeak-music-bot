@@ -14,7 +14,7 @@ import { createWebServer } from "./web/server.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DATA_DIR = path.join(ROOT_DIR, "data");
-const CONFIG_PATH = path.join(ROOT_DIR, "config.json");
+const CONFIG_PATH = path.join(DATA_DIR, "config.json");
 const DB_PATH = path.join(DATA_DIR, "tsmusicbot.db");
 const LOG_DIR = path.join(DATA_DIR, "logs");
 const COOKIE_DIR = path.join(DATA_DIR, "cookies");

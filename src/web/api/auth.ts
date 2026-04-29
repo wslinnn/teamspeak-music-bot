@@ -3,6 +3,9 @@ import type { MusicProvider } from "../../music/provider.js";
 import { YouTubeProvider } from "../../music/youtube.js";
 import type { CookieStore } from "../../music/auth.js";
 import type { Logger } from "../../logger.js";
+import type { BotConfig } from "../../data/config.js";
+import { signToken } from "../../auth/jwt.js";
+import { createRateLimiter } from "../../auth/rate-limit.js";
 
 export function createAuthRouter(
   neteaseProvider: MusicProvider,
@@ -11,7 +14,24 @@ export function createAuthRouter(
   logger: Logger,
   cookieStore?: CookieStore
 ): Router {
+  return createAuthRouterWithConfig(
+    neteaseProvider, qqProvider, bilibiliProvider, logger, undefined, undefined, undefined, cookieStore
+  );
+}
+
+export function createAuthRouterWithConfig(
+  neteaseProvider: MusicProvider,
+  qqProvider: MusicProvider,
+  bilibiliProvider: MusicProvider,
+  logger: Logger,
+  config?: BotConfig,
+  jwtSecret?: string,
+  jwtExpiresIn?: string,
+  cookieStore?: CookieStore,
+  adminOnly?: (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => void,
+): Router {
   const router = Router();
+  const requireAdmin = adminOnly ?? ((_req, _res, next) => next());
   // YouTube is auth-less; we only use this instance so /auth/status can
   // report whether yt-dlp is actually installed (loggedIn=false otherwise).
   const youtubeProvider: MusicProvider = new YouTubeProvider();
@@ -22,7 +42,7 @@ export function createAuthRouter(
     return platform === "qq" ? qqProvider : neteaseProvider;
   }
 
-  router.get("/status", async (req, res) => {
+  router.get("/status", requireAdmin, async (req, res) => {
     try {
       const platform = req.query.platform as string;
       const provider = getProvider(platform);
@@ -31,11 +51,11 @@ export function createAuthRouter(
       res.json({ platform: provider.platform, ...status });
     } catch (err) {
       logger.error({ err }, "Auth status check failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
-  router.post("/qrcode", async (req, res) => {
+  router.post("/qrcode", requireAdmin, async (req, res) => {
     try {
       const { platform } = req.body;
       const provider = getProvider(platform);
@@ -44,15 +64,15 @@ export function createAuthRouter(
       res.json(qr);
     } catch (err) {
       logger.error({ err }, "QR code generation failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
-  router.get("/qrcode/status", async (req, res) => {
+  router.get("/qrcode/status", requireAdmin, async (req, res) => {
     try {
       const { key, platform } = req.query;
       if (!key) {
-        res.status(400).json({ error: "key is required" });
+        res.status(400).json({ success: false, error: "key is required" });
         return;
       }
       const provider = getProvider(platform as string);
@@ -73,39 +93,39 @@ export function createAuthRouter(
       res.json({ status });
     } catch (err) {
       logger.error({ err }, "QR status check failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
-  router.post("/sms/send", async (req, res) => {
+  router.post("/sms/send", requireAdmin, async (req, res) => {
     try {
       const { phone } = req.body;
       if (!phone) {
-        res.status(400).json({ error: "phone is required" });
+        res.status(400).json({ success: false, error: "phone is required" });
         return;
       }
       if (!neteaseProvider.sendSmsCode) {
         res
           .status(400)
-          .json({ error: "SMS login not supported for this platform" });
+          .json({ success: false, error: "SMS login not supported for this platform" });
         return;
       }
       const success = await neteaseProvider.sendSmsCode(phone);
       res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
-  router.post("/sms/verify", async (req, res) => {
+  router.post("/sms/verify", requireAdmin, async (req, res) => {
     try {
       const { phone, code } = req.body;
       if (!phone || !code) {
-        res.status(400).json({ error: "phone and code are required" });
+        res.status(400).json({ success: false, error: "phone and code are required" });
         return;
       }
       if (!neteaseProvider.loginWithSms) {
-        res.status(400).json({ error: "SMS login not supported" });
+        res.status(400).json({ success: false, error: "SMS login not supported" });
         return;
       }
       const success = await neteaseProvider.loginWithSms(phone, code);
@@ -114,14 +134,14 @@ export function createAuthRouter(
       }
       res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
-  router.post("/cookie", (req, res) => {
+  router.post("/cookie", requireAdmin, (req, res) => {
     const { platform, cookie } = req.body;
     if (!cookie) {
-      res.status(400).json({ error: "cookie is required" });
+      res.status(400).json({ success: false, error: "cookie is required" });
       return;
     }
     // YouTube has no cookie concept — reject instead of falling through and
@@ -141,6 +161,33 @@ export function createAuthRouter(
     }
     res.json({ success: true });
   });
+
+  // Admin login endpoint
+  if (config && jwtSecret && jwtExpiresIn) {
+    const loginLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5000 });
+
+    router.post("/login", (req, res, next) => {
+      const ip = req.ip ?? "unknown";
+      if (loginLimiter.isLimited(ip)) {
+        res.status(429).json({ success: false, error: "Too many login attempts" });
+        return;
+      }
+      next();
+    }, (req, res) => {
+      const { password } = req.body;
+
+      if (password && password === config.adminPassword) {
+        const token = signToken("admin", jwtSecret, jwtExpiresIn);
+        res.json({ success: true, token, expiresIn: jwtExpiresIn });
+        return;
+      }
+
+      const clientIp = req.ip ?? "unknown";
+      loginLimiter.recordFailure(clientIp);
+      logger.warn({ ip: clientIp }, "Login failed");
+      res.status(401).json({ success: false, error: "Invalid credentials" });
+    });
+  }
 
   return router;
 }

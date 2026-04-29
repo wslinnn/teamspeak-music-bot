@@ -8,8 +8,6 @@ import type { Logger } from "../logger.js";
 const require = createRequire(import.meta.url);
 const ffmpegPath: string | null = require("ffmpeg-static");
 
-/** 全局 PID 追踪器，防止进程在类实例切换时沦为孤儿进程 （ */
-const globalActivePids = new Set<number>();
 
 function isExecutable(binPath: string): boolean {
   try {
@@ -80,6 +78,7 @@ export class AudioPlayer extends EventEmitter {
   private static readonly MAX_CONSECUTIVE_FAILURES = 3;
   private healthyFrames = 0;
   private static readonly HEALTHY_FRAME_RESET = 50; // ~1 second of audio
+  private activePid: number | null = null;
 
   constructor(logger: Logger) {
     super();
@@ -119,7 +118,7 @@ export class AudioPlayer extends EventEmitter {
     
     const currentPid = this.ffmpeg.pid;
     if (currentPid) {
-      globalActivePids.add(currentPid);
+      this.activePid = currentPid;
       this.logger.debug({ pid: currentPid, sessionId: currentSessionId }, "FFmpeg spawned");
     }
 
@@ -137,7 +136,7 @@ export class AudioPlayer extends EventEmitter {
     });
 
     this.ffmpeg.on("exit", (code, signal) => {
-      if (currentPid) globalActivePids.delete(currentPid);
+      if (this.activePid === currentPid) this.activePid = null;
       this.logger.info({ pid: currentPid, code, signal }, "FFmpeg exited");
       
       // 只有当前会话的进程结束才置空变量
@@ -186,26 +185,27 @@ export class AudioPlayer extends EventEmitter {
   }
 
   private forceCleanup(proc: ChildProcess, pid: number): void {
-    if (!globalActivePids.has(pid)) return;
-
     try {
       proc.kill("SIGTERM");
-    } catch (e) { /* ignore */ }
+    } catch {
+      this.logger.debug({ pid }, "SIGTERM failed (process may have already exited)");
+    }
 
     const killTimeout = setTimeout(() => {
       try {
-        process.kill(pid, 0); 
+        process.kill(pid, 0);
         process.kill(pid, "SIGKILL");
-      } catch (e) {
-      } finally {
-        globalActivePids.delete(pid);
+        this.logger.warn({ pid }, "FFmpeg required SIGKILL");
+      } catch {
+        this.logger.debug({ pid }, "SIGKILL target already exited");
       }
-    }, 1500);
+      if (this.activePid === pid) this.activePid = null;
+    }, 3000);
 
     proc.unref();
     proc.once("exit", () => {
       clearTimeout(killTimeout);
-      globalActivePids.delete(pid);
+      if (this.activePid === pid) this.activePid = null;
     });
   }
 

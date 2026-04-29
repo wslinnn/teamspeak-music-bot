@@ -21,7 +21,8 @@ import type { ServerProtocol } from "../ts-protocol/client.js";
 async function connectWithTimeout(
   bot: BotInstance,
   ms: number,
-  logger: Logger
+  logger: Logger,
+  signal?: AbortSignal
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -30,8 +31,19 @@ async function connectWithTimeout(
       ms
     );
   });
+
+  const abortPromise = new Promise<never>((_, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("Connect aborted by restart signal"));
+      return;
+    }
+    signal?.addEventListener("abort", () => {
+      reject(new Error("Connect aborted by restart signal"));
+    }, { once: true });
+  });
+
   try {
-    await Promise.race([bot.connect(), timeout]);
+    await Promise.race([bot.connect(), timeout, abortPromise]);
   } catch (err) {
     logger.warn(
       { err, botId: bot.id },
@@ -39,8 +51,8 @@ async function connectWithTimeout(
     );
     try {
       bot.disconnect();
-    } catch {
-      // ignore teardown errors
+    } catch (err) {
+      logger.debug({ err, botId: bot.id }, "Disconnect error during connect cleanup");
     }
     throw err;
   } finally {
@@ -74,6 +86,7 @@ export class BotManager extends EventEmitter {
   private database: BotDatabase;
   private config: BotConfig;
   private logger: Logger;
+  private restartControllers = new Map<string, AbortController>();
 
   constructor(
     neteaseProvider: MusicProvider,
@@ -192,56 +205,69 @@ export class BotManager extends EventEmitter {
     const oldBot = this.bots.get(id);
     if (!oldBot) throw new Error(`Bot ${id} not found`);
 
-    // Always tear down the outgoing instance before creating a replacement.
-    // Covers three cases:
-    //   1. oldBot is fully connected (manual restart)
-    //   2. oldBot is mid-handshake from a prior rapid start (isConnected()
-    //      still returns false but the library client is live and will leak
-    //      a TS session if we abandon it)
-    //   3. oldBot was just created by createBot but never connected — the
-    //      disconnect call is a cheap no-op here.
-    // Calling disconnect() is idempotent (disconnectEmitted guards event
-    // emission), so this is safe in all states.
-    oldBot.disconnect();
+    // Abort any in-progress restart for this bot to prevent race conditions
+    const existingController = this.restartControllers.get(id);
+    if (existingController) {
+      existingController.abort();
+    }
+    const controller = new AbortController();
+    this.restartControllers.set(id, controller);
 
-    // Reload config from database so updated settings (channel, nickname, etc.) take effect
-    const saved = this.database.getBotInstances().find((i) => i.id === id);
-    if (saved) {
-      const proto = saved.serverProtocol as "ts3" | "ts6" | "" | undefined;
-      const bot = new BotInstance({
-        id: saved.id,
-        name: saved.name,
-        tsOptions: {
-          host: saved.serverAddress,
-          port: saved.serverPort,
-          queryPort: proto === "ts6" ? 10080 : 10011,
-          nickname: saved.nickname,
-          // Reuse the stored identity so server groups assigned to this bot
-          // survive restarts — without this the TS server sees a new UID
-          // each connect and strips all previously granted groups.
-          identity: saved.identity || undefined,
-          defaultChannel: saved.defaultChannel || undefined,
-          channelPassword: saved.channelPassword || undefined,
-          serverPassword: saved.serverPassword || undefined,
-          serverProtocol: proto === "ts3" || proto === "ts6" ? proto : undefined,
-          ts6ApiKey: saved.ts6ApiKey || undefined,
-        },
-        neteaseProvider: this.neteaseProvider,
-        qqProvider: this.qqProvider,
-        bilibiliProvider: this.bilibiliProvider,
-      youtubeProvider: this.youtubeProvider,
-        database: this.database,
-        config: this.config,
-        logger: this.logger,
-      });
-      this.bots.set(id, bot);
-      this.emit("botInstance", bot);
-      await connectWithTimeout(bot, 15_000, this.logger);
-      // Mark as autoStart so it reconnects on Docker restart, and persist identity
-      this.database.saveBotInstance({ ...saved, autoStart: true });
-      this.persistBotIdentity(saved, bot);
-    } else {
-      await connectWithTimeout(oldBot, 15_000, this.logger);
+    try {
+      // Always tear down the outgoing instance before creating a replacement.
+      // Covers three cases:
+      //   1. oldBot is fully connected (manual restart)
+      //   2. oldBot is mid-handshake from a prior rapid start (isConnected()
+      //      still returns false but the library client is live and will leak
+      //      a TS session if we abandon it)
+      //   3. oldBot was just created by createBot but never connected — the
+      //      disconnect call is a cheap no-op here.
+      // Calling disconnect() is idempotent (disconnectEmitted guards event
+      // emission), so this is safe in all states.
+      oldBot.disconnect();
+      await oldBot.onceDisconnected();
+
+      // Reload config from database so updated settings (channel, nickname, etc.) take effect
+      const saved = this.database.getBotInstances().find((i) => i.id === id);
+      if (saved) {
+        const proto = saved.serverProtocol as "ts3" | "ts6" | "" | undefined;
+        const bot = new BotInstance({
+          id: saved.id,
+          name: saved.name,
+          tsOptions: {
+            host: saved.serverAddress,
+            port: saved.serverPort,
+            queryPort: proto === "ts6" ? 10080 : 10011,
+            nickname: saved.nickname,
+            // Reuse the stored identity so server groups assigned to this bot
+            // survive restarts — without this the TS server sees a new UID
+            // each connect and strips all previously granted groups.
+            identity: saved.identity || undefined,
+            defaultChannel: saved.defaultChannel || undefined,
+            channelPassword: saved.channelPassword || undefined,
+            serverPassword: saved.serverPassword || undefined,
+            serverProtocol: proto === "ts3" || proto === "ts6" ? proto : undefined,
+            ts6ApiKey: saved.ts6ApiKey || undefined,
+          },
+          neteaseProvider: this.neteaseProvider,
+          qqProvider: this.qqProvider,
+          bilibiliProvider: this.bilibiliProvider,
+        youtubeProvider: this.youtubeProvider,
+          database: this.database,
+          config: this.config,
+          logger: this.logger,
+        });
+        this.bots.set(id, bot);
+        this.emit("botInstance", bot);
+        await connectWithTimeout(bot, 15_000, this.logger, controller.signal);
+        // Mark as autoStart so it reconnects on Docker restart, and persist identity
+        this.database.saveBotInstance({ ...saved, autoStart: true });
+        this.persistBotIdentity(saved, bot);
+      } else {
+        await connectWithTimeout(oldBot, 15_000, this.logger, controller.signal);
+      }
+    } finally {
+      this.restartControllers.delete(id);
     }
   }
 

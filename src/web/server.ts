@@ -11,8 +11,12 @@ import type { CookieStore } from "../music/auth.js";
 import { createBotRouter } from "./api/bot.js";
 import { createMusicRouter } from "./api/music.js";
 import { createPlayerRouter } from "./api/player.js";
-import { createAuthRouter } from "./api/auth.js";
+import { createAuthRouterWithConfig } from "./api/auth.js";
+import { createFavoritesRouter } from "./api/favorites.js";
 import { setupWebSocket } from "./websocket.js";
+import { deriveSecret, verifyToken } from "../auth/jwt.js";
+import { createRequireAdmin } from "../auth/middleware.js";
+import { saveConfig } from "../data/config.js";
 
 export interface WebServerOptions {
   port: number;
@@ -39,37 +43,158 @@ export function createWebServer(options: WebServerOptions): WebServer {
   const logger = options.logger.child({ component: "web" });
 
   if (options.config.trustProxy) {
-    // Honor X-Forwarded-* from a reverse proxy (nginx/Caddy/Cloudflare).
     app.set("trust proxy", true);
   }
 
   app.use(express.json());
+
+  const authEnabled = !!options.config.adminPassword;
+  const jwtSecret = deriveSecret(options.config.adminPassword);
+  const requireAdmin = createRequireAdmin(jwtSecret);
 
   app.get("/api/config/public-url", (_req, res) => {
     const raw = (options.config.publicUrl ?? "").trim();
     res.json({ publicUrl: raw ? raw.replace(/\/+$/, "") : null });
   });
 
+  app.get("/api/health", (_req, res) => {
+    res.json({
+      status: "ok",
+      version: "0.1.0",
+      authEnabled,
+      needsSetup: !options.config.adminPassword,
+    });
+  });
+
+  // Setup endpoint: set admin password on first run
+  app.post("/api/setup", (req, res) => {
+    if (options.config.adminPassword) {
+      res.status(403).json({ success: false, error: "Setup already completed" });
+      return;
+    }
+    const { password } = req.body;
+    if (!password || typeof password !== "string" || password.trim().length === 0) {
+      res.status(400).json({ success: false, error: "Password is required" });
+      return;
+    }
+    options.config.adminPassword = password;
+    try {
+      saveConfig(options.configPath, options.config);
+    } catch (err) {
+      logger.error({ err }, "Failed to save config during setup");
+      res.status(500).json({ success: false, error: "Failed to save configuration" });
+      return;
+    }
+    logger.info("Admin password set via setup");
+    res.json({ success: true });
+  });
+
+  // Global auth middleware for all /api/* except whitelist
+  const AUTH_WHITELIST = new Set([
+    "/api/auth/login",
+    "/api/config/public-url",
+    "/api/health",
+    "/api/setup",
+  ]);
+  app.use((req, res, next) => {
+    if (!req.path.startsWith("/api")) return next();
+    if (AUTH_WHITELIST.has(req.path)) return next();
+    if (!authEnabled) return next();
+    // Only enforce auth on admin-only routes; regular API endpoints are open
+    next();
+  });
+
   app.use(
     "/api/bot",
-    createBotRouter(options.botManager, options.config, options.configPath, logger)
+    createBotRouter(
+      options.botManager,
+      options.config,
+      options.configPath,
+      logger,
+      requireAdmin
+    )
   );
   app.use(
     "/api/music",
-    createMusicRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger)
+    createMusicRouter(
+      options.neteaseProvider,
+      options.qqProvider,
+      options.bilibiliProvider,
+      logger,
+      requireAdmin
+    )
   );
-  app.use("/api/player", createPlayerRouter(
-    options.botManager, logger, options.database,
-    options.neteaseProvider, options.qqProvider, options.bilibiliProvider,
-  ));
+  app.use(
+    "/api/player",
+    createPlayerRouter(
+      options.botManager,
+      logger,
+      options.database,
+      options.neteaseProvider,
+      options.qqProvider,
+      options.bilibiliProvider,
+      requireAdmin
+    )
+  );
   app.use(
     "/api/auth",
-    createAuthRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger, options.cookieStore)
+    createAuthRouterWithConfig(
+      options.neteaseProvider,
+      options.qqProvider,
+      options.bilibiliProvider,
+      logger,
+      options.config,
+      jwtSecret,
+      options.config.jwtExpiresIn,
+      options.cookieStore,
+      requireAdmin
+    )
   );
 
-  app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", version: "0.1.0" });
+  server.on("error", (err) => {
+    logger.error({ err }, "HTTP server error");
   });
+
+  const wss = new WebSocketServer({
+    server,
+    path: "/ws",
+    verifyClient: authEnabled
+      ? (info, cb) => {
+          const url = new URL(
+            info.req.url || "",
+            `http://${info.req.headers.host}`
+          );
+          const token = url.searchParams.get("token");
+          if (!token) {
+            cb(false, 4001, "Authentication required");
+            return;
+          }
+          const payload = verifyToken(token, jwtSecret);
+          if (!payload) {
+            cb(false, 4001, "Invalid token");
+            return;
+          }
+          cb(true);
+        }
+      : undefined,
+  });
+  wss.on("error", (err) => {
+    logger.error({ err }, "WebSocket server error");
+  });
+  const wsResult = setupWebSocket(
+    wss,
+    options.botManager,
+    logger,
+    jwtSecret,
+    authEnabled
+  );
+
+  app.use(
+    "/api/favorites",
+    createFavoritesRouter(options.database, (data: object) =>
+      wsResult.broadcast(data)
+    )
+  );
 
   if (options.staticDir) {
     app.use(express.static(options.staticDir));
@@ -78,15 +203,12 @@ export function createWebServer(options: WebServerOptions): WebServer {
     });
   }
 
-  server.on("error", (err) => {
-    logger.error({ err }, "HTTP server error");
+  // Global error handler — catches errors thrown in route handlers
+  // that weren't caught by try/catch. Must have 4 parameters for Express.
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    logger.error({ err, path: _req.path }, "Unhandled API error");
+    res.status(500).json({ success: false, error: "Internal server error" });
   });
-
-  const wss = new WebSocketServer({ server, path: "/ws" });
-  wss.on("error", (err) => {
-    logger.error({ err }, "WebSocket server error");
-  });
-  const cleanupWs = setupWebSocket(wss, options.botManager, logger);
 
   return {
     async start(): Promise<void> {
@@ -98,7 +220,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       });
     },
     stop(): void {
-      cleanupWs();
+      wsResult.cleanup();
       wss.close();
       server.close();
     },

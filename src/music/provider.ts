@@ -77,4 +77,12 @@ export interface MusicProvider {
   getPersonalFm?(): Promise<Song[]>;
   getDailyRecommendSongs?(): Promise<Song[]>;
   getUserPlaylists?(): Promise<Playlist[]>;
+  getPlaylistDetail?(playlistId: string): Promise<{
+    id: string;
+    name: string;
+    description: string;
+    coverUrl: string;
+    songCount: number;
+  }>;
+  getPopularVideos?(limit: number): Promise<Song[]>;
 }
