@@ -78,6 +78,8 @@ export class AudioPlayer extends EventEmitter {
   private spawnFailed = false;
   private consecutiveFailures = 0;
   private static readonly MAX_CONSECUTIVE_FAILURES = 3;
+  private healthyFrames = 0;
+  private static readonly HEALTHY_FRAME_RESET = 50; // ~1 second of audio
 
   constructor(logger: Logger) {
     super();
@@ -93,6 +95,7 @@ export class AudioPlayer extends EventEmitter {
     this.currentUrl = url;
     this.seekOffset = seekSeconds;
     this.framesPlayed = 0;
+    this.healthyFrames = 0;
     this.ffmpegPaused = false;
     this.spawnFailed = false;
 
@@ -179,6 +182,7 @@ export class AudioPlayer extends EventEmitter {
     this.currentUrl = "";
     this.seekOffset = 0;
     this.framesPlayed = 0;
+    this.healthyFrames = 0;
   }
 
   private forceCleanup(proc: ChildProcess, pid: number): void {
@@ -255,6 +259,11 @@ export class AudioPlayer extends EventEmitter {
       const opusFrame = this.encoder.encode(adjusted);
       this.emit("frame", opusFrame);
       this.framesPlayed++;
+      this.healthyFrames++;
+      if (this.healthyFrames >= AudioPlayer.HEALTHY_FRAME_RESET) {
+        this.consecutiveFailures = 0;
+        this.healthyFrames = 0;
+      }
     } catch (err) {
       this.emit("error", err as Error);
     }
