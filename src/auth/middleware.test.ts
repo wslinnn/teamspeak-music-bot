@@ -29,7 +29,7 @@ describe("requireAuth middleware", () => {
   const requireAuth = createRequireAuth(secret);
 
   it("passes through with valid token", () => {
-    const token = signToken({ role: "admin" }, secret, "1h");
+    const token = signToken("admin", secret);
     const req = mockReq({ authorization: `Bearer ${token}` });
     const res = mockRes();
     let nextCalled = false;
@@ -62,7 +62,7 @@ describe("requireAuth middleware", () => {
   });
 
   it("rejects request with wrong scheme", () => {
-    const token = signToken({ role: "admin" }, secret, "1h");
+    const token = signToken("admin", secret);
     const req = mockReq({ authorization: `Token ${token}` });
     const res = mockRes();
     let nextCalled = false;

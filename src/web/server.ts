@@ -15,6 +15,7 @@ import { createAuthRouter } from "./api/auth.js";
 import { createFavoritesRouter } from "./api/favorites.js";
 import { setupWebSocket } from "./websocket.js";
 import { deriveSecret, signToken, verifyToken } from "../auth/jwt.js";
+import { createRateLimiter } from "../auth/rate-limit.js";
 import { createRequireAuth, createRequireAdmin } from "../auth/middleware.js";
 
 export interface WebServerOptions {
@@ -60,7 +61,16 @@ export function createWebServer(options: WebServerOptions): WebServer {
     res.json({ publicUrl: raw ? raw.replace(/\/+$/, "") : null });
   });
 
-  app.post("/api/auth/login", (req, res) => {
+  const loginLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5000 });
+
+  app.post("/api/auth/login", (req, res, next) => {
+    const ip = req.ip ?? "unknown";
+    if (loginLimiter.isLimited(ip)) {
+      res.status(429).json({ success: false, error: "Too many login attempts" });
+      return;
+    }
+    next();
+  }, (req, res) => {
     const { username, password } = req.body;
 
     // Legacy single-admin mode (password only)
