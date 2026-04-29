@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { createHmac } from "node:crypto";
 
 export interface BotConfig {
   webPort: number;
@@ -43,13 +44,51 @@ export function getDefaultConfig(): BotConfig {
   };
 }
 
+/**
+ * Validate config values. Throws on invalid values.
+ */
+export function validateConfig(config: BotConfig): void {
+  const errors: string[] = [];
+
+  if (!Number.isInteger(config.webPort) || config.webPort < 1 || config.webPort > 65535) {
+    errors.push(`webPort must be 1-65535, got ${config.webPort}`);
+  }
+  if (!Number.isInteger(config.neteaseApiPort) || config.neteaseApiPort < 1 || config.neteaseApiPort > 65535) {
+    errors.push(`neteaseApiPort must be 1-65535, got ${config.neteaseApiPort}`);
+  }
+  if (!Number.isInteger(config.qqMusicApiPort) || config.qqMusicApiPort < 1 || config.qqMusicApiPort > 65535) {
+    errors.push(`qqMusicApiPort must be 1-65535, got ${config.qqMusicApiPort}`);
+  }
+  if (config.autoReturnDelay < 0) {
+    errors.push(`autoReturnDelay must be >= 0, got ${config.autoReturnDelay}`);
+  }
+  if (config.idleTimeoutMinutes < 0) {
+    errors.push(`idleTimeoutMinutes must be >= 0, got ${config.idleTimeoutMinutes}`);
+  }
+  if (config.locale !== "zh" && config.locale !== "en") {
+    errors.push(`locale must be 'zh' or 'en', got '${config.locale}'`);
+  }
+  if (config.theme !== "dark" && config.theme !== "light") {
+    errors.push(`theme must be 'dark' or 'light', got '${config.theme}'`);
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`Invalid configuration:\n  ${errors.join("\n  ")}`);
+  }
+}
+
 export function loadConfig(path: string): BotConfig {
   const defaults = getDefaultConfig();
   try {
     const raw = readFileSync(path, "utf-8");
     const partial = JSON.parse(raw) as Partial<BotConfig>;
-    return { ...defaults, ...partial };
-  } catch {
+    const config = { ...defaults, ...partial };
+    validateConfig(config);
+    return config;
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Invalid configuration")) {
+      throw err;
+    }
     return defaults;
   }
 }
@@ -57,4 +96,13 @@ export function loadConfig(path: string): BotConfig {
 export function saveConfig(path: string, config: BotConfig): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(config, null, 2), "utf-8");
+}
+
+/**
+ * Derive a stable JWT secret from the admin password.
+ * If adminPassword is empty, returns an empty string (auth disabled).
+ */
+export function getJwtSecret(adminPassword: string): string {
+  if (!adminPassword) return "";
+  return createHmac("sha256", "tsmusicbot-jwt-salt").update(adminPassword).digest("hex");
 }

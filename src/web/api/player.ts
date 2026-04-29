@@ -1,9 +1,16 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import type { BotManager } from "../../bot/manager.js";
 import type { BotDatabase } from "../../data/database.js";
 import type { MusicProvider } from "../../music/provider.js";
 import type { Logger } from "../../logger.js";
 import { parseCommand } from "../../bot/commands.js";
+import { validatePlatform, validateBotId } from "../../utils/validate.js";
+
+declare module "express-serve-static-core" {
+  interface Request {
+    bot?: import("../../bot/instance.js").BotInstance;
+  }
+}
 
 export function createPlayerRouter(
   botManager: BotManager,
@@ -16,12 +23,19 @@ export function createPlayerRouter(
   const router = Router();
 
   router.use("/:botId", (req, res, next) => {
-    const bot = botManager.getBot(req.params.botId);
-    if (!bot) {
-      res.status(404).json({ error: "Bot not found" });
+    let botId: string;
+    try {
+      botId = validateBotId(req.params.botId);
+    } catch (err) {
+      res.status(400).json({ success: false, error: (err as Error).message });
       return;
     }
-    (req as any).bot = bot;
+    const bot = botManager.getBot(botId);
+    if (!bot) {
+      res.status(404).json({ success: false, error: "Bot not found" });
+      return;
+    }
+    req.bot = bot;
     next();
   });
 
@@ -35,48 +49,48 @@ export function createPlayerRouter(
 
   router.post("/:botId/play", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { query, platform } = req.body;
       if (!query) {
-        res.status(400).json({ error: "query is required" });
+        res.status(400).json({ success: false, error: "query is required" });
         return;
       }
       const cmd = parseCommand(`!play ${platformFlag(platform)} ${query}`.trim(), "!");
       if (!cmd) {
-        res.status(400).json({ error: "Invalid command" });
+        res.status(400).json({ success: false, error: "Invalid command" });
         return;
       }
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.post("/:botId/add", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { query, platform } = req.body;
       const cmd = parseCommand(`!add ${platformFlag(platform)} ${query}`.trim(), "!");
       if (!cmd) {
-        res.status(400).json({ error: "Invalid command" });
+        res.status(400).json({ success: false, error: "Invalid command" });
         return;
       }
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
-  const simpleCommand = (cmdStr: string) => async (req: any, res: any) => {
+  const simpleCommand = (cmdStr: string) => async (req: Request, res: Response) => {
     try {
-      const bot = req.bot;
+      const bot = req.bot!;
       const cmd = parseCommand(cmdStr, "!")!;
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   };
 
@@ -89,7 +103,7 @@ export function createPlayerRouter(
 
   router.post("/:botId/volume", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { volume } = req.body;
       // Reject bad input with a proper 4xx instead of letting cmdVol
       // return a "Usage:" string inside a 200 body — API clients can't
@@ -102,14 +116,14 @@ export function createPlayerRouter(
       ) {
         res
           .status(400)
-          .json({ error: "volume must be a number between 0 and 100" });
+          .json({ success: false, error: "volume must be a number between 0 and 100" });
         return;
       }
       const cmd = parseCommand(`!vol ${Math.round(volume)}`, "!")!;
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -117,71 +131,71 @@ export function createPlayerRouter(
 
   router.post("/:botId/mode", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { mode } = req.body;
       if (typeof mode !== "string" || !VALID_MODES.has(mode)) {
         res
           .status(400)
-          .json({ error: "mode must be one of: seq, loop, random, rloop" });
+          .json({ success: false, error: "mode must be one of: seq, loop, random, rloop" });
         return;
       }
       const cmd = parseCommand(`!mode ${mode}`, "!")!;
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   // Get current elapsed time (ground truth from server)
   router.get("/:botId/elapsed", (req, res) => {
-    const bot = (req as any).bot;
+    const bot = req.bot!;
     res.json({ elapsed: bot.getPlayer().getElapsed() });
   });
 
   // Seek to position
   router.post("/:botId/seek", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { position } = req.body; // seconds
       // typeof NaN === "number" and NaN < 0 is false, so a plain range
       // check lets NaN/Infinity through and later corrupts seekOffset.
       if (typeof position !== "number" || !Number.isFinite(position) || position < 0) {
         res
           .status(400)
-          .json({ error: "position must be a finite non-negative number" });
+          .json({ success: false, error: "position must be a finite non-negative number" });
         return;
       }
       bot.getPlayer().seek(position);
       res.json({ message: `Seeked to ${Math.floor(position)}s`, seekOffset: position });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.get("/:botId/queue", (req, res) => {
-    const bot = (req as any).bot;
+    const bot = req.bot!;
     res.json({ queue: bot.getQueue(), status: bot.getStatus() });
   });
 
   router.delete("/:botId/queue/:index", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const cmd = parseCommand(`!remove ${req.params.index}`, "!")!;
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   // Jump to a specific index in the queue (without clearing it)
   router.post("/:botId/play-at", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { index } = req.body;
       if (typeof index !== "number" || index < 0) {
-        res.status(400).json({ error: "index is required" });
+        res.status(400).json({ success: false, error: "index is required" });
         return;
       }
       const queue = bot.getQueueManager();
@@ -189,14 +203,14 @@ export function createPlayerRouter(
       // invalid index silently kills the user's current song and leaves the
       // queue idle.
       if (index >= queue.size()) {
-        res.status(400).json({ error: "Invalid queue index" });
+        res.status(400).json({ success: false, error: "Invalid queue index" });
         return;
       }
       bot.getPlayer().stop();
       bot.getPlayer().resetFailures();
       const song = queue.playAt(index);
       if (!song) {
-        res.status(400).json({ error: "Invalid queue index" });
+        res.status(400).json({ success: false, error: "Invalid queue index" });
         return;
       }
       const ok = await bot.resolveAndPlay(song);
@@ -206,13 +220,13 @@ export function createPlayerRouter(
       }
       res.json({ message: `Now playing: ${song.name} - ${song.artist}` });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.post("/:botId/playlist", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { playlistId, platform } = req.body;
       const cmd = parseCommand(
         `!playlist ${platformFlag(platform)} ${playlistId}`.trim(),
@@ -221,7 +235,7 @@ export function createPlayerRouter(
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
@@ -229,15 +243,11 @@ export function createPlayerRouter(
   // Respects current play mode (random = pick random first song)
   router.post("/:botId/play-playlist", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { playlistId, platform } = req.body;
       // Use the bot's own provider lookup — it already knows about youtube,
       // which the router's constructor params did not.
-      const provider = bot.getProviderFor(
-        platform === "bilibili" || platform === "qq" || platform === "youtube"
-          ? platform
-          : "netease"
-      );
+      const provider = bot.getProviderFor(validatePlatform(platform));
 
       // Stop current playback
       bot.getPlayer().stop();
@@ -272,17 +282,17 @@ export function createPlayerRouter(
       res.json({ message: `Loaded ${songs.length} songs. Now playing: ${first?.name ?? "unknown"}` });
     } catch (err) {
       logger.error({ err }, "Play playlist failed");
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   // Play a single song by ID — resolves URL on demand
   router.post("/:botId/play-song", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { song } = req.body;
       if (!song || !song.id || !song.platform) {
-        res.status(400).json({ error: "song object with id and platform is required" });
+        res.status(400).json({ success: false, error: "song object with id and platform is required" });
         return;
       }
       const queue = bot.getQueueManager();
@@ -299,16 +309,16 @@ export function createPlayerRouter(
 
       res.json({ message: `Now playing: ${song.name || 'Unknown'} - ${song.artist || 'Unknown'}` });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   router.post("/:botId/add-song", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { song } = req.body;
       if (!song || !song.id || !song.platform) {
-        res.status(400).json({ error: "song object with id and platform is required" });
+        res.status(400).json({ success: false, error: "song object with id and platform is required" });
         return;
       }
       const queue = bot.getQueueManager();
@@ -326,20 +336,16 @@ export function createPlayerRouter(
 
       res.json({ message: `Added to queue: ${song.name || 'Unknown'} - ${song.artist || 'Unknown'} (position ${queue.size()})` });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   // Add a song to queue by ID — metadata only
   router.post("/:botId/add-by-id", async (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const { songId, platform } = req.body;
-      const provider = bot.getProviderFor(
-        platform === "bilibili" || platform === "qq" || platform === "youtube"
-          ? platform
-          : "netease"
-      );
+      const provider = bot.getProviderFor(validatePlatform(platform));
 
       const song = await provider.getSongDetail(songId);
       if (!song) {
@@ -358,20 +364,20 @@ export function createPlayerRouter(
 
       res.json({ message: `Added: ${song.name} - ${song.artist} (position ${queue.size()})` });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 
   // --- Profile config endpoints ---
 
   router.get("/:botId/profile", (req, res) => {
-    const bot = (req as any).bot;
+    const bot = req.bot!;
     res.json(bot.getProfileManager().getConfig());
   });
 
   router.put("/:botId/profile", (req, res) => {
     try {
-      const bot = (req as any).bot;
+      const bot = req.bot!;
       const pm = bot.getProfileManager();
       pm.updateConfig(req.body);
       if (database) {
@@ -379,7 +385,7 @@ export function createPlayerRouter(
       }
       res.json(pm.getConfig());
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      res.status(500).json({ success: false, error: (err as Error).message });
     }
   });
 

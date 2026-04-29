@@ -1,5 +1,30 @@
 import { defineStore } from 'pinia';
 import axios from 'axios';
+import { useAuthStore } from './auth.js';
+import router from '../router/index.js';
+
+// Request interceptor: attach JWT token to all API requests
+axios.interceptors.request.use((config) => {
+  const authStore = useAuthStore();
+  const token = authStore.getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Response interceptor: on 401, clear token and redirect to login
+axios.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      const authStore = useAuthStore();
+      authStore.logout();
+      router.push({ name: 'login' });
+    }
+    return Promise.reject(error);
+  },
+);
 
 export interface Song {
   id: string;

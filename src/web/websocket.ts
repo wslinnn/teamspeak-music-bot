@@ -2,11 +2,13 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { BotManager } from "../bot/manager.js";
 import type { BotInstance } from "../bot/instance.js";
 import type { Logger } from "../logger.js";
+import { verifyToken } from "../auth/jwt.js";
 
-export function setupWebSocket(
+export function setupAuthenticatedWebSocket(
   wss: WebSocketServer,
   botManager: BotManager,
-  logger: Logger
+  logger: Logger,
+  jwtSecret: string,
 ): () => void {
   const clients = new Set<WebSocket>();
 
@@ -18,7 +20,25 @@ export function setupWebSocket(
     disconnected: () => void;
   }>();
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req) => {
+    // --- Token validation ---
+    if (jwtSecret) {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      const token = url.searchParams.get("token");
+      if (!token) {
+        logger.warn("WebSocket connection rejected: no token");
+        ws.close(4001, "Authentication required");
+        return;
+      }
+      try {
+        verifyToken(token, jwtSecret);
+      } catch {
+        logger.warn("WebSocket connection rejected: invalid token");
+        ws.close(4001, "Invalid or expired token");
+        return;
+      }
+    }
+
     clients.add(ws);
     logger.debug("WebSocket client connected");
 

@@ -12,6 +12,7 @@ import {
   isAdminCommand,
   type ParsedCommand,
 } from "./commands.js";
+import { Mutex } from "../utils/mutex.js";
 import type { Logger } from "../logger.js";
 import type { BotDatabase, ProfileConfig } from "../data/database.js";
 import type { BotConfig } from "../data/config.js";
@@ -60,7 +61,7 @@ export class BotInstance extends EventEmitter {
   private connected = false;
   private disconnectEmitted = false;
   private voteSkipUsers = new Set<string>();
-  private isAdvancing = false;
+  private playNextMutex = new Mutex();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private channelUserCount = 0;
   private profileManager: BotProfileManager;
@@ -207,6 +208,41 @@ export class BotInstance extends EventEmitter {
     }
   }
 
+  /**
+   * Check if a TS user (by client ID) belongs to any of the
+   * configured admin server groups.
+   * Returns true if adminGroups is empty (no restriction) or the user
+   * is in one of the configured groups.
+   *
+   * Note: msg.invokerId from TS3TextMessage is a client ID (clid),
+   * not a database ID (cldbid). The clientinfo command accepts clid.
+   * Fails closed: on error, denies access rather than granting it.
+   */
+  private async isInvokerAdmin(invokerClientId: string): Promise<boolean> {
+    const groups = this.config.adminGroups;
+    if (groups.length === 0) return true;
+
+    try {
+      // clientinfo accepts clid (client ID, which is what invokerId provides)
+      const results = await this.tsClient.execCommandWithResponse(
+        `clientinfo clid=${invokerClientId}`,
+      );
+      if (!results.length) return false;
+
+      const serverGroupsStr = results[0]["client_servergroups"] ?? "";
+      const userGroups = serverGroupsStr
+        .split(",")
+        .map((g: string) => parseInt(g, 10))
+        .filter((g: number) => !isNaN(g));
+
+      return userGroups.some((g: number) => groups.includes(g));
+    } catch (err) {
+      this.logger.error({ err, invokerClientId }, "Failed to check invoker groups");
+      // Fail closed: deny access on error to prevent privilege escalation
+      return false;
+    }
+  }
+
   private async handleTextMessage(msg: TS3TextMessage): Promise<void> {
     const parsed = parseCommand(
       msg.message,
@@ -216,7 +252,11 @@ export class BotInstance extends EventEmitter {
     if (!parsed) return;
 
     if (isAdminCommand(parsed.name)) {
-      // TODO: Check if invoker is in adminGroups
+      const isAdmin = await this.isInvokerAdmin(msg.invokerId);
+      if (!isAdmin) {
+        await this.tsClient.sendTextMessage("Permission denied: admin only command");
+        return;
+      }
     }
 
     this.logger.info(
@@ -640,15 +680,13 @@ export class BotInstance extends EventEmitter {
   }
 
   private async playNext(): Promise<void> {
-    if (this.isAdvancing || !this.connected) return;
-    this.isAdvancing = true;
-    try {
+    if (!this.connected) return;
+    await this.playNextMutex.run(async () => {
       this.voteSkipUsers.clear();
       const next = this.queue.next();
       if (next) {
         let started = await this.resolveAndPlay(next);
         if (!started) {
-          // Skip to next if URL resolve fails (up to 3 retries)
           for (let i = 0; i < 3 && this.connected; i++) {
             const retry = this.queue.next();
             if (!retry) break;
@@ -660,16 +698,18 @@ export class BotInstance extends EventEmitter {
         }
         if (!started) {
           this.player.stop();
-          this.profileManager.onSongChange(null).catch(() => {});
+          this.profileManager.onSongChange(null).catch((err) => {
+            this.logger.error({ err }, "Failed to update profile on song end");
+          });
         }
       } else {
         this.player.stop();
-        this.profileManager.onSongChange(null).catch(() => {});
+        this.profileManager.onSongChange(null).catch((err) => {
+          this.logger.error({ err }, "Failed to update profile on song end");
+        });
       }
       this.emit("stateChange");
-    } finally {
-      this.isAdvancing = false;
-    }
+    });
   }
 
   private extractId(input: string): string {
