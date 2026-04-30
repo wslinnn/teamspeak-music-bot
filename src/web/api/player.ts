@@ -153,7 +153,12 @@ export function createPlayerRouter(
   router.get("/:botId/elapsed", (req, res) => {
     const bot = req.bot!;
     const elapsed = bot.getPlayer().getElapsed();
-    res.json({ elapsed: Math.round(elapsed * 100) / 100 });
+    const state = bot.getPlayer().getState();
+    res.json({
+      elapsed: Math.round(elapsed * 100) / 100,
+      playing: state === "playing",
+      paused: state === "paused",
+    });
   });
 
   // Seek to position

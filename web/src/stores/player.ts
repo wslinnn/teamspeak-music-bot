@@ -207,15 +207,20 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    /** Poll server for real elapsed time for active bot */
+    /** Poll server for real elapsed time and playback state for active bot */
     async syncElapsed() {
-      if (!this.activeBotId || !this.isPlaying) return;
+      if (!this.activeBotId) return;
       try {
         const res = await http.get(`/api/player/${this.activeBotId}/elapsed`);
+        const bot = this.bots.find((b) => b.id === this.activeBotId);
+        if (bot) {
+          bot.playing = res.data.playing ?? bot.playing;
+          bot.paused = res.data.paused ?? bot.paused;
+        }
         this._setTiming(this.activeBotId, {
           serverElapsed: res.data.elapsed,
           serverSyncTime: Date.now(),
-          wasPlaying: true,
+          wasPlaying: res.data.playing && !res.data.paused,
         });
       } catch (err) {
         console.debug('syncElapsed failed:', err);
@@ -337,6 +342,12 @@ export const usePlayerStore = defineStore('player', {
 
     async pause() {
       if (!this.activeBotId) return;
+      // Optimistically update local state for instant UI feedback
+      const bot = this.bots.find((b) => b.id === this.activeBotId);
+      if (bot) {
+        bot.playing = false;
+        bot.paused = true;
+      }
       // Freeze elapsed at current interpolated value
       this._setTiming(this.activeBotId, {
         serverElapsed: this.elapsed,
@@ -347,6 +358,12 @@ export const usePlayerStore = defineStore('player', {
 
     async resume() {
       if (!this.activeBotId) return;
+      // Optimistically update local state for instant UI feedback
+      const bot = this.bots.find((b) => b.id === this.activeBotId);
+      if (bot) {
+        bot.playing = true;
+        bot.paused = false;
+      }
       await http.post(`/api/player/${this.activeBotId}/resume`);
       this._setTiming(this.activeBotId, {
         serverSyncTime: Date.now(),
