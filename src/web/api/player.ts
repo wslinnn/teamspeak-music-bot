@@ -447,6 +447,7 @@ export function createPlayerRouter(
         res.status(400).json({ success: false, error: "Invalid reorder indices" });
         return;
       }
+      bot.emit("stateChange");
       res.json({ success: true, queue: queue.list() });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });

@@ -88,6 +88,7 @@ export function useWebSocket() {
             for (const bot of data.bots) {
               if (bot && typeof bot.id === 'string') {
                 store.updateBotStatus(bot.id, bot as any);
+                store.fetchQueueForBot(bot.id);
               }
             }
           }

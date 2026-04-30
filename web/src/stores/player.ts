@@ -194,6 +194,7 @@ export const usePlayerStore = defineStore('player', {
       this.bots = res.data.bots;
       if (!this.activeBotId && this.bots.length > 0) {
         this.activeBotId = this.bots[0].id;
+        await this.fetchQueue();
       }
       // Sync elapsed from each bot's status
       for (const bot of this.bots) {
@@ -209,7 +210,8 @@ export const usePlayerStore = defineStore('player', {
 
     /** Poll server for real elapsed time and playback state for active bot */
     async syncElapsed() {
-      if (!this.activeBotId) return;
+      if (!this.activeBotId || (this as any)._syncingElapsed) return;
+      (this as any)._syncingElapsed = true;
       try {
         const res = await http.get(`/api/player/${this.activeBotId}/elapsed`);
         const bot = this.bots.find((b) => b.id === this.activeBotId);
@@ -224,6 +226,8 @@ export const usePlayerStore = defineStore('player', {
         });
       } catch (err) {
         console.debug('syncElapsed failed:', err);
+      } finally {
+        (this as any)._syncingElapsed = false;
       }
     },
 
@@ -310,6 +314,7 @@ export const usePlayerStore = defineStore('player', {
       const toast = useToast();
       try {
         await http.post(`/api/player/${this.activeBotId}/add`, { query, platform });
+        await this.fetchQueue();
         toast.success('已添加到队列');
       } catch {
         toast.error('添加到队列失败');
@@ -321,6 +326,7 @@ export const usePlayerStore = defineStore('player', {
       const toast = useToast();
       try {
         await http.post(`/api/player/${this.activeBotId}/add-song`, { song });
+        await this.fetchQueue();
         toast.success(`已添加到队列: ${song.name}`);
       } catch {
         toast.error('添加到队列失败');
