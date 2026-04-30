@@ -4,8 +4,19 @@ import { YouTubeProvider } from "../../music/youtube.js";
 import type { CookieStore } from "../../music/auth.js";
 import type { Logger } from "../../logger.js";
 import type { BotConfig } from "../../data/config.js";
-import { signToken } from "../../auth/jwt.js";
+import { signToken, verifyToken } from "../../auth/jwt.js";
 import { createRateLimiter } from "../../auth/rate-limit.js";
+
+export const COOKIE_NAME = "tsbot_token";
+
+/** Parse a duration string like "7d" into seconds */
+function parseDurationToSeconds(d: string): number {
+  const match = d.match(/^(\d+)([smhd])$/);
+  if (!match) return 7 * 24 * 3600;
+  const val = parseInt(match[1], 10);
+  const unit: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+  return val * (unit[match[2]] ?? 86400);
+}
 
 export function createAuthRouter(
   neteaseProvider: MusicProvider,
@@ -165,6 +176,8 @@ export function createAuthRouterWithConfig(
   // Admin login endpoint
   if (config && jwtSecret && jwtExpiresIn) {
     const loginLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5000 });
+    const cookieMaxAge = parseDurationToSeconds(jwtExpiresIn);
+    const secure = !!config.trustProxy;
 
     router.post("/login", (req, res, next) => {
       const ip = req.ip ?? "unknown";
@@ -176,9 +189,23 @@ export function createAuthRouterWithConfig(
     }, (req, res) => {
       const { password } = req.body;
 
+      let role: "admin" | "user" | null = null;
       if (password && password === config.adminPassword) {
-        const token = signToken("admin", jwtSecret, jwtExpiresIn);
-        res.json({ success: true, token, expiresIn: jwtExpiresIn });
+        role = "admin";
+      } else if (password && password === config.userPassword) {
+        role = "user";
+      }
+
+      if (role) {
+        const token = signToken(role, jwtSecret, jwtExpiresIn);
+        res.cookie(COOKIE_NAME, token, {
+          httpOnly: true,
+          sameSite: "strict",
+          path: "/",
+          secure,
+          maxAge: cookieMaxAge * 1000,
+        });
+        res.json({ success: true, role, expiresIn: jwtExpiresIn });
         return;
       }
 
@@ -186,6 +213,41 @@ export function createAuthRouterWithConfig(
       loginLimiter.recordFailure(clientIp);
       logger.warn({ ip: clientIp }, "Login failed");
       res.status(401).json({ success: false, error: "Invalid credentials" });
+    });
+
+    router.get("/me", (req, res) => {
+      let token: string | undefined;
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith("Bearer ")) {
+        token = authHeader.slice(7);
+      }
+      if (!token) {
+        const cookieHeader = req.headers.cookie;
+        if (cookieHeader) {
+          for (const part of cookieHeader.split(";")) {
+            const [key, ...rest] = part.split("=");
+            if (key?.trim() === COOKIE_NAME) {
+              token = rest.join("=").trim();
+              break;
+            }
+          }
+        }
+      }
+      if (!token) {
+        res.json({ role: null });
+        return;
+      }
+      const payload = verifyToken(token, jwtSecret);
+      if (!payload) {
+        res.json({ role: null });
+        return;
+      }
+      res.json({ role: payload.role });
+    });
+
+    router.post("/logout", (_req, res) => {
+      res.clearCookie(COOKIE_NAME, { path: "/" });
+      res.json({ success: true });
     });
   }
 

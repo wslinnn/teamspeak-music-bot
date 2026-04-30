@@ -44,6 +44,7 @@ export interface BotConfig {
   neteaseApiPort: number;
   qqMusicApiPort: number;
   adminPassword: string;
+  userPassword: string;
   adminGroups: number[];
   autoReturnDelay: number;
   autoPauseOnEmpty: boolean;
@@ -70,6 +71,7 @@ export function getDefaultConfig(): BotConfig {
     neteaseApiPort: 3001,
     qqMusicApiPort: 3200,
     adminPassword: "",
+    userPassword: "",
     adminGroups: [],
     autoReturnDelay: 300,
     autoPauseOnEmpty: true,

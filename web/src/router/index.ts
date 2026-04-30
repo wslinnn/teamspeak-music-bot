@@ -97,6 +97,11 @@ router.beforeEach(async (to, from, next) => {
     return authStore.isAuthenticated ? next({ path: '/' }) : next();
   }
 
+  // 强制所有用户先登录（除白名单外）
+  if (!authStore.isAuthenticated) {
+    return next({ path: '/login', query: { redirect: to.fullPath } });
+  }
+
   // 管理员专属页
   if (to.meta.requiresAdmin && !authStore.isAdmin) {
     return next({ path: '/' });

@@ -15,10 +15,10 @@
         </div>
       </div>
 
-      <div class="flex-1 overflow-hidden relative w-full lg:w-auto" style="mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%); -webkit-mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);">
+      <div class="flex-1 overflow-hidden relative w-full lg:w-auto self-stretch" style="mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%); -webkit-mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);">
         <div v-if="loading" class="text-white/50 text-sm text-center py-[60px]">加载歌词中...</div>
         <div v-else-if="lines.length === 0" class="text-white/50 text-sm text-center py-[60px]">暂无歌词</div>
-        <div v-else class="h-full overflow-y-auto relative scroll-smooth py-[30vh]" ref="scrollContainer">
+        <div v-else class="h-full overflow-y-auto relative scroll-smooth py-[30vh]" ref="scrollContainer" @scroll.passive="onUserScroll">
           <div>
             <div
               v-for="(line, i) in lines"
@@ -73,9 +73,10 @@ const activeLine = ref(-1);
 const loading = ref(false);
 const scrollContainer = ref<HTMLElement | null>(null);
 const lineRefs = ref<Record<number, HTMLElement>>({});
-let syncTimer: ReturnType<typeof setInterval> | null = null;
+let rafId: number | null = null;
 let userScrolling = false;
 let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
+let lastFetchedSongId = '';
 
 const bgStyle = computed(() => {
   if (currentSong.value?.coverUrl) {
@@ -90,6 +91,8 @@ const bgStyle = computed(() => {
 
 async function fetchLyrics() {
   if (!currentSong.value) return;
+  if (currentSong.value.id === lastFetchedSongId && lines.value.length > 0) return;
+  lastFetchedSongId = currentSong.value.id;
   loading.value = true;
   lines.value = [];
   activeLine.value = -1;
@@ -120,77 +123,73 @@ function findActiveLine(elapsed: number): number {
   return idx;
 }
 
-function scrollToActiveLine(idx: number) {
-  if (userScrolling) return;
+/** 滚动到指定行并居中，centerRatio 控制垂直位置（0.5=正中，<0.5=偏上） */
+function scrollToLine(idx: number, behavior: ScrollBehavior = 'smooth', centerRatio = 0.38) {
   const el = lineRefs.value[idx];
   const container = scrollContainer.value;
   if (!el || !container) return;
-
-  const containerHeight = container.clientHeight;
-  const lineTop = el.offsetTop;
-  const lineHeight = el.offsetHeight;
-  const targetScrollTop = lineTop - containerHeight / 2 + lineHeight / 2;
-  container.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+  const containerRect = container.getBoundingClientRect();
+  const elRect = el.getBoundingClientRect();
+  const offset = elRect.top - containerRect.top + container.scrollTop - container.clientHeight * centerRatio + elRect.height / 2;
+  container.scrollTo({ top: offset, behavior });
 }
 
-function syncLyrics() {
-  if (!store.isPlaying || lines.value.length === 0) return;
-  const elapsed = store.elapsed;
-  const idx = findActiveLine(elapsed);
-  if (idx !== activeLine.value && idx >= 0) {
-    activeLine.value = idx;
-    scrollToActiveLine(idx);
+/** rAF 循环：每帧检测 elapsed 变化，同步高亮和滚动 */
+function tick() {
+  if (store.isPlaying && lines.value.length > 0) {
+    const idx = findActiveLine(store.elapsed);
+    if (idx >= 0 && idx !== activeLine.value) {
+      activeLine.value = idx;
+      scrollToLine(idx);
+    }
   }
+  rafId = requestAnimationFrame(tick);
 }
 
 async function seekToLine(index: number) {
+  activeLine.value = index;
+  userScrolling = false;
+  scrollToLine(index, 'instant');
   const time = lines.value[index]?.time;
   if (time !== undefined) {
     await store.seek(time);
   }
-  activeLine.value = index;
-  scrollToActiveLine(index);
 }
 
-function startSync() {
-  stopSync();
-  syncTimer = setInterval(syncLyrics, 500);
-}
-
-function stopSync() {
-  if (syncTimer) {
-    clearInterval(syncTimer);
-    syncTimer = null;
-  }
-}
-
-function onScroll() {
+function onUserScroll() {
   userScrolling = true;
   if (scrollTimeout) clearTimeout(scrollTimeout);
   scrollTimeout = setTimeout(() => {
     userScrolling = false;
-  }, 3000);
+  }, 1500);
 }
 
-watch(currentSong, () => {
-  fetchLyrics();
-  lineRefs.value = {};
+watch(() => currentSong.value?.id, (newId, oldId) => {
+  if (newId !== oldId) {
+    lastFetchedSongId = '';
+    fetchLyrics();
+    lineRefs.value = {};
+  }
 });
 
 watch(() => store.isPlaying, (playing) => {
-  if (playing) startSync();
-  else stopSync();
-}, { immediate: true });
+  if (!playing && lines.value.length > 0) {
+    const idx = findActiveLine(store.elapsed);
+    if (idx >= 0) {
+      activeLine.value = idx;
+      userScrolling = false;
+      scrollToLine(idx, 'smooth');
+    }
+  }
+});
 
 onMounted(() => {
   if (currentSong.value) fetchLyrics();
-  if (store.isPlaying) startSync();
-  scrollContainer.value?.addEventListener('scroll', onScroll, { passive: true });
+  rafId = requestAnimationFrame(tick);
 });
 
 onUnmounted(() => {
-  stopSync();
-  scrollContainer.value?.removeEventListener('scroll', onScroll);
+  if (rafId !== null) cancelAnimationFrame(rafId);
   if (scrollTimeout) clearTimeout(scrollTimeout);
 });
 </script>

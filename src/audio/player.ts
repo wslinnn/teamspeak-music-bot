@@ -91,7 +91,7 @@ export class AudioPlayer extends EventEmitter {
     // 1. 停止当前所有播放，自增 sessionId 屏蔽旧回调 （
     this.stop();
 
-    const currentSessionId = this.sessionId; 
+    const currentSessionId = this.sessionId;
     this.currentUrl = url;
     this.seekOffset = seekSeconds;
     this.framesPlayed = 0;
@@ -116,7 +116,7 @@ export class AudioPlayer extends EventEmitter {
 
     const ffmpegBin = getFfmpegCommand();
     this.ffmpeg = spawn(ffmpegBin, args, { stdio: ["ignore", "pipe", "pipe"] });
-    
+
     const currentPid = this.ffmpeg.pid;
     if (currentPid) {
       globalActivePids.add(currentPid);
@@ -139,7 +139,7 @@ export class AudioPlayer extends EventEmitter {
     this.ffmpeg.on("exit", (code, signal) => {
       if (currentPid) globalActivePids.delete(currentPid);
       this.logger.info({ pid: currentPid, code, signal }, "FFmpeg exited");
-      
+
       // 只有当前会话的进程结束才置空变量
       if (this.sessionId === currentSessionId) {
         this.ffmpeg = null;
@@ -155,21 +155,34 @@ export class AudioPlayer extends EventEmitter {
     });
 
     this.state = "playing";
+    // 播放开始时先发送静音帧，让 DAC 从静默状态渐变，避免 seek 后的爆音
+    const silence = Buffer.alloc(PCM_FRAME_BYTES);
+    for (let i = 0; i < 8; i++) {
+      try { this.emit("frame", this.encoder.encode(silence)); } catch { /* ignore */ }
+    }
     this.startFrameLoop();
   }
 
   stop(): void {
-    // 3. 递增 ID 是最有效的逻辑“隔离墙”
-    this.sessionId++; 
+    // 3. 递增 ID 是最有效的逻辑"隔离墙"
+    this.sessionId++;
     this.frameLoopRunning = false;
-    
+
     // 立即清空缓冲区，确保切歌瞬间静音 （
     this.pcmBuffer = Buffer.alloc(0);
+
+    // 发送静音帧过渡，避免音频硬切断产生爆音
+    if (this.state !== "idle") {
+      const silence = Buffer.alloc(PCM_FRAME_BYTES);
+      for (let i = 0; i < 8; i++) {
+        try { this.emit("frame", this.encoder.encode(silence)); } catch { /* ignore */ }
+      }
+    }
 
     if (this.ffmpeg) {
       const procToKill = this.ffmpeg;
       const pidToKill = procToKill.pid;
-      this.ffmpeg = null; 
+      this.ffmpeg = null;
 
       if (pidToKill) {
         this.forceCleanup(procToKill, pidToKill);
@@ -194,7 +207,7 @@ export class AudioPlayer extends EventEmitter {
 
     const killTimeout = setTimeout(() => {
       try {
-        process.kill(pid, 0); 
+        process.kill(pid, 0);
         process.kill(pid, "SIGKILL");
       } catch (e) {
       } finally {
@@ -281,9 +294,30 @@ export class AudioPlayer extends EventEmitter {
   }
 
   getElapsed(): number { return this.seekOffset + (this.framesPlayed * FRAME_DURATION_MS) / 1000; }
-  seek(seconds: number): void { if (this.currentUrl && Number.isFinite(seconds) && seconds >= 0) this.play(this.currentUrl, seconds); }
-  pause(): void { if (this.state === "playing") this.state = "paused"; }
-  resume(): void { if (this.state === "paused") { this.state = "playing"; this.nextFrameTime = performance.now(); } }
+  seek(seconds: number): void {
+    if (this.currentUrl && Number.isFinite(seconds) && seconds >= 0) {
+      this.play(this.currentUrl, seconds);
+    }
+  }
+  pause(): void {
+    if (this.state === "playing") {
+      this.state = "paused";
+      const silence = Buffer.alloc(PCM_FRAME_BYTES);
+      for (let i = 0; i < 8; i++) {
+        try { this.emit("frame", this.encoder.encode(silence)); } catch { /* ignore */ }
+      }
+    }
+  }
+  resume(): void {
+    if (this.state === "paused") {
+      const silence = Buffer.alloc(PCM_FRAME_BYTES);
+      for (let i = 0; i < 8; i++) {
+        try { this.emit("frame", this.encoder.encode(silence)); } catch { /* ignore */ }
+      }
+      this.state = "playing";
+      this.nextFrameTime = performance.now();
+    }
+  }
   resetFailures(): void { this.consecutiveFailures = 0; }
   setVolume(vol: number): void { this.volume = Math.max(0, Math.min(100, vol)); }
   getVolume(): number { return this.volume; }

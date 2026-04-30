@@ -30,6 +30,20 @@ export class PlayQueue {
     this.songs.push(...songs);
   }
 
+  insertAt(index: number, song: QueuedSong): void {
+    if (index < 0) index = 0;
+    if (index > this.songs.length) index = this.songs.length;
+    this.songs.splice(index, 0, song);
+    if (index <= this.currentIndex) {
+      this.currentIndex++;
+    }
+    const newPlayed = new Set<number>();
+    for (const idx of this.playedIndices) {
+      newPlayed.add(idx >= index ? idx + 1 : idx);
+    }
+    this.playedIndices = newPlayed;
+  }
+
   remove(index: number): QueuedSong | null {
     if (index < 0 || index >= this.songs.length) return null;
     const [removed] = this.songs.splice(index, 1);

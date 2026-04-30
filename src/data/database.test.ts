@@ -32,6 +32,7 @@ describe("database", () => {
       album: "Test Album",
       platform: "netease",
       coverUrl: "https://example.com/cover.jpg",
+      duration: 180,
     });
 
     botDb.addPlayHistory({
@@ -42,6 +43,7 @@ describe("database", () => {
       album: "Another Album",
       platform: "qq",
       coverUrl: "https://example.com/cover2.jpg",
+      duration: 240,
     });
 
     const history = botDb.getPlayHistory("bot1", 10);

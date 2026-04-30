@@ -8,6 +8,7 @@ export interface PlayHistoryEntry {
   album: string;
   platform: "netease" | "qq" | "bilibili" | "youtube";
   coverUrl: string;
+  duration: number;
 }
 
 export interface PlayHistoryRecord extends PlayHistoryEntry {
@@ -49,7 +50,7 @@ export interface FavoriteEntry {
   title: string;
   artist: string;
   coverUrl: string;
-  userId: string;
+  duration: number;
 }
 
 export interface FavoriteRecord extends FavoriteEntry {
@@ -76,9 +77,9 @@ export interface BotDatabase {
   getProfileConfig(botId: string): ProfileConfig;
   saveProfileConfig(botId: string, config: ProfileConfig): void;
   addFavorite(entry: Omit<FavoriteEntry, "id">): void;
-  getFavorites(userId: string): FavoriteRecord[];
-  deleteFavorite(id: number, userId: string): boolean;
-  isFavorite(songId: string, platform: string, userId: string): boolean;
+  getFavorites(): FavoriteRecord[];
+  deleteFavorite(id: number): boolean;
+  isFavorite(songId: string, platform: string): boolean;
   healthCheck(): boolean;
   close(): void;
 }
@@ -115,12 +116,6 @@ function migrateSchema(db: Database.Database): void {
     }
   }
 
-  // Favorites user_id migration
-  const favColumns = db.prepare("PRAGMA table_info(favorites)").all() as Array<{ name: string }>;
-  const favNames = favColumns.map((c) => c.name);
-  if (!favNames.includes("userId")) {
-    db.exec("ALTER TABLE favorites ADD COLUMN userId TEXT NOT NULL DEFAULT 'admin'");
-  }
 }
 
 function initTables(db: Database.Database): void {
@@ -134,6 +129,7 @@ function initTables(db: Database.Database): void {
       album TEXT NOT NULL,
       platform TEXT NOT NULL,
       coverUrl TEXT NOT NULL,
+      duration INTEGER NOT NULL DEFAULT 0,
       playedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -165,11 +161,11 @@ function initTables(db: Database.Database): void {
       title TEXT NOT NULL,
       artist TEXT NOT NULL,
       coverUrl TEXT NOT NULL,
-      userId TEXT NOT NULL DEFAULT 'admin',
+      duration INTEGER NOT NULL DEFAULT 0,
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_song_user ON favorites(songId, platform, userId);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_song_platform ON favorites(songId, platform);
   `);
 }
 
@@ -182,8 +178,8 @@ export function createDatabase(dbPath: string): BotDatabase {
   let closed = false;
 
   const insertHistory = db.prepare(`
-    INSERT INTO play_history (botId, songId, songName, artist, album, platform, coverUrl)
-    VALUES (@botId, @songId, @songName, @artist, @album, @platform, @coverUrl)
+    INSERT INTO play_history (botId, songId, songName, artist, album, platform, coverUrl, duration)
+    VALUES (@botId, @songId, @songName, @artist, @album, @platform, @coverUrl, @duration)
   `);
 
   const selectHistory = db.prepare(`
@@ -230,18 +226,18 @@ export function createDatabase(dbPath: string): BotDatabase {
   `);
 
   const insertFavorite = db.prepare(`
-    INSERT INTO favorites (songId, platform, title, artist, coverUrl, userId)
-    VALUES (@songId, @platform, @title, @artist, @coverUrl, @userId)
+    INSERT INTO favorites (songId, platform, title, artist, coverUrl, duration)
+    VALUES (@songId, @platform, @title, @artist, @coverUrl, @duration)
   `);
 
   const selectFavorites = db.prepare(`
-    SELECT * FROM favorites WHERE userId = ? ORDER BY id DESC
+    SELECT * FROM favorites ORDER BY id DESC
   `);
 
-  const deleteFavorite = db.prepare(`DELETE FROM favorites WHERE id = ? AND userId = ?`);
+  const deleteFavorite = db.prepare(`DELETE FROM favorites WHERE id = ?`);
 
   const checkFavorite = db.prepare(`
-    SELECT 1 FROM favorites WHERE songId = ? AND platform = ? AND userId = ? LIMIT 1
+    SELECT 1 FROM favorites WHERE songId = ? AND platform = ? LIMIT 1
   `);
 
   return {
@@ -311,17 +307,17 @@ export function createDatabase(dbPath: string): BotDatabase {
       insertFavorite.run(entry);
     },
 
-    getFavorites(userId) {
-      return selectFavorites.all(userId) as FavoriteRecord[];
+    getFavorites() {
+      return selectFavorites.all() as FavoriteRecord[];
     },
 
-    deleteFavorite(id, userId) {
-      const result = deleteFavorite.run(id, userId);
+    deleteFavorite(id) {
+      const result = deleteFavorite.run(id);
       return result.changes > 0;
     },
 
-    isFavorite(songId, platform, userId) {
-      const row = checkFavorite.get(songId, platform, userId);
+    isFavorite(songId, platform) {
+      const row = checkFavorite.get(songId, platform);
       return !!row;
     },
 

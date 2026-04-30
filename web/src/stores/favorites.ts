@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { http } from '../utils/http';
+import { useToast } from '../composables/useToast';
 
 export interface Favorite {
   id: number;
@@ -9,6 +10,7 @@ export interface Favorite {
   title: string;
   artist: string;
   coverUrl: string;
+  duration: number;
   createdAt: string;
 }
 
@@ -35,7 +37,9 @@ export const useFavoritesStore = defineStore('favorites', () => {
     name: string;
     artist: string;
     coverUrl: string;
+    duration?: number;
   }) {
+    const toast = useToast();
     try {
       await http.post('/api/favorites', {
         songId: song.id,
@@ -43,19 +47,25 @@ export const useFavoritesStore = defineStore('favorites', () => {
         title: song.name,
         artist: song.artist,
         coverUrl: song.coverUrl,
+        duration: song.duration ?? 0,
       });
       await fetchFavorites();
+      toast.success('已添加到收藏');
     } catch (err) {
       console.error('Failed to add favorite:', err);
+      toast.error('收藏失败');
     }
   }
 
   async function removeFavorite(id: number) {
+    const toast = useToast();
     try {
       await http.delete(`/api/favorites/${id}`);
       await fetchFavorites();
+      toast.success('已取消收藏');
     } catch (err) {
       console.error('Failed to remove favorite:', err);
+      toast.error('取消收藏失败');
     }
   }
 

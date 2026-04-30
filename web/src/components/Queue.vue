@@ -49,9 +49,9 @@
             <div
               class="flex items-center gap-2 p-2 rounded-[var(--radius-sm)] transition-colors cursor-pointer select-none hover:bg-hover-bg group"
               :class="{ 'bg-[rgba(51,94,234,0.1)]': store.currentSong?.id === song.id }"
-              @dblclick="playAtIndex(i)"
+              @click="playAtIndex(i)"
             >
-              <span class="drag-handle cursor-grab text-foreground-subtle opacity-0 transition-opacity hover:opacity-100 group-hover:opacity-50 shrink-0 text-base p-0.5">
+              <span class="drag-handle cursor-grab text-foreground-subtle opacity-50 md:opacity-0 md:group-hover:opacity-50 transition-opacity shrink-0 text-base p-0.5 active:opacity-100">
                 <Icon icon="mdi:drag-vertical" />
               </span>
               <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
@@ -65,6 +65,7 @@
                 :song-name="song.name"
                 :artist="song.artist"
                 :cover-url="song.coverUrl"
+                :duration="song.duration"
               />
               <button class="text-sm opacity-0 p-1 rounded-[var(--radius-sm)] transition-opacity text-text-tertiary hover:text-text-primary group-hover:opacity-100" @click="removeSong(i)" title="移除">
                 <Icon icon="mdi:close" />

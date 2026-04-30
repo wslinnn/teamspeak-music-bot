@@ -310,6 +310,7 @@ async function pollQrStatus(platform: string) {
       if (qr.pollTimer) clearInterval(qr.pollTimer);
       qr.pollTimer = null;
       await checkAuthStatus();
+      toast.success('扫码登录成功');
     } else if (qr.status === 'expired') {
       if (qr.pollTimer) clearInterval(qr.pollTimer);
       qr.pollTimer = null;

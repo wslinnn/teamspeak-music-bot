@@ -20,6 +20,7 @@ const props = defineProps<{
   songName: string;
   artist: string;
   coverUrl: string;
+  duration?: number;
 }>();
 
 const favoritesStore = useFavoritesStore();
@@ -40,6 +41,7 @@ async function toggle() {
       name: props.songName,
       artist: props.artist,
       coverUrl: props.coverUrl,
+      duration: props.duration ?? 0,
     });
   }
 }

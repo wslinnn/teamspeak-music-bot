@@ -2,24 +2,43 @@
   <div class="flex min-h-screen items-center justify-center bg-surface">
     <div class="w-full max-w-[400px] rounded-xl bg-surface-elevated p-10 shadow-xl">
       <h1 class="mb-2 text-center text-[28px] font-bold text-foreground">欢迎使用 TSMusicBot</h1>
-      <p class="mb-8 text-center text-sm text-foreground-muted">请设置管理密码以保护你的 WebUI</p>
+      <p class="mb-8 text-center text-sm text-foreground-muted">请设置管理密码和普通用户密码</p>
       <form @submit.prevent="handleSetup" class="flex flex-col gap-4">
         <input
-          v-model="password"
+          v-model="adminPassword"
           type="password"
           aria-label="管理密码"
           class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
-          placeholder="设置密码"
+          placeholder="管理密码"
           autocomplete="new-password"
           :disabled="authStore.loading"
           autofocus
         />
         <input
-          v-model="confirmPassword"
+          v-model="confirmAdminPassword"
           type="password"
-          aria-label="确认密码"
+          aria-label="确认管理密码"
           class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
-          placeholder="确认密码"
+          placeholder="确认管理密码"
+          autocomplete="new-password"
+          :disabled="authStore.loading"
+        />
+        <div class="h-px bg-border-color my-1" />
+        <input
+          v-model="userPassword"
+          type="password"
+          aria-label="普通用户密码"
+          class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
+          placeholder="普通用户密码"
+          autocomplete="new-password"
+          :disabled="authStore.loading"
+        />
+        <input
+          v-model="confirmUserPassword"
+          type="password"
+          aria-label="确认普通用户密码"
+          class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
+          placeholder="确认普通用户密码"
           autocomplete="new-password"
           :disabled="authStore.loading"
         />
@@ -41,27 +60,40 @@ import BaseButton from '../components/common/BaseButton.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
-const password = ref('');
-const confirmPassword = ref('');
+const adminPassword = ref('');
+const confirmAdminPassword = ref('');
+const userPassword = ref('');
+const confirmUserPassword = ref('');
 const localError = ref('');
 
-const canSubmit = computed(() => password.value.length > 0 && confirmPassword.value.length > 0);
+const canSubmit = computed(() =>
+  adminPassword.value.length > 0 &&
+  userPassword.value.length > 0
+);
 
 async function handleSetup() {
   localError.value = '';
-  if (!password.value) {
-    localError.value = '请输入密码';
+  if (!adminPassword.value || !userPassword.value) {
+    localError.value = '请输入管理密码和普通用户密码';
     return;
   }
-  if (password.value !== confirmPassword.value) {
-    localError.value = '两次输入的密码不一致';
+  if (adminPassword.value !== confirmAdminPassword.value) {
+    localError.value = '两次输入的管理密码不一致';
     return;
   }
-  if (password.value.length < 4) {
+  if (userPassword.value !== confirmUserPassword.value) {
+    localError.value = '两次输入的普通用户密码不一致';
+    return;
+  }
+  if (adminPassword.value.length < 4 || userPassword.value.length < 4) {
     localError.value = '密码至少需要 4 个字符';
     return;
   }
-  const success = await authStore.setup(password.value);
+  if (adminPassword.value === userPassword.value) {
+    localError.value = '管理密码和普通用户密码不能相同';
+    return;
+  }
+  const success = await authStore.setup(adminPassword.value, userPassword.value);
   if (success) {
     router.push('/');
   }

@@ -11,7 +11,7 @@
         <span class="text-sm font-medium truncate">{{ song.name }}</span>
         <span
           class="shrink-0 text-[10px] font-semibold px-[5px] py-px rounded-[3px] leading-[1.4]"
-          :class="getPlatformBadgeClass(song.platform)"
+          :class="getPlatformTailwindClass(song.platform)"
         >{{ getPlatformLabel(song.platform) }}</span>
       </div>
       <div class="text-xs text-text-secondary">{{ song.artist }}</div>
@@ -25,6 +25,7 @@
         :song-name="song.name"
         :artist="song.artist"
         :cover-url="song.coverUrl"
+        :duration="song.duration"
       />
       <button class="text-lg p-1 rounded-[var(--radius-sm)] opacity-70 transition-opacity hover:opacity-100" @click.stop="$emit('play')" title="播放">
         <Icon icon="mdi:play" />
@@ -42,7 +43,7 @@ import CoverArt from './CoverArt.vue';
 import FavoriteButton from './FavoriteButton.vue';
 import { Song } from '../stores/player.js';
 import { formatDuration } from '../utils/format';
-import { getPlatformLabel, getPlatformBadgeClass } from '../utils/platform';
+import { getPlatformLabel, getPlatformTailwindClass } from '../utils/platform';
 
 defineProps<{
   song: Song;

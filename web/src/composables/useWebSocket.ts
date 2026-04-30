@@ -1,6 +1,5 @@
 import { ref, computed, onUnmounted } from 'vue';
 import { usePlayerStore } from '../stores/player';
-import { useAuthStore } from '../stores/auth';
 import { useFavoritesStore } from '../stores/favorites';
 import { useToast } from './useToast';
 
@@ -36,7 +35,6 @@ function cleanupWebSocket(ws: WebSocket | null) {
 
 export function useWebSocket() {
   const store = usePlayerStore();
-  const authStore = useAuthStore();
   const connectionState = ref<ConnectionState>('disconnected');
   const connected = computed(() => connectionState.value === 'connected');
   let ws: WebSocket | null = null;
@@ -60,12 +58,7 @@ export function useWebSocket() {
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    let url = `${protocol}//${window.location.host}/ws`;
-
-    const token = authStore.getToken();
-    if (token) {
-      url += `?token=${encodeURIComponent(token)}`;
-    }
+    const url = `${protocol}//${window.location.host}/ws`;
 
     connectionState.value = 'reconnecting';
     ws = new WebSocket(url);

@@ -379,6 +379,7 @@ export class BotInstance extends EventEmitter {
         album: song.album,
         platform: song.platform,
         coverUrl: song.coverUrl,
+        duration: song.duration ?? 0,
       });
       // Update bot presence (fire-and-forget — never blocks playback)
       this.profileManager.onSongChange(song).catch((err) => {

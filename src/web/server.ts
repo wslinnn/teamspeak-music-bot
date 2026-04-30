@@ -15,7 +15,8 @@ import { createAuthRouterWithConfig } from "./api/auth.js";
 import { createFavoritesRouter } from "./api/favorites.js";
 import { setupWebSocket } from "./websocket.js";
 import { deriveSecret, verifyToken } from "../auth/jwt.js";
-import { createRequireAdmin } from "../auth/middleware.js";
+import { createRequireAuth, createRequireAdmin } from "../auth/middleware.js";
+import { COOKIE_NAME } from "./api/auth.js";
 import { saveConfig } from "../data/config.js";
 
 export interface WebServerOptions {
@@ -48,8 +49,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   app.use(express.json());
 
-  const authEnabled = !!options.config.adminPassword;
+  const authEnabled = !!options.config.adminPassword && !!options.config.userPassword;
   const jwtSecret = deriveSecret(options.config.adminPassword);
+  const requireAuth = createRequireAuth(jwtSecret);
   const requireAdmin = createRequireAdmin(jwtSecret);
 
   app.get("/api/config/public-url", (_req, res) => {
@@ -62,22 +64,27 @@ export function createWebServer(options: WebServerOptions): WebServer {
       status: "ok",
       version: "0.1.0",
       authEnabled,
-      needsSetup: !options.config.adminPassword,
+      needsSetup: !options.config.adminPassword || !options.config.userPassword,
     });
   });
 
-  // Setup endpoint: set admin password on first run
+  // Setup endpoint: set admin and user passwords on first run
   app.post("/api/setup", (req, res) => {
-    if (options.config.adminPassword) {
+    if (options.config.adminPassword && options.config.userPassword) {
       res.status(403).json({ success: false, error: "Setup already completed" });
       return;
     }
-    const { password } = req.body;
-    if (!password || typeof password !== "string" || password.trim().length === 0) {
-      res.status(400).json({ success: false, error: "Password is required" });
+    const { adminPassword, userPassword } = req.body;
+    if (!adminPassword || typeof adminPassword !== "string" || adminPassword.trim().length === 0) {
+      res.status(400).json({ success: false, error: "Admin password is required" });
       return;
     }
-    options.config.adminPassword = password;
+    if (!userPassword || typeof userPassword !== "string" || userPassword.trim().length === 0) {
+      res.status(400).json({ success: false, error: "User password is required" });
+      return;
+    }
+    options.config.adminPassword = adminPassword;
+    options.config.userPassword = userPassword;
     try {
       saveConfig(options.configPath, options.config);
     } catch (err) {
@@ -85,13 +92,15 @@ export function createWebServer(options: WebServerOptions): WebServer {
       res.status(500).json({ success: false, error: "Failed to save configuration" });
       return;
     }
-    logger.info("Admin password set via setup");
+    logger.info("Admin and user passwords set via setup");
     res.json({ success: true });
   });
 
   // Global auth middleware for all /api/* except whitelist
   const AUTH_WHITELIST = new Set([
     "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/me",
     "/api/config/public-url",
     "/api/health",
     "/api/setup",
@@ -100,8 +109,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
     if (!req.path.startsWith("/api")) return next();
     if (AUTH_WHITELIST.has(req.path)) return next();
     if (!authEnabled) return next();
-    // Only enforce auth on admin-only routes; regular API endpoints are open
-    next();
+    requireAuth(req, res, next);
   });
 
   app.use(
@@ -111,6 +119,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       options.config,
       options.configPath,
       logger,
+      requireAuth,
       requireAdmin
     )
   );
@@ -160,11 +169,18 @@ export function createWebServer(options: WebServerOptions): WebServer {
     path: "/ws",
     verifyClient: authEnabled
       ? (info, cb) => {
-          const url = new URL(
-            info.req.url || "",
-            `http://${info.req.headers.host}`
-          );
-          const token = url.searchParams.get("token");
+          // Read token from cookie instead of URL param
+          const cookieHeader = info.req.headers.cookie;
+          let token: string | undefined;
+          if (cookieHeader) {
+            for (const part of cookieHeader.split(";")) {
+              const [key, ...rest] = part.split("=");
+              if (key?.trim() === COOKIE_NAME) {
+                token = rest.join("=").trim();
+                break;
+              }
+            }
+          }
           if (!token) {
             cb(false, 4001, "Authentication required");
             return;
