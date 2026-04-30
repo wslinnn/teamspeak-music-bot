@@ -92,9 +92,19 @@ router.beforeEach(async (to, from, next) => {
     return next({ path: '/' });
   }
 
+  // 鉴权未开启 → 所有页面放行
+  if (authStore.authEnabled === false) {
+    return next();
+  }
+
   // 已登录用户访问 /login → 重定向首页
   if (to.path === '/login') {
     return authStore.isAuthenticated ? next({ path: '/' }) : next();
+  }
+
+  // 强制所有用户先登录（除白名单外）
+  if (!authStore.isAuthenticated) {
+    return next({ path: '/login', query: { redirect: to.fullPath } });
   }
 
   // 管理员专属页

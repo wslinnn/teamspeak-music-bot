@@ -2,12 +2,12 @@
   <div class="flex min-h-screen items-center justify-center bg-surface">
     <div class="w-full max-w-[400px] rounded-xl bg-surface-elevated p-10 shadow-xl">
       <h1 class="mb-2 text-center text-[28px] font-bold text-foreground">TSMusicBot</h1>
-      <p class="mb-8 text-center text-sm text-foreground-muted">请输入管理密码</p>
+      <p class="mb-8 text-center text-sm text-foreground-muted">请输入密码登录</p>
       <form @submit.prevent="handleLogin" class="flex flex-col gap-4">
         <input
           v-model="password"
           type="password"
-          aria-label="管理密码"
+          aria-label="密码"
           class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
           placeholder="密码"
           autocomplete="current-password"

@@ -14,7 +14,7 @@
       <!-- Bot selector (always shown when at least one bot exists) -->
       <div v-if="store.bots.length > 0" class="relative" ref="selectorRef">
         <button class="flex items-center gap-2 md:gap-2.5 px-3 md:px-5 py-2 md:py-2.5 bg-bg-secondary rounded-[var(--radius-md)] text-base font-semibold min-h-[44px] transition-colors duration-[var(--transition-fast)] cursor-pointer hover:bg-hover-bg" @click="dropdownOpen = !dropdownOpen">
-          <span class="w-2.5 h-2.5 rounded-full bg-text-tertiary shrink-0" :class="{ 'bg-green-500': activeBot?.connected }" />
+          <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="activeBot?.connected ? 'bg-green-500' : 'bg-text-tertiary'" />
           <span class="hidden sm:inline max-w-[160px] truncate whitespace-nowrap">{{ activeBot?.name ?? '选择机器人' }}</span>
           <Icon v-if="activeBot?.playing && !activeBot?.paused" icon="mdi:play" class="text-sm text-green-500" />
           <Icon v-else-if="activeBot?.paused" icon="mdi:pause" class="text-sm text-yellow-500" />
@@ -31,7 +31,7 @@
               :class="{ 'bg-[rgba(51,94,234,0.12)] text-primary': bot.id === store.activeBotId }"
               @click="selectBot(bot.id)"
             >
-              <span class="w-2.5 h-2.5 rounded-full bg-text-tertiary shrink-0" :class="{ 'bg-green-500': bot.connected }" />
+              <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="bot.connected ? 'bg-green-500' : 'bg-text-tertiary'" />
               <span class="flex-1 min-w-0 truncate whitespace-nowrap">{{ bot.name }}</span>
               <span v-if="bot.playing && !bot.paused" class="text-[11px] px-1.5 py-px rounded font-medium shrink-0 bg-[rgba(34,197,94,0.15)] text-green-500">播放中</span>
               <span v-else-if="bot.paused" class="text-[11px] px-1.5 py-px rounded font-medium shrink-0 bg-[rgba(234,179,8,0.15)] text-yellow-500">已暂停</span>
@@ -60,15 +60,15 @@
       <!-- Desktop-only auth controls -->
       <div class="hidden md:flex items-center gap-4">
         <RouterLink v-if="authStore.authEnabled && !authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
-          管理员登录
+          登录
         </RouterLink>
-        <RouterLink v-if="authStore.authEnabled && authStore.isAuthenticated" to="/settings" class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100">
+        <RouterLink v-if="authStore.isAdmin" to="/settings" class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100">
           <Icon icon="mdi:cog" />
         </RouterLink>
-        <div v-if="authStore.authEnabled && authStore.isAuthenticated" class="flex items-center gap-2 ml-1 pl-3 border-l border-border-color">
+        <div v-if="authStore.isAuthenticated" class="flex items-center gap-2 ml-1 pl-3 border-l border-border-color">
           <div class="flex items-center gap-1.5 text-sm text-text-secondary">
-            <Icon icon="mdi:shield-account" class="text-lg" />
-            <span>管理员</span>
+            <Icon :icon="authStore.isAdmin ? 'mdi:shield-account' : 'mdi:account'" class="text-lg" />
+            <span>{{ authStore.isAdmin ? '管理员' : '用户' }}</span>
           </div>
           <button class="text-[18px] opacity-50 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" title="退出登录" @click="handleLogout">
             <Icon icon="mdi:logout" />
@@ -117,13 +117,13 @@
             class="flex items-center justify-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-semibold bg-primary text-white transition-all duration-[var(--transition-fast)] hover:brightness-110"
             @click="mobileMenuOpen = false"
           >
-            <Icon icon="mdi:login" class="mr-3" /> 管理员登录
+            <Icon icon="mdi:login" class="mr-3" /> 登录
           </RouterLink>
 
           <div v-if="authStore.authEnabled && authStore.isAuthenticated" class="flex items-center justify-between px-4 py-3">
             <div class="flex items-center gap-2 text-[15px] font-medium text-text-secondary">
-              <Icon icon="mdi:shield-account" class="text-lg" />
-              <span>管理员</span>
+              <Icon :icon="authStore.isAdmin ? 'mdi:shield-account' : 'mdi:account'" class="text-lg" />
+              <span>{{ authStore.isAdmin ? '管理员' : '用户' }}</span>
             </div>
             <button
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-md)] text-[13px] font-medium opacity-60 transition-all duration-[var(--transition-fast)] hover:opacity-100 hover:bg-hover-bg"

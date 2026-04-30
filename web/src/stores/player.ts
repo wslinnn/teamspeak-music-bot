@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { http } from '../utils/http';
+import { useToast } from '../composables/useToast';
 
 export interface Song {
   id: string;
@@ -169,11 +170,23 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async startBotInstance(id: string) {
-      await http.post(`/api/bot/${id}/start`);
+      const toast = useToast();
+      try {
+        await http.post(`/api/bot/${id}/start`);
+        toast.success('机器人已启动');
+      } catch {
+        toast.error('启动机器人失败');
+      }
     },
 
     async stopBotInstance(id: string) {
-      await http.post(`/api/bot/${id}/stop`);
+      const toast = useToast();
+      try {
+        await http.post(`/api/bot/${id}/stop`);
+        toast.success('机器人已停止');
+      } catch {
+        toast.error('停止机器人失败');
+      }
     },
 
     async fetchBots() {
@@ -250,52 +263,76 @@ export const usePlayerStore = defineStore('player', {
 
     async playAtIndex(index: number) {
       if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/play-at`, { index });
-      this._setTiming(this.activeBotId, { serverElapsed: 0 });
-      this._syncAfterAction();
+      const toast = useToast();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/play-at`, { index });
+        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+        this._syncAfterAction();
+        toast.success('开始播放');
+      } catch {
+        toast.error('播放失败');
+      }
     },
 
     async play(query: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/play`, { query, platform });
-      this._setTiming(this.activeBotId, { serverElapsed: 0 });
-      this._syncAfterAction();
-    },
-
-    async playById(songId: string, platform = 'netease') {
-      if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/play-by-id`, { songId, platform });
-      this._setTiming(this.activeBotId, { serverElapsed: 0 });
-      this._syncAfterAction();
+      const toast = useToast();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/play`, { query, platform });
+        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+        this._syncAfterAction();
+        toast.success('开始播放');
+      } catch {
+        toast.error('播放失败');
+      }
     },
 
     async playSong(song: Song) {
       if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/play-song`, { song });
-      this._setTiming(this.activeBotId, { serverElapsed: 0 });
-      this._syncAfterAction();
+      const toast = useToast();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/play-song`, { song });
+        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+        this._syncAfterAction();
+        toast.success(`开始播放: ${song.name}`);
+      } catch {
+        toast.error('播放失败');
+      }
     },
 
     async addToQueue(query: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/add`, { query, platform });
-    },
-
-    async addToQueueById(songId: string, platform = 'netease') {
-      if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/add-by-id`, { songId, platform });
+      const toast = useToast();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/add`, { query, platform });
+        toast.success('已添加到队列');
+      } catch {
+        toast.error('添加到队列失败');
+      }
     },
 
     async addSong(song: Song) {
       if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/add-song`, { song });
+      const toast = useToast();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/add-song`, { song });
+        toast.success(`已添加到队列: ${song.name}`);
+      } catch {
+        toast.error('添加到队列失败');
+      }
     },
 
     async playPlaylist(playlistId: string, platform = 'netease') {
       if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
-      this._setTiming(this.activeBotId, { serverElapsed: 0 });
-      this._syncAfterAction();
+      const toast = useToast();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
+        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+        this._syncAfterAction();
+        toast.success('开始播放歌单');
+      } catch {
+        toast.error('播放歌单失败');
+      }
     },
 
     async pause() {
@@ -344,8 +381,19 @@ export const usePlayerStore = defineStore('player', {
 
     async seek(position: number) {
       if (!this.activeBotId) return;
+      // 立即更新本地状态，不等 HTTP 响应
+      this._setTiming(this.activeBotId, {
+        serverElapsed: position,
+        serverSyncTime: Date.now(),
+        wasPlaying: true,
+      });
+      const bot = this.bots.find(b => b.id === this.activeBotId);
+      if (bot) {
+        bot.playing = true;
+        bot.paused = false;
+      }
+      // 再发请求到服务端
       await http.post(`/api/player/${this.activeBotId}/seek`, { position });
-      this._setTiming(this.activeBotId, { serverElapsed: position });
       this._syncAfterAction();
     },
 
@@ -356,7 +404,19 @@ export const usePlayerStore = defineStore('player', {
 
     async setMode(mode: string) {
       if (!this.activeBotId) return;
-      await http.post(`/api/player/${this.activeBotId}/mode`, { mode });
+      const toast = useToast();
+      const modeLabels: Record<string, string> = {
+        seq: '顺序播放',
+        loop: '单曲循环',
+        random: '随机播放',
+        rloop: '随机循环',
+      };
+      try {
+        await http.post(`/api/player/${this.activeBotId}/mode`, { mode });
+        toast.success(`已切换到${modeLabels[mode] ?? mode}`);
+      } catch {
+        toast.error('切换播放模式失败');
+      }
     },
 
     async fetchHomeData() {

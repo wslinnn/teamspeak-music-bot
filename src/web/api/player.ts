@@ -152,7 +152,8 @@ export function createPlayerRouter(
   // Get current elapsed time (ground truth from server)
   router.get("/:botId/elapsed", (req, res) => {
     const bot = req.bot!;
-    res.json({ elapsed: bot.getPlayer().getElapsed() });
+    const elapsed = bot.getPlayer().getElapsed();
+    res.json({ elapsed: Math.round(elapsed * 100) / 100 });
   });
 
   // Seek to position
@@ -169,6 +170,7 @@ export function createPlayerRouter(
         return;
       }
       bot.getPlayer().seek(position);
+      bot.emit("stateChange");
       res.json({ message: `Seeked to ${Math.floor(position)}s`, seekOffset: position });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
@@ -298,11 +300,19 @@ export function createPlayerRouter(
         return;
       }
       const queue = bot.getQueueManager();
-      queue.clear();
-      queue.add(song);
-      queue.play();
+      const currentIdx = queue.getCurrentIndex();
 
+      bot.getPlayer().stop();
       bot.getPlayer().resetFailures();
+
+      if (currentIdx >= 0) {
+        queue.insertAt(currentIdx, song);
+        queue.playAt(currentIdx);
+      } else {
+        queue.insertAt(0, song);
+        queue.playAt(0);
+      }
+
       const ok = await bot.resolveAndPlay(queue.current()!);
       if (!ok) {
         res.json({ message: `Cannot play: ${song.name || song.id}` });
@@ -403,7 +413,7 @@ export function createPlayerRouter(
       name: r.songName,
       artist: r.artist,
       album: r.album,
-      duration: 0,
+      duration: (r as any).duration ?? 0,
       coverUrl: r.coverUrl,
       platform: r.platform,
       playedAt: r.playedAt,

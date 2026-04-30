@@ -5,19 +5,8 @@ import { useAuthStore } from '../stores/auth';
 export const http: AxiosInstance = axios.create({
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
-
-http.interceptors.request.use(
-  (config) => {
-    const authStore = useAuthStore();
-    const token = authStore.getToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
 
 http.interceptors.response.use(
   (response) => response,

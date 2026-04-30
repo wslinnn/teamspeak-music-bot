@@ -1,59 +1,55 @@
 import { defineStore } from 'pinia';
-import { ref, computed, watch } from 'vue';
+import { ref, computed } from 'vue';
 import { http } from '../utils/http';
 
-function parseJwt(token: string): { role?: string; sub?: string; exp?: number } | null {
-  try {
-    const base64 = token.split('.')[1];
-    const json = atob(base64.replace(/-/g, '+').replace(/_/g, '/'));
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-function isTokenExpired(token: string): boolean {
-  const payload = parseJwt(token);
-  if (!payload || !payload.exp) return true;
-  return Date.now() >= payload.exp * 1000;
-}
-
 export const useAuthStore = defineStore('auth', () => {
-  const rawToken = localStorage.getItem('jwt_token');
-  const token = ref<string | null>(rawToken && !isTokenExpired(rawToken) ? rawToken : null);
-  if (rawToken && !token.value) {
-    localStorage.removeItem('jwt_token');
-  }
   const loading = ref(false);
   const error = ref<string | null>(null);
   const authEnabled = ref<boolean | null>(null);
   const needsSetup = ref<boolean | null>(null);
+  const role = ref<'admin' | 'user' | null>(null);
+  let checkPromise: Promise<boolean> | null = null;
 
-  const isAuthenticated = computed(() => {
-    if (!token.value) return false;
-    return !isTokenExpired(token.value);
-  });
-
-  const role = computed(() => {
-    if (!token.value) return null;
-    return parseJwt(token.value)?.role ?? null;
-  });
-
+  const isAuthenticated = computed(() => role.value !== null);
   const isAdmin = computed(() => role.value === 'admin');
+  const isUser = computed(() => role.value === 'user');
 
   async function checkAuthEnabled(): Promise<boolean> {
-    try {
-      const res = await http.get('/api/health');
-      authEnabled.value = res.data.authEnabled === true;
-      needsSetup.value = res.data.needsSetup === true;
-      return authEnabled.value;
-    } catch (err: unknown) {
-      const status = (err as any)?.response?.status;
-      if (!status) throw err;
-      authEnabled.value = false;
-      needsSetup.value = false;
-      return false;
-    }
+    if (checkPromise) return checkPromise;
+
+    checkPromise = (async () => {
+      try {
+        const res = await http.get('/api/health');
+        authEnabled.value = res.data.authEnabled === true;
+        needsSetup.value = res.data.needsSetup === true;
+
+        // Restore session from HTTP-only cookie if auth is enabled
+        if (authEnabled.value) {
+          try {
+            const meRes = await http.get('/api/auth/me');
+            role.value = meRes.data.role ?? null;
+          } catch (meErr: unknown) {
+            const meStatus = (meErr as any)?.response?.status;
+            if (meStatus && meStatus !== 401) {
+              console.warn('Failed to fetch user:', meErr);
+            }
+            role.value = null;
+          }
+        }
+
+        return authEnabled.value;
+      } catch (err: unknown) {
+        const status = (err as any)?.response?.status;
+        if (!status) throw err;
+        authEnabled.value = false;
+        needsSetup.value = false;
+        return false;
+      } finally {
+        checkPromise = null;
+      }
+    })();
+
+    return checkPromise;
   }
 
   async function login(password: string): Promise<boolean> {
@@ -62,8 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await http.post('/api/auth/login', { password });
       if (res.data.success) {
-        token.value = res.data.token;
-        localStorage.setItem('jwt_token', res.data.token);
+        role.value = res.data.role;
         return true;
       }
       error.value = res.data.error ?? 'Login failed';
@@ -79,14 +74,15 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function setup(password: string): Promise<boolean> {
+  async function setup(adminPassword: string, userPassword: string): Promise<boolean> {
     loading.value = true;
     error.value = null;
     try {
-      const res = await http.post('/api/setup', { password });
+      const res = await http.post('/api/setup', { adminPassword, userPassword });
       if (res.data.success) {
         needsSetup.value = false;
-        return true;
+        authEnabled.value = true;
+        return await login(adminPassword);
       }
       error.value = res.data.error ?? 'Setup failed';
       return false;
@@ -102,24 +98,11 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout(): void {
-    token.value = null;
-    localStorage.removeItem('jwt_token');
+    role.value = null;
+    http.post('/api/auth/logout').catch(() => {});
   }
-
-  function getToken(): string | null {
-    return token.value;
-  }
-
-  // Clear stale token when auth is disabled
-  watch(token, (t) => {
-    if (t && !parseJwt(t)) {
-      token.value = null;
-      localStorage.removeItem('jwt_token');
-    }
-  });
 
   return {
-    token,
     loading,
     error,
     authEnabled,
@@ -127,10 +110,10 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     role,
     isAdmin,
+    isUser,
     checkAuthEnabled,
     login,
     setup,
     logout,
-    getToken,
   };
 });

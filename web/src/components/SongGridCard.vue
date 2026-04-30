@@ -34,6 +34,7 @@
             :song-name="song.name"
             :artist="song.artist"
             :cover-url="song.coverUrl"
+            :duration="song.duration"
           />
           <button
             class="flex h-7 w-7 items-center justify-center rounded-full text-foreground-muted transition-all duration-200 hover:bg-interactive-hover hover:text-primary"

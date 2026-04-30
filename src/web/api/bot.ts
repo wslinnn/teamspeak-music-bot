@@ -16,18 +16,20 @@ export function createBotRouter(
   config: BotConfig,
   configPath: string,
   logger: Logger,
+  requireAuth?: RequestHandler,
   requireAdmin?: RequestHandler
 ): Router {
   const router = Router();
+  const auth = requireAuth ?? ((_req, _res, next) => next());
   const adminOnly = requireAdmin ?? ((_req, _res, next) => next());
 
-  router.get("/", (_req, res) => {
+  router.get("/", auth, (_req, res) => {
     const bots = botManager.getAllBots().map((b) => b.getStatus());
     res.json({ bots });
   });
 
   // GET /api/bot/settings — 读取全局 bot 行为设置
-  router.get("/settings", (_req, res) => {
+  router.get("/settings", auth, (_req, res) => {
     res.json({
       idleTimeoutMinutes: config.idleTimeoutMinutes ?? 0,
       commandPrefix: config.commandPrefix ?? "!",
@@ -71,7 +73,7 @@ export function createBotRouter(
     }
   });
 
-  router.get("/:id", (req, res) => {
+  router.get("/:id", auth, (req, res) => {
     const bot = botManager.getBot(req.validatedId!);
     if (!bot) {
       res.status(404).json({ success: false, error: "Bot not found" });
@@ -81,7 +83,7 @@ export function createBotRouter(
   });
 
   // Get saved config for a bot
-  router.get("/:id/config", (req, res) => {
+  router.get("/:id/config", auth, (req, res) => {
     const saved = botManager.getBotConfig(req.validatedId!);
     if (!saved) {
       res.status(404).json({ success: false, error: "Bot config not found" });
