@@ -49,10 +49,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   app.use(express.json());
 
-  const authEnabled = !!options.config.adminPassword && !!options.config.userPassword;
-  const jwtSecret = deriveSecret(options.config.adminPassword);
-  const requireAuth = createRequireAuth(jwtSecret);
-  const requireAdmin = createRequireAdmin(jwtSecret);
+  const getJwtSecret = () => deriveSecret(options.config.adminPassword);
+  const requireAuth = createRequireAuth(getJwtSecret);
+  const requireAdmin = createRequireAdmin(getJwtSecret);
 
   app.get("/api/config/public-url", (_req, res) => {
     const raw = (options.config.publicUrl ?? "").trim();
@@ -60,10 +59,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
   });
 
   app.get("/api/health", (_req, res) => {
+    const isAuthEnabled = !!options.config.adminPassword && !!options.config.userPassword;
     res.json({
       status: "ok",
       version: "0.1.0",
-      authEnabled,
+      authEnabled: isAuthEnabled,
       needsSetup: !options.config.adminPassword || !options.config.userPassword,
     });
   });
@@ -108,7 +108,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
   app.use((req, res, next) => {
     if (!req.path.startsWith("/api")) return next();
     if (AUTH_WHITELIST.has(req.path)) return next();
-    if (!authEnabled) return next();
+    const isAuthEnabled = !!options.config.adminPassword && !!options.config.userPassword;
+    if (!isAuthEnabled) return next();
     requireAuth(req, res, next);
   });
 
@@ -153,7 +154,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
       options.bilibiliProvider,
       logger,
       options.config,
-      jwtSecret,
+      getJwtSecret,
       options.config.jwtExpiresIn,
       options.cookieStore,
       requireAdmin
@@ -167,32 +168,35 @@ export function createWebServer(options: WebServerOptions): WebServer {
   const wss = new WebSocketServer({
     server,
     path: "/ws",
-    verifyClient: authEnabled
-      ? (info, cb) => {
-          // Read token from cookie instead of URL param
-          const cookieHeader = info.req.headers.cookie;
-          let token: string | undefined;
-          if (cookieHeader) {
-            for (const part of cookieHeader.split(";")) {
-              const [key, ...rest] = part.split("=");
-              if (key?.trim() === COOKIE_NAME) {
-                token = rest.join("=").trim();
-                break;
-              }
-            }
+    verifyClient: (info, cb) => {
+      const isAuthEnabled = !!options.config.adminPassword && !!options.config.userPassword;
+      if (!isAuthEnabled) {
+        cb(true);
+        return;
+      }
+      // Read token from cookie instead of URL param
+      const cookieHeader = info.req.headers.cookie;
+      let token: string | undefined;
+      if (cookieHeader) {
+        for (const part of cookieHeader.split(";")) {
+          const [key, ...rest] = part.split("=");
+          if (key?.trim() === COOKIE_NAME) {
+            token = rest.join("=").trim();
+            break;
           }
-          if (!token) {
-            cb(false, 4001, "Authentication required");
-            return;
-          }
-          const payload = verifyToken(token, jwtSecret);
-          if (!payload) {
-            cb(false, 4001, "Invalid token");
-            return;
-          }
-          cb(true);
         }
-      : undefined,
+      }
+      if (!token) {
+        cb(false, 4001, "Authentication required");
+        return;
+      }
+      const payload = verifyToken(token, getJwtSecret());
+      if (!payload) {
+        cb(false, 4001, "Invalid token");
+        return;
+      }
+      cb(true);
+    },
   });
   wss.on("error", (err) => {
     logger.error({ err }, "WebSocket server error");
@@ -200,9 +204,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   const wsResult = setupWebSocket(
     wss,
     options.botManager,
-    logger,
-    jwtSecret,
-    authEnabled
+    logger
   );
 
   app.use(

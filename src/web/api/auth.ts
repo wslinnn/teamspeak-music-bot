@@ -36,7 +36,7 @@ export function createAuthRouterWithConfig(
   bilibiliProvider: MusicProvider,
   logger: Logger,
   config?: BotConfig,
-  jwtSecret?: string,
+  getJwtSecret?: () => string,
   jwtExpiresIn?: string,
   cookieStore?: CookieStore,
   adminOnly?: (req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => void,
@@ -174,7 +174,7 @@ export function createAuthRouterWithConfig(
   });
 
   // Admin login endpoint
-  if (config && jwtSecret && jwtExpiresIn) {
+  if (config && getJwtSecret && jwtExpiresIn) {
     const loginLimiter = createRateLimiter({ maxAttempts: 5, windowMs: 5000 });
     const cookieMaxAge = parseDurationToSeconds(jwtExpiresIn);
     const secure = !!config.trustProxy;
@@ -197,7 +197,7 @@ export function createAuthRouterWithConfig(
       }
 
       if (role) {
-        const token = signToken(role, jwtSecret, jwtExpiresIn);
+        const token = signToken(role, getJwtSecret(), jwtExpiresIn);
         res.cookie(COOKIE_NAME, token, {
           httpOnly: true,
           sameSite: "strict",
@@ -237,7 +237,7 @@ export function createAuthRouterWithConfig(
         res.json({ role: null });
         return;
       }
-      const payload = verifyToken(token, jwtSecret);
+      const payload = verifyToken(token, getJwtSecret());
       if (!payload) {
         res.json({ role: null });
         return;

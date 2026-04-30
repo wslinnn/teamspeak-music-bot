@@ -26,7 +26,7 @@ function mockRes(): { statusCode: number; body: unknown } & Response {
 }
 
 describe("requireAuth middleware", () => {
-  const requireAuth = createRequireAuth(secret);
+  const requireAuth = createRequireAuth(() => secret);
 
   it("passes through with valid token", () => {
     const token = signToken("admin", secret);

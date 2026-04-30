@@ -7,8 +7,6 @@ export function setupWebSocket(
   wss: WebSocketServer,
   botManager: BotManager,
   logger: Logger,
-  jwtSecret: string,
-  authEnabled: boolean,
 ): { cleanup: () => void; broadcast: (data: object) => void } {
   const clients = new Set<WebSocket>();
 

@@ -13,7 +13,7 @@ function parseCookies(cookieHeader: string | undefined): Record<string, string> 
   return cookies;
 }
 
-export function createRequireAuth(secret: string) {
+export function createRequireAuth(getSecret: () => string) {
   return function requireAuth(
     req: Request,
     res: Response,
@@ -37,7 +37,7 @@ export function createRequireAuth(secret: string) {
       return;
     }
 
-    const payload = verifyToken(token, secret);
+    const payload = verifyToken(token, getSecret());
     if (!payload) {
       res.status(401).json({ error: "Invalid token" });
       return;
@@ -47,8 +47,8 @@ export function createRequireAuth(secret: string) {
   };
 }
 
-export function createRequireAdmin(secret: string) {
-  const requireAuth = createRequireAuth(secret);
+export function createRequireAdmin(getSecret: () => string) {
+  const requireAuth = createRequireAuth(getSecret);
   return function requireAdmin(
     req: Request,
     res: Response,

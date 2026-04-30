@@ -92,6 +92,11 @@ router.beforeEach(async (to, from, next) => {
     return next({ path: '/' });
   }
 
+  // 鉴权未开启 → 所有页面放行
+  if (authStore.authEnabled === false) {
+    return next();
+  }
+
   // 已登录用户访问 /login → 重定向首页
   if (to.path === '/login') {
     return authStore.isAuthenticated ? next({ path: '/' }) : next();
