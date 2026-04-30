@@ -158,6 +158,8 @@ export function createPlayerRouter(
       elapsed: Math.round(elapsed * 100) / 100,
       playing: state === "playing",
       paused: state === "paused",
+      volume: bot.getPlayer().getVolume(),
+      playMode: bot.getQueueManager().getMode(),
     });
   });
 

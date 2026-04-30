@@ -218,6 +218,8 @@ export const usePlayerStore = defineStore('player', {
         if (bot) {
           bot.playing = res.data.playing ?? bot.playing;
           bot.paused = res.data.paused ?? bot.paused;
+          if (typeof res.data.volume === 'number') bot.volume = res.data.volume;
+          if (res.data.playMode) bot.playMode = res.data.playMode;
         }
         this._setTiming(this.activeBotId, {
           serverElapsed: res.data.elapsed,
