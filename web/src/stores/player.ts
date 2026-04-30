@@ -190,35 +190,55 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async fetchBots() {
-      const res = await http.get('/api/bot');
-      this.bots = res.data.bots;
-      if (!this.activeBotId && this.bots.length > 0) {
-        this.activeBotId = this.bots[0].id;
-      }
-      // Sync elapsed from each bot's status
-      for (const bot of this.bots) {
-        if (bot.elapsed !== undefined) {
-          this._setTiming(bot.id, {
-            serverElapsed: bot.elapsed,
-            serverSyncTime: Date.now(),
-            wasPlaying: bot.playing && !bot.paused,
-          });
+      try {
+        const res = await http.get('/api/bot');
+        const fetchedBots: BotStatus[] = res.data.bots ?? [];
+
+        // Merge fetched bots into store instead of wholesale replacement
+        // to avoid racing with WebSocket init/stateChange updates
+        for (const bot of fetchedBots) {
+          this.updateBotStatus(bot.id, bot);
         }
+
+        // Remove bots that no longer exist on the server
+        const aliveIds = new Set(fetchedBots.map((b) => b.id));
+        for (const bot of [...this.bots]) {
+          if (!aliveIds.has(bot.id)) {
+            this.removeBotStatus(bot.id);
+          }
+        }
+
+        if (!this.activeBotId && this.bots.length > 0) {
+          this.activeBotId = this.bots[0].id;
+          await this.fetchQueue();
+        }
+      } catch (err) {
+        console.debug('fetchBots failed:', err);
       }
     },
 
-    /** Poll server for real elapsed time for active bot */
+    /** Poll server for real elapsed time and playback state for active bot */
     async syncElapsed() {
-      if (!this.activeBotId || !this.isPlaying) return;
+      if (!this.activeBotId || (this as any)._syncingElapsed) return;
+      (this as any)._syncingElapsed = true;
       try {
         const res = await http.get(`/api/player/${this.activeBotId}/elapsed`);
+        const bot = this.bots.find((b) => b.id === this.activeBotId);
+        if (bot) {
+          bot.playing = res.data.playing ?? bot.playing;
+          bot.paused = res.data.paused ?? bot.paused;
+          if (typeof res.data.volume === 'number') bot.volume = res.data.volume;
+          if (res.data.playMode) bot.playMode = res.data.playMode;
+        }
         this._setTiming(this.activeBotId, {
           serverElapsed: res.data.elapsed,
           serverSyncTime: Date.now(),
-          wasPlaying: true,
+          wasPlaying: res.data.playing && !res.data.paused,
         });
       } catch (err) {
         console.debug('syncElapsed failed:', err);
+      } finally {
+        (this as any)._syncingElapsed = false;
       }
     },
 
@@ -305,6 +325,7 @@ export const usePlayerStore = defineStore('player', {
       const toast = useToast();
       try {
         await http.post(`/api/player/${this.activeBotId}/add`, { query, platform });
+        await this.fetchQueue();
         toast.success('已添加到队列');
       } catch {
         toast.error('添加到队列失败');
@@ -316,6 +337,7 @@ export const usePlayerStore = defineStore('player', {
       const toast = useToast();
       try {
         await http.post(`/api/player/${this.activeBotId}/add-song`, { song });
+        await this.fetchQueue();
         toast.success(`已添加到队列: ${song.name}`);
       } catch {
         toast.error('添加到队列失败');
@@ -337,6 +359,12 @@ export const usePlayerStore = defineStore('player', {
 
     async pause() {
       if (!this.activeBotId) return;
+      // Optimistically update local state for instant UI feedback
+      const bot = this.bots.find((b) => b.id === this.activeBotId);
+      if (bot) {
+        bot.playing = false;
+        bot.paused = true;
+      }
       // Freeze elapsed at current interpolated value
       this._setTiming(this.activeBotId, {
         serverElapsed: this.elapsed,
@@ -347,6 +375,12 @@ export const usePlayerStore = defineStore('player', {
 
     async resume() {
       if (!this.activeBotId) return;
+      // Optimistically update local state for instant UI feedback
+      const bot = this.bots.find((b) => b.id === this.activeBotId);
+      if (bot) {
+        bot.playing = true;
+        bot.paused = false;
+      }
       await http.post(`/api/player/${this.activeBotId}/resume`);
       this._setTiming(this.activeBotId, {
         serverSyncTime: Date.now(),

@@ -153,7 +153,14 @@ export function createPlayerRouter(
   router.get("/:botId/elapsed", (req, res) => {
     const bot = req.bot!;
     const elapsed = bot.getPlayer().getElapsed();
-    res.json({ elapsed: Math.round(elapsed * 100) / 100 });
+    const state = bot.getPlayer().getState();
+    res.json({
+      elapsed: Math.round(elapsed * 100) / 100,
+      playing: state === "playing",
+      paused: state === "paused",
+      volume: bot.getPlayer().getVolume(),
+      playMode: bot.getQueueManager().getMode(),
+    });
   });
 
   // Seek to position
@@ -442,6 +449,7 @@ export function createPlayerRouter(
         res.status(400).json({ success: false, error: "Invalid reorder indices" });
         return;
       }
+      bot.emit("stateChange");
       res.json({ success: true, queue: queue.list() });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
