@@ -64,6 +64,7 @@
       </div>
 
       <div class="w-[240px] flex items-center justify-end gap-2">
+        <!-- Desktop volume -->
         <Icon icon="mdi:volume-high" class="text-lg opacity-60 hidden sm:block" />
         <input
           type="range"
@@ -73,12 +74,21 @@
           @change="onVolumeChange"
           class="volume-slider hidden sm:block"
         />
+        <!-- Mobile volume button -->
+        <button
+          class="sm:hidden text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100"
+          aria-label="音量与播放设置"
+          @click="mobileControlsOpen = true"
+        >
+          <Icon icon="mdi:volume-high" />
+        </button>
         <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" :class="{ 'opacity-100 text-primary': showQueue }" @click="showQueue = !showQueue">
           <Icon icon="mdi:playlist-music" />
         </button>
       </div>
     </div>
     <ServerTreeDrawer v-model="serverTreeOpen" />
+    <MobilePlayerControls v-model="mobileControlsOpen" />
   </div>
 </template>
 
@@ -91,12 +101,14 @@ import CoverArt from './CoverArt.vue';
 import Queue from './Queue.vue';
 import PlayingIndicator from './PlayingIndicator.vue';
 import ServerTreeDrawer from './ServerTreeDrawer.vue';
+import MobilePlayerControls from './MobilePlayerControls.vue';
 import { formatDuration } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
 const showQueue = ref(false);
 const serverTreeOpen = ref(false);
+const mobileControlsOpen = ref(false);
 
 function openServerTree() {
   serverTreeOpen.value = true;
