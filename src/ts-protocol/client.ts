@@ -12,6 +12,7 @@ import {
   type Identity,
   type TextMessage,
   type ClientInfo,
+  type ChannelInfo,
   type FileUploadInfo,
 } from "@honeybbq/teamspeak-client";
 import type { Logger } from "../logger.js";
@@ -368,8 +369,37 @@ export class TS3Client extends EventEmitter {
     return this.identity.toString();
   }
 
+  async getChannelList(): Promise<ChannelInfo[]> {
+    if (!this.client) return [];
+    try {
+      return await listChannels(this.client);
+    } catch {
+      return [];
+    }
+  }
+
+  async getClientList(): Promise<ClientInfo[]> {
+    if (!this.client) return [];
+    try {
+      return await listClients(this.client);
+    } catch {
+      return [];
+    }
+  }
+
   getClientId(): number {
     return this.clientId;
+  }
+
+  async joinChannelById(channelId: bigint, password?: string): Promise<void> {
+    if (!this.client) throw new Error("Not connected");
+    try {
+      await clientMove(this.client, this.clientId, channelId, password);
+      this.logger.info({ channelId: channelId.toString() }, "Moved to channel by ID");
+    } catch (err) {
+      this.logger.error({ err, channelId: channelId.toString() }, "Failed to move to channel by ID");
+      throw err;
+    }
   }
 
   disconnect(): void {
