@@ -8,6 +8,12 @@
       <RouterLink to="/search" class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80" active-class="opacity-100 !text-primary">搜索</RouterLink>
       <RouterLink to="/history" class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80" active-class="opacity-100 !text-primary">播放历史</RouterLink>
       <RouterLink to="/favorites" class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80" active-class="opacity-100 !text-primary">收藏</RouterLink>
+      <button
+        class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80 flex items-center gap-1"
+        @click="serverTreeOpen = true"
+      >
+        <Icon icon="mdi:server" /> 服务器
+      </button>
     </div>
 
     <div class="ml-auto flex items-center gap-2 md:gap-4">
@@ -99,6 +105,12 @@
         <RouterLink to="/favorites" class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg" active-class="opacity-100 !text-primary bg-[rgba(51,94,234,0.1)]" @click="mobileMenuOpen = false">
           <Icon icon="mdi:heart" class="mr-3" /> 收藏
         </RouterLink>
+        <button
+          class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg w-full text-left"
+          @click="mobileMenuOpen = false; serverTreeOpen = true"
+        >
+          <Icon icon="mdi:server" class="mr-3" /> 服务器
+        </button>
         <RouterLink
           v-if="authStore.isAdmin"
           to="/settings"
@@ -137,6 +149,8 @@
     </div>
   </Transition>
 
+  <ServerTreeDrawer v-model="serverTreeOpen" />
+
 </template>
 
 <script setup lang="ts">
@@ -145,6 +159,7 @@ import { Icon } from '@iconify/vue';
 import { useRouter } from 'vue-router';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
+import ServerTreeDrawer from './ServerTreeDrawer.vue';
 
 const store = usePlayerStore();
 const authStore = useAuthStore();
@@ -152,6 +167,7 @@ const router = useRouter();
 const activeBot = computed(() => store.activeBot);
 const dropdownOpen = ref(false);
 const mobileMenuOpen = ref(false);
+const serverTreeOpen = ref(false);
 const selectorRef = ref<HTMLElement | null>(null);
 const togglingBots = ref<Record<string, boolean>>({});
 

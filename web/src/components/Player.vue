@@ -32,7 +32,14 @@
             {{ currentSong.name }}
           </div>
           <div class="text-[11px] text-text-secondary flex items-center gap-1">
-            <span v-if="showBotBadge" class="inline-block text-[10px] font-semibold px-[5px] bg-[rgba(51,94,234,0.15)] text-primary rounded-[3px] leading-4 whitespace-nowrap shrink-0">{{ activeBot?.name }}</span>
+            <button
+              v-if="showBotBadge"
+              class="inline-flex items-center gap-0.5 text-[10px] font-semibold px-[5px] bg-[rgba(51,94,234,0.15)] text-primary rounded-[3px] leading-4 whitespace-nowrap shrink-0 cursor-pointer hover:brightness-110 transition-all"
+              @click.stop="openServerTree"
+            >
+              <Icon icon="mdi:account-voice" class="text-[10px]" />
+              {{ activeBot?.name }}
+            </button>
             {{ currentSong.artist }}
           </div>
         </div>
@@ -71,6 +78,7 @@
         </button>
       </div>
     </div>
+    <ServerTreeDrawer v-model="serverTreeOpen" />
   </div>
 </template>
 
@@ -82,11 +90,17 @@ import { usePlayerStore } from '../stores/player.js';
 import CoverArt from './CoverArt.vue';
 import Queue from './Queue.vue';
 import PlayingIndicator from './PlayingIndicator.vue';
+import ServerTreeDrawer from './ServerTreeDrawer.vue';
 import { formatDuration } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
 const showQueue = ref(false);
+const serverTreeOpen = ref(false);
+
+function openServerTree() {
+  serverTreeOpen.value = true;
+}
 
 const store = usePlayerStore();
 const activeBot = computed(() => store.activeBot);

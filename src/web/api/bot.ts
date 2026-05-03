@@ -174,5 +174,44 @@ export function createBotRouter(
     }
   });
 
+  router.get("/:id/server-tree", auth, async (req, res) => {
+    try {
+      const bot = botManager.getBot(req.validatedId!);
+      if (!bot) {
+        res.status(404).json({ success: false, error: "Bot not found" });
+        return;
+      }
+      const tree = await bot.getServerTree();
+      res.json(tree);
+    } catch (err) {
+      logger.error({ err }, "Failed to get server tree");
+      res.status(500).json({ success: false, error: (err as Error).message });
+    }
+  });
+
+  router.post("/:id/join-channel", adminOnly, async (req, res) => {
+    try {
+      const bot = botManager.getBot(req.validatedId!);
+      if (!bot) {
+        res.status(404).json({ success: false, error: "Bot not found" });
+        return;
+      }
+      const { channelId, password } = req.body;
+      if (!channelId || typeof channelId !== "string" || channelId.trim().length === 0) {
+        res.status(400).json({ success: false, error: "channelId is required" });
+        return;
+      }
+      if (password !== undefined && typeof password !== "string") {
+        res.status(400).json({ success: false, error: "password must be a string" });
+        return;
+      }
+      await bot.joinChannelById(channelId, password);
+      res.json({ success: true, message: "Joined channel" });
+    } catch (err) {
+      logger.error({ err }, "Failed to join channel");
+      res.status(500).json({ success: false, error: (err as Error).message });
+    }
+  });
+
   return router;
 }
