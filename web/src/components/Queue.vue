@@ -8,7 +8,7 @@
       />
     </Transition>
     <div
-      class="fixed top-0 bottom-0 right-0 w-[min(360px,85vw)] z-[111] transition-transform duration-[var(--transition-normal)] flex flex-col"
+      class="fixed top-0 bottom-0 right-0 w-[min(360px,85vw)] z-[111] transition-transform duration-[var(--transition-normal)] flex flex-col will-change-transform"
       :style="{ background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-elevated)' }"
       :class="open ? 'translate-x-0' : 'translate-x-full'"
     >

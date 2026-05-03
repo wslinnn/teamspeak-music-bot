@@ -25,7 +25,7 @@
     >
       <div
         v-if="modelValue"
-        class="fixed bottom-0 left-0 right-0 z-[201] bg-bg-primary rounded-t-2xl px-6 pt-4 pb-8 sm:hidden"
+        class="fixed bottom-0 left-0 right-0 z-[201] bg-bg-primary rounded-t-2xl px-6 pt-4 pb-8 sm:hidden will-change-transform"
       >
         <!-- Drag handle -->
         <div class="flex justify-center mb-5" @click="close">

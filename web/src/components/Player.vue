@@ -12,7 +12,9 @@
         @mouseleave="progressTooltipVisible = false"
       >
         <div class="w-full h-0.5 bg-border-color transition-[height] duration-150 relative rounded-sm group">
-          <div class="absolute top-0 left-0 h-full bg-primary rounded-sm" :style="{ width: progressPercent + '%' }" />
+          <div class="absolute top-0 left-0 h-full w-full">
+            <div class="h-full bg-primary rounded-sm origin-left" :style="{ transform: `scaleX(${progressPercent / 100})` }" />
+          </div>
           <div class="absolute top-1/2 w-2.5 h-2.5 bg-primary rounded-full -ml-[5px] -mt-[5px] opacity-0 scale-0 transition-all duration-150 group-hover:opacity-100 group-hover:scale-100" :style="{ left: progressPercent + '%' }" />
         </div>
         <div
@@ -138,6 +140,8 @@ const progressTooltipX = ref(0);
 const progressTooltipTime = ref('0:00');
 const progressBarRef = ref<HTMLElement | null>(null);
 let rafId: number | null = null;
+let backupTimer: ReturnType<typeof setInterval> | null = null;
+let pendingHoverRaf = false;
 
 function formatTime(seconds: number): string {
   if (!seconds || seconds < 0) return '0:00';
@@ -158,6 +162,26 @@ function updateProgress() {
   }
 }
 
+function onVisibilityChange() {
+  if (document.hidden) {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (!backupTimer) {
+      backupTimer = setInterval(updateProgress, 250);
+    }
+  } else {
+    if (backupTimer) {
+      clearInterval(backupTimer);
+      backupTimer = null;
+    }
+    if (store.isPlaying && rafId === null) {
+      rafId = requestAnimationFrame(updateProgress);
+    }
+  }
+}
+
 async function onProgressClick(e: MouseEvent) {
   const bar = progressBarRef.value;
   if (!bar) return;
@@ -169,26 +193,34 @@ async function onProgressClick(e: MouseEvent) {
 }
 
 function onProgressHover(e: MouseEvent) {
-  const bar = progressBarRef.value;
-  if (!bar) return;
-  const rect = bar.getBoundingClientRect();
-  const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  const duration = currentSong.value?.duration ?? 0;
-  progressTooltipVisible.value = true;
-  progressTooltipX.value = e.clientX - rect.left;
-  progressTooltipTime.value = formatTime(ratio * duration);
+  if (pendingHoverRaf) return;
+  pendingHoverRaf = true;
+  requestAnimationFrame(() => {
+    pendingHoverRaf = false;
+    const bar = progressBarRef.value;
+    if (!bar) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const duration = currentSong.value?.duration ?? 0;
+    progressTooltipVisible.value = true;
+    progressTooltipX.value = e.clientX - rect.left;
+    progressTooltipTime.value = formatTime(ratio * duration);
+  });
 }
 
 onMounted(() => {
   rafId = requestAnimationFrame(updateProgress);
+  document.addEventListener('visibilitychange', onVisibilityChange);
 });
 
 onUnmounted(() => {
   if (rafId !== null) cancelAnimationFrame(rafId);
+  if (backupTimer) clearInterval(backupTimer);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 
 watch(() => store.isPlaying, (playing) => {
-  if (playing && rafId === null) {
+  if (playing && rafId === null && !document.hidden) {
     rafId = requestAnimationFrame(updateProgress);
   }
 });

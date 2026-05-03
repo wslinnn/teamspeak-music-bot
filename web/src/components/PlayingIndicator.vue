@@ -1,19 +1,16 @@
 <template>
   <div class="flex items-end gap-[3px] h-4">
     <div
-      class="w-[3px] rounded-sm bg-primary"
-      :class="{ 'animate-bar1': isPlaying, 'h-1': !isPlaying }"
-      :style="isPlaying ? {} : { height: '4px' }"
+      class="w-[3px] h-4 rounded-sm bg-primary origin-bottom"
+      :class="{ 'animate-bar1': isPlaying, 'scale-y-[0.25]': !isPlaying }"
     />
     <div
-      class="w-[3px] rounded-sm bg-primary"
-      :class="{ 'animate-bar2': isPlaying, 'h-1': !isPlaying }"
-      :style="isPlaying ? {} : { height: '4px' }"
+      class="w-[3px] h-4 rounded-sm bg-primary origin-bottom"
+      :class="{ 'animate-bar2': isPlaying, 'scale-y-[0.25]': !isPlaying }"
     />
     <div
-      class="w-[3px] rounded-sm bg-primary"
-      :class="{ 'animate-bar3': isPlaying, 'h-1': !isPlaying }"
-      :style="isPlaying ? {} : { height: '4px' }"
+      class="w-[3px] h-4 rounded-sm bg-primary origin-bottom"
+      :class="{ 'animate-bar3': isPlaying, 'scale-y-[0.25]': !isPlaying }"
     />
   </div>
 </template>
@@ -24,10 +21,9 @@ defineProps<{ isPlaying: boolean }>();
 
 <style scoped>
 @keyframes bar-bounce {
-  0%, 100% { height: 4px; }
-  50% { height: 16px; }
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
 }
-
 .animate-bar1 {
   animation: bar-bounce 0.8s ease-in-out infinite;
 }

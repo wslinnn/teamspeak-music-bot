@@ -30,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue';
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue';
 
 const props = defineProps<{ modelValue: boolean; title?: string }>();
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
@@ -51,7 +51,7 @@ watch(
     document.body.style.overflow = open ? 'hidden' : '';
     if (open && !wasOpen) {
       document.addEventListener('keydown', onKeydown);
-      setTimeout(() => modalRef.value?.focus(), 0);
+      nextTick(() => modalRef.value?.focus());
     } else if (!open && wasOpen) {
       document.removeEventListener('keydown', onKeydown);
     }

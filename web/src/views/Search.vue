@@ -51,10 +51,9 @@
         class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"
       >
         <SongGridCard
-          v-for="(song, i) in results"
+          v-for="song in results"
           :key="`${song.platform}-${song.id}`"
           :song="song"
-          :style="{ animationDelay: `${Math.min(i * 40, 400)}ms` }"
           @play="store.playSong(song)"
           @add="store.addSong(song)"
         />
