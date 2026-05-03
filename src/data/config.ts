@@ -137,10 +137,10 @@ export function loadConfig(path: string): BotConfig {
 }
 
 export function saveConfig(path: string, config: BotConfig): void {
+  mkdirSync(dirname(path), { recursive: true });
   const lockPath = `${path}.lock`;
   acquireFileLock(lockPath);
   try {
-    mkdirSync(dirname(path), { recursive: true });
     const tmpPath = join(dirname(path), `.tmp-${Date.now()}.json`);
     writeFileSync(tmpPath, JSON.stringify(config, null, 2), "utf-8");
     renameSync(tmpPath, path);
