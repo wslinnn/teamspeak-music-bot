@@ -35,16 +35,38 @@ watch(theme, (t) => {
 
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 
+function startSyncTimer() {
+  if (syncTimer) return;
+  syncTimer = setInterval(() => playerStore.syncElapsed(), 3000);
+}
+
+function stopSyncTimer() {
+  if (syncTimer) {
+    clearInterval(syncTimer);
+    syncTimer = null;
+  }
+}
+
+function onVisibilityChange() {
+  if (document.hidden) {
+    stopSyncTimer();
+  } else {
+    startSyncTimer();
+  }
+}
+
 onMounted(() => {
   authStore.checkAuthEnabled().catch((err) => console.warn('checkAuthEnabled failed:', err));
   playerStore.loadTheme();
   connect();
   playerStore.fetchBots();
-  syncTimer = setInterval(() => playerStore.syncElapsed(), 3000);
+  startSyncTimer();
+  document.addEventListener('visibilitychange', onVisibilityChange);
 });
 
 onUnmounted(() => {
-  if (syncTimer) clearInterval(syncTimer);
+  stopSyncTimer();
+  document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 </script>
 

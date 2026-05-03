@@ -12,7 +12,7 @@
   <Transition name="slide-from-right">
     <aside
       v-if="modelValue"
-      class="fixed top-0 right-0 bottom-0 z-[160] bg-bg-secondary border-l border-border-color flex flex-col"
+      class="fixed top-0 right-0 bottom-0 z-[160] bg-bg-secondary border-l border-border-color flex flex-col will-change-transform"
       :class="isMobile ? 'w-full' : 'w-[360px]'"
     >
       <!-- Mobile header with close button -->
@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, onUnmounted } from 'vue';
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../stores/player';
 import { useAuthStore } from '../stores/auth';
@@ -72,10 +72,14 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const lastUpdated = ref(0);
 
-const isMobile = computed(() => window.innerWidth <= 768);
+const isMobile = ref(window.innerWidth <= 768);
 const isAdmin = computed(() => authStore.isAdmin);
 const isPlaying = computed(() => playerStore.isPlaying && !playerStore.isPaused);
 const activeBotId = computed(() => playerStore.activeBotId);
+
+function updateIsMobile() {
+  isMobile.value = window.innerWidth <= 768;
+}
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -132,7 +136,14 @@ watch(() => props.modelValue, (open) => {
   }
 });
 
-onUnmounted(stopPolling);
+onMounted(() => {
+  window.addEventListener('resize', updateIsMobile);
+});
+
+onUnmounted(() => {
+  stopPolling();
+  window.removeEventListener('resize', updateIsMobile);
+});
 </script>
 
 <style scoped>

@@ -77,6 +77,7 @@ let rafId: number | null = null;
 let userScrolling = false;
 let scrollTimeout: ReturnType<typeof setTimeout> | null = null;
 let lastFetchedSongId = '';
+let nextLineIdx = 0;
 
 const bgStyle = computed(() => {
   if (currentSong.value?.coverUrl) {
@@ -96,6 +97,7 @@ async function fetchLyrics() {
   loading.value = true;
   lines.value = [];
   activeLine.value = -1;
+  nextLineIdx = 0;
 
   try {
     const res = await http.get(`/api/music/lyrics/${currentSong.value.id}`, {
@@ -112,15 +114,10 @@ async function fetchLyrics() {
 
 function findActiveLine(elapsed: number): number {
   if (lines.value.length === 0) return -1;
-  let idx = -1;
-  for (let i = 0; i < lines.value.length; i++) {
-    if (lines.value[i].time <= elapsed) {
-      idx = i;
-    } else {
-      break;
-    }
+  while (nextLineIdx < lines.value.length && lines.value[nextLineIdx].time <= elapsed) {
+    nextLineIdx++;
   }
-  return idx;
+  return nextLineIdx - 1;
 }
 
 /** 滚动到指定行并居中，centerRatio 控制垂直位置（0.5=正中，<0.5=偏上） */
@@ -167,6 +164,7 @@ function onUserScroll() {
 watch(() => currentSong.value?.id, (newId, oldId) => {
   if (newId !== oldId) {
     lastFetchedSongId = '';
+    nextLineIdx = 0;
     fetchLyrics();
     lineRefs.value = {};
   }
@@ -183,13 +181,26 @@ watch(() => store.isPlaying, (playing) => {
   }
 });
 
+function onVisibilityChange() {
+  if (document.hidden) {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+  } else if (rafId === null) {
+    rafId = requestAnimationFrame(tick);
+  }
+}
+
 onMounted(() => {
   if (currentSong.value) fetchLyrics();
   rafId = requestAnimationFrame(tick);
+  document.addEventListener('visibilitychange', onVisibilityChange);
 });
 
 onUnmounted(() => {
   if (rafId !== null) cancelAnimationFrame(rafId);
   if (scrollTimeout) clearTimeout(scrollTimeout);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 </script>
