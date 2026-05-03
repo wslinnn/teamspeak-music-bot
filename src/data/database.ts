@@ -63,7 +63,7 @@ export const DEFAULT_PROFILE_CONFIG: ProfileConfig = {
   descriptionEnabled: true,
   nicknameEnabled: true,
   awayStatusEnabled: true,
-  channelDescEnabled: true,
+  channelDescEnabled: false,
   nowPlayingMsgEnabled: true,
 };
 
