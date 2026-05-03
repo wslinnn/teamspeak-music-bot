@@ -36,7 +36,7 @@
         <div class="mb-6">
           <div class="flex items-center justify-between mb-3">
             <span class="text-sm font-medium text-text-secondary">音量</span>
-            <span class="text-sm text-text-primary font-semibold tabular-nums">{{ volume }}%</span>
+            <span class="text-sm text-text-primary font-semibold tabular-nums">{{ sliderVolume }}%</span>
           </div>
           <div class="flex items-center gap-3">
             <Icon icon="mdi:volume-low" class="text-xl text-text-tertiary shrink-0" />
@@ -44,8 +44,8 @@
               type="range"
               min="0"
               max="100"
-              :value="volume"
-              @input="onVolumeInput"
+              v-model.number="sliderVolume"
+              @change="onVolumeChange"
               class="mobile-volume-slider flex-1"
             />
             <Icon icon="mdi:volume-high" class="text-xl text-text-tertiary shrink-0" />
@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../stores/player.js';
 
@@ -88,8 +88,14 @@ const emit = defineEmits<{
 
 const store = usePlayerStore();
 const activeBot = computed(() => store.activeBot);
-const volume = computed(() => activeBot.value?.volume ?? 75);
+const storeVolume = computed(() => activeBot.value?.volume ?? 75);
 const currentMode = computed(() => activeBot.value?.playMode ?? 'seq');
+
+// Local slider value for real-time display; synced from store when panel opens
+const sliderVolume = ref(storeVolume.value);
+watch(() => props.modelValue, (open) => {
+  if (open) sliderVolume.value = storeVolume.value;
+});
 
 const modes = [
   { key: 'seq', label: '顺序', icon: 'mdi:arrow-right' },
@@ -102,9 +108,8 @@ function close() {
   emit('update:modelValue', false);
 }
 
-function onVolumeInput(e: Event) {
-  const target = e.target as HTMLInputElement;
-  store.setVolume(parseInt(target.value));
+function onVolumeChange() {
+  store.setVolume(sliderVolume.value);
 }
 
 function setMode(mode: string) {
