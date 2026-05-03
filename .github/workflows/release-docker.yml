@@ -1,0 +1,72 @@
+name: Release Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.2.3)'
+        required: true
+        type: string
+      draft:
+        description: 'Create as draft release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: scripts/docker/Dockerfile
+          tags: tsmusicbot:${{ github.event.inputs.tag }}
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export image to tar.gz
+        run: |
+          docker save tsmusicbot:${{ github.event.inputs.tag }} | gzip > tsmusicbot-${{ github.event.inputs.tag }}.tar.gz
+          ls -lh tsmusicbot-*.tar.gz
+
+      - name: Create or use existing GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          DRAFT_FLAG="${{ github.event.inputs.draft == 'true' && '--draft' || '' }}"
+
+          # Check if release already exists
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, skipping creation."
+          else
+            # Create tag if it doesn't exist
+            if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+              git tag "$TAG"
+              git push origin "$TAG"
+            fi
+
+            gh release create "$TAG" \
+              --title "TSMusicBot $TAG" \
+              --generate-notes \
+              $DRAFT_FLAG
+          fi
+
+      - name: Upload tar.gz to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.event.inputs.tag }} \
+            tsmusicbot-${{ github.event.inputs.tag }}.tar.gz \
+            --clobber
