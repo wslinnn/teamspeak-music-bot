@@ -845,4 +845,60 @@ export class BotInstance extends EventEmitter {
   getIdentityExport(): string | undefined {
     return this.tsClient.getIdentityExport();
   }
+
+  async getServerTree(): Promise<{
+    channels: {
+      id: string;
+      parentId: string | null;
+      name: string;
+      description: string;
+    }[];
+    clients: {
+      id: string;
+      nickname: string;
+      uid: string;
+      channelId: string;
+      isBot: boolean;
+      serverGroups: string[];
+      type: number;
+    }[];
+    botChannelId: string;
+    botClientId: string;
+  }> {
+    if (!this.connected) {
+      throw new Error("Bot is not connected");
+    }
+    const [channels, clients] = await Promise.all([
+      this.tsClient.getChannelList(),
+      this.tsClient.getClientList(),
+    ]);
+    const currentChannelId = this.tsClient.getChannelId();
+    const currentClientId = this.tsClient.getClientId();
+
+    return {
+      channels: channels.map((ch) => ({
+        id: String(ch.id),
+        parentId: ch.parentID === 0n ? null : String(ch.parentID),
+        name: ch.name,
+        description: ch.description,
+      })),
+      clients: clients.map((c) => ({
+        id: String(c.id),
+        nickname: c.nickname,
+        uid: c.uid,
+        channelId: String(c.channelID),
+        isBot: String(c.id) === String(currentClientId),
+        serverGroups: c.serverGroups,
+        type: c.type,
+      })),
+      botChannelId: String(currentChannelId),
+      botClientId: String(currentClientId),
+    };
+  }
+
+  async joinChannelById(channelId: string, password?: string): Promise<void> {
+    if (!this.connected) throw new Error("Bot is not connected");
+    if (!/^\d+$/.test(channelId)) throw new Error("Invalid channel ID");
+    await this.tsClient.joinChannelById(BigInt(channelId), password);
+  }
 }
