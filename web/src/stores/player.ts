@@ -190,21 +190,30 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async fetchBots() {
-      const res = await http.get('/api/bot');
-      this.bots = res.data.bots;
-      if (!this.activeBotId && this.bots.length > 0) {
-        this.activeBotId = this.bots[0].id;
-        await this.fetchQueue();
-      }
-      // Sync elapsed from each bot's status
-      for (const bot of this.bots) {
-        if (bot.elapsed !== undefined) {
-          this._setTiming(bot.id, {
-            serverElapsed: bot.elapsed,
-            serverSyncTime: Date.now(),
-            wasPlaying: bot.playing && !bot.paused,
-          });
+      try {
+        const res = await http.get('/api/bot');
+        const fetchedBots: BotStatus[] = res.data.bots ?? [];
+
+        // Merge fetched bots into store instead of wholesale replacement
+        // to avoid racing with WebSocket init/stateChange updates
+        for (const bot of fetchedBots) {
+          this.updateBotStatus(bot.id, bot);
         }
+
+        // Remove bots that no longer exist on the server
+        const aliveIds = new Set(fetchedBots.map((b) => b.id));
+        for (const bot of [...this.bots]) {
+          if (!aliveIds.has(bot.id)) {
+            this.removeBotStatus(bot.id);
+          }
+        }
+
+        if (!this.activeBotId && this.bots.length > 0) {
+          this.activeBotId = this.bots[0].id;
+          await this.fetchQueue();
+        }
+      } catch (err) {
+        console.debug('fetchBots failed:', err);
       }
     },
 
