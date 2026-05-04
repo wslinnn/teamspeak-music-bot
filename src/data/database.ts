@@ -102,17 +102,18 @@ function migrateSchema(db: Database.Database): void {
     db.exec("ALTER TABLE bot_instances ADD COLUMN serverPassword TEXT NOT NULL DEFAULT ''");
   }
   // Profile feature flags
-  const profileCols = [
-    "profile_avatar_enabled",
-    "profile_description_enabled",
-    "profile_nickname_enabled",
-    "profile_away_enabled",
-    "profile_channel_desc_enabled",
-    "profile_now_playing_enabled",
-  ];
-  for (const col of profileCols) {
+  const profileColDefaults: Record<string, 0 | 1> = {
+    profile_avatar_enabled: 1,
+    profile_description_enabled: 1,
+    profile_nickname_enabled: 1,
+    profile_away_enabled: 1,
+    profile_channel_desc_enabled: 0,
+    profile_now_playing_enabled: 1,
+  };
+  for (const [col, def] of Object.entries(profileColDefaults)) {
     if (!names.includes(col)) {
-      db.exec(`ALTER TABLE bot_instances ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 1`);
+      const stmt = "ALTER TABLE bot_instances ADD COLUMN " + col + " INTEGER NOT NULL DEFAULT " + def;
+      db.exec(stmt);
     }
   }
 
@@ -150,7 +151,7 @@ function initTables(db: Database.Database): void {
       profile_description_enabled INTEGER NOT NULL DEFAULT 1,
       profile_nickname_enabled INTEGER NOT NULL DEFAULT 1,
       profile_away_enabled INTEGER NOT NULL DEFAULT 1,
-      profile_channel_desc_enabled INTEGER NOT NULL DEFAULT 1,
+      profile_channel_desc_enabled INTEGER NOT NULL DEFAULT 0,
       profile_now_playing_enabled INTEGER NOT NULL DEFAULT 1
     );
 
@@ -187,8 +188,18 @@ export function createDatabase(dbPath: string): BotDatabase {
   `);
 
   const upsertInstance = db.prepare(`
-    INSERT INTO bot_instances (id, name, serverAddress, serverPort, nickname, defaultChannel, channelPassword, autoStart, serverProtocol, ts6ApiKey, serverPassword, identity)
-    VALUES (@id, @name, @serverAddress, @serverPort, @nickname, @defaultChannel, @channelPassword, @autoStart, @serverProtocol, @ts6ApiKey, @serverPassword, @identity)
+    INSERT INTO bot_instances (
+      id, name, serverAddress, serverPort, nickname, defaultChannel, channelPassword,
+      autoStart, serverProtocol, ts6ApiKey, serverPassword, identity,
+      profile_avatar_enabled, profile_description_enabled, profile_nickname_enabled,
+      profile_away_enabled, profile_channel_desc_enabled, profile_now_playing_enabled
+    )
+    VALUES (
+      @id, @name, @serverAddress, @serverPort, @nickname, @defaultChannel, @channelPassword,
+      @autoStart, @serverProtocol, @ts6ApiKey, @serverPassword, @identity,
+      @profileAvatar, @profileDescription, @profileNickname,
+      @profileAway, @profileChannelDesc, @profileNowPlaying
+    )
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       serverAddress = excluded.serverAddress,
@@ -256,6 +267,13 @@ export function createDatabase(dbPath: string): BotDatabase {
         ...instance,
         autoStart: instance.autoStart ? 1 : 0,
         identity: instance.identity ?? null,
+        // 仅在 INSERT 新行时生效（ON CONFLICT 走 UPDATE 分支不覆盖 profile 列）
+        profileAvatar: DEFAULT_PROFILE_CONFIG.avatarEnabled ? 1 : 0,
+        profileDescription: DEFAULT_PROFILE_CONFIG.descriptionEnabled ? 1 : 0,
+        profileNickname: DEFAULT_PROFILE_CONFIG.nicknameEnabled ? 1 : 0,
+        profileAway: DEFAULT_PROFILE_CONFIG.awayStatusEnabled ? 1 : 0,
+        profileChannelDesc: DEFAULT_PROFILE_CONFIG.channelDescEnabled ? 1 : 0,
+        profileNowPlaying: DEFAULT_PROFILE_CONFIG.nowPlayingMsgEnabled ? 1 : 0,
       });
     },
 

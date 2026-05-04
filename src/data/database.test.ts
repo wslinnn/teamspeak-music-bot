@@ -100,4 +100,73 @@ describe("database", () => {
     expect(botDb.getBotInstances()).toHaveLength(0);
     expect(botDb.deleteBotInstance("nonexistent")).toBe(false);
   });
+
+  it("new bot inherits DEFAULT_PROFILE_CONFIG (channel_desc off by default)", () => {
+    botDb.saveBotInstance({
+      id: "bot1",
+      name: "Music Bot",
+      serverAddress: "localhost",
+      serverPort: 9987,
+      nickname: "MusicBot",
+      defaultChannel: "Music",
+      channelPassword: "",
+      autoStart: false,
+      serverProtocol: "",
+      ts6ApiKey: "",
+      serverPassword: "",
+    });
+
+    const profile = botDb.getProfileConfig("bot1");
+    expect(profile.channelDescEnabled).toBe(false);
+    expect(profile.avatarEnabled).toBe(true);
+    expect(profile.descriptionEnabled).toBe(true);
+    expect(profile.nicknameEnabled).toBe(true);
+    expect(profile.awayStatusEnabled).toBe(true);
+    expect(profile.nowPlayingMsgEnabled).toBe(true);
+  });
+
+  it("preserves user-edited profile config across saveBotInstance upsert", () => {
+    botDb.saveBotInstance({
+      id: "bot1",
+      name: "Music Bot",
+      serverAddress: "localhost",
+      serverPort: 9987,
+      nickname: "MusicBot",
+      defaultChannel: "Music",
+      channelPassword: "",
+      autoStart: false,
+      serverProtocol: "",
+      ts6ApiKey: "",
+      serverPassword: "",
+    });
+
+    // 用户在 UI 中开启了频道简介、关闭了头像
+    botDb.saveProfileConfig("bot1", {
+      avatarEnabled: false,
+      descriptionEnabled: true,
+      nicknameEnabled: true,
+      awayStatusEnabled: true,
+      channelDescEnabled: true,
+      nowPlayingMsgEnabled: true,
+    });
+
+    // 之后再次更新 bot 配置（重命名等），profile 不应被重置
+    botDb.saveBotInstance({
+      id: "bot1",
+      name: "Renamed Bot",
+      serverAddress: "localhost",
+      serverPort: 9987,
+      nickname: "Renamed",
+      defaultChannel: "Music",
+      channelPassword: "",
+      autoStart: false,
+      serverProtocol: "",
+      ts6ApiKey: "",
+      serverPassword: "",
+    });
+
+    const profile = botDb.getProfileConfig("bot1");
+    expect(profile.avatarEnabled).toBe(false);
+    expect(profile.channelDescEnabled).toBe(true);
+  });
 });
