@@ -37,6 +37,10 @@
 - **机器人形象自动更新** — 播放时自动更新头像（专辑封面）、昵称（当前歌曲）、描述、Away 状态、频道描述，停止时恢复默认值。每项功能独立可配置，权限不足时自动降级
 - **多机器人独立播放** — 多个机器人同时在不同服务器或频道播放不同音乐，每个机器人独立的播放队列、进度和音量，WebUI 一键切换控制
 - **播放历史** — 自动记录所有播放过的歌曲
+- **收藏夹** — 跨客户端同步的云端收藏，任意歌曲一键收藏，WebUI 独立页面管理
+- **TS 服务器频道树可视化** — 在 WebUI 中浏览当前 TS 服务器完整频道树，管理员可点击频道一键移动机器人
+- **队列拖拽重排序** — WebUI 播放队列支持鼠标/触屏拖拽调整顺序，同时支持 `!reorder` 文字命令
+- **全面移动端适配** — 底部抽屉式播放控制、触摸友好的触控目标、后台自动节流节省电量，手机浏览器获得近似原生 App 的体验
 - **懒加载机制** — 歌单只存储元数据，播放时才获取链接（避免链接过期）
 - **一键部署** — FFmpeg 内置，Windows 双击运行 / Linux systemd / Docker
 
@@ -95,6 +99,12 @@ docker-compose up -d
 
 打开浏览器访问 **http://localhost:3000**
 
+> 生产环境推荐使用预构建镜像版 `docker-compose.prod.yml`（无需编译，秒级启动）：
+> ```bash
+> docker load -i tsmusicbot-v1.x.x.tar.gz
+> docker-compose -f docker-compose.prod.yml up -d
+> ```
+
 <details>
 <summary>Docker 详细说明</summary>
 
@@ -128,6 +138,15 @@ sudo ./scripts/install.sh
 自动安装 Node.js 和依赖，配置 systemd 服务，支持开机自启。
 
 ## 更新升级
+
+> **⚠️ 鉴权系统升级注意事项**
+>
+> 从本次版本之前的旧版本升级时，由于新增了强制鉴权系统：
+> - **首次启动会被引导到 `/setup`**，必须设置管理员密码 + 用户密码才能继续使用
+> - **登录方式已变更**：旧的 URL 参数 token 方式失效，改为 HTTP-only Cookie，需要重新登录
+> - **Settings 页面仅限管理员访问**，普通用户会被重定向到首页
+>
+> 升级后执行 `npm start` 或重启 Docker 容器，浏览器访问 `http://localhost:3000/setup` 完成初始设置即可。
 
 > **⚠️ 从使用 `@honeybbq/teamspeak-client 0.1.x` 的旧版本升级时的重要变更**
 >
@@ -221,10 +240,11 @@ sudo systemctl start tsmusicbot
 
 ### 首次配置
 
-1. 打开 **http://localhost:3000/setup** 进入设置向导
-2. 填写 TeamSpeak 服务器地址（默认端口：9987）
-3. 设置机器人昵称
-4. （可选）扫码登录网易云/QQ音乐账号以播放 VIP 歌曲
+1. 打开 **http://localhost:3000/setup** 进入设置向导，设置管理员密码和用户密码
+2. 使用设置的密码登录
+3. 填写 TeamSpeak 服务器地址（默认端口：9987）
+4. 设置机器人昵称
+5. （可选）扫码登录网易云/QQ音乐账号以播放 VIP 歌曲
 
 ### WebUI 页面说明
 
@@ -233,9 +253,12 @@ sudo systemctl start tsmusicbot
 | **首页** | 推荐歌单、每日推荐、私人FM、我的歌单 |
 | **搜索** | 三平台统一搜索，结果标注网易云/QQ/B站来源 |
 | **歌单** | 查看歌单详情，播放全部（根据当前播放模式选择首歌） |
-| **歌词** | 全屏歌词页，实时同步滚动，模糊专辑封面背景 |
+| **歌词** | 全屏歌词页，实时同步滚动，模糊专辑封面背景，支持后台节流 |
 | **历史** | 播放历史记录 |
-| **设置** | 主题切换、机器人管理、三平台账号登录、音质选择、命令前缀 |
+| **收藏夹** | 收藏歌曲列表，支持取消收藏 |
+| **设置** | 主题切换、机器人管理（含 TS 资料同步 6 项开关）、三平台账号登录、音质选择、命令前缀 |
+| **登录** | 管理员/用户双角色密码登录 |
+| **首次设置** | `/setup` 首次启动强制设置管理员密码与用户密码 |
 
 ### TeamSpeak 文字命令
 
@@ -253,6 +276,8 @@ sudo systemctl start tsmusicbot
 | `!stop` | 停止播放并清空队列 |
 | `!vol <0-100>` | 设置音量 |
 | `!queue` | 查看播放队列 |
+| `!remove <num>` | 移除队列中指定项 |
+| `!reorder <from> <to>` | 调整队列中歌曲顺序 |
 | `!mode <seq\|loop\|random\|rloop>` | 切换播放模式 |
 | `!playlist <歌单名或ID>` | 加载歌单（支持名称模糊搜索和 ID） |
 | `!playlist -q <歌单名>` | 从 QQ 音乐搜索并加载歌单 |
@@ -294,9 +319,10 @@ teamspeak-music-bot/
 │   │   ├── instance.ts         # Bot 实例（绑定 TS3 + 播放器 + 音源）
 │   │   ├── manager.ts          # 多实例生命周期管理
 │   │   └── profile.ts          # 机器人形象管理（头像/昵称/描述/Away/频道描述）
+│   ├── auth/                   # 鉴权模块（JWT + HTTP-only Cookie + 限流）
 │   ├── data/                   # 数据层
-│   │   ├── config.ts           # JSON 配置文件
-│   │   └── database.ts         # SQLite 数据库（播放历史、实例持久化）
+│   │   ├── config.ts           # JSON 配置文件（原子写入）
+│   │   └── database.ts         # SQLite 数据库（播放历史、机器人配置、收藏夹）
 │   ├── music/                  # 音源服务
 │   │   ├── provider.ts         # 统一 MusicProvider 接口
 │   │   ├── netease.ts          # 网易云音乐适配器
@@ -317,21 +343,26 @@ teamspeak-music-bot/
 │   │       ├── bot.ts          # 机器人管理 CRUD
 │   │       ├── music.ts        # 搜索/歌单/歌词/音质
 │   │       ├── player.ts       # 播放控制/队列/历史/跳转
-│   │       └── auth.ts         # QR登录/Cookie/SMS
+│   │       ├── favorites.ts    # 收藏夹增删查
+│   │       └── auth.ts         # 登录/鉴权/Cookie
 │   └── index.ts                # 入口（启动所有服务）
-├── web/src/                    # 前端源码 (Vue 3)
+├── web/src/                    # 前端源码 (Vue 3 + Tailwind CSS 4)
 │   ├── components/             # Player, Navbar, Queue, CoverArt, SongCard
-│   ├── views/                  # Home, Search, Playlist, Lyrics, History, Settings, Setup
-│   ├── stores/                 # Pinia 状态管理（含服务端时间同步）
-│   ├── composables/            # WebSocket 自动重连
-│   └── styles/                 # SCSS 主题变量（深色/浅色）
+│   │   ├── common/             # 通用基础组件库（BaseButton/BaseModal/BaseToggle 等）
+│   │   ├── settings/           # 设置页子模块
+│   │   └── MobilePlayerControls.vue  # 移动端底部播放抽屉
+│   ├── views/                  # Home, Search, Playlist, Lyrics, History, Favorites, Settings, Login, Setup
+│   ├── stores/                 # Pinia 状态管理（player/auth/favorites/toast）
+│   ├── composables/            # WebSocket 自动重连、Toast 通知
+│   └── styles/                 # Tailwind CSS 入口 + CSS 主题变量
 ├── scripts/                    # 部署脚本
 │   ├── setup.bat               # Windows 首次安装
 │   ├── start.bat               # Windows 启动脚本
 │   ├── install.sh              # Linux 一键安装 + systemd 服务
 │   └── docker/                 # Docker 部署文件
 │       ├── Dockerfile
-│       └── docker-compose.yml
+│       ├── docker-compose.yml      # 源码构建版
+│       └── docker-compose.prod.yml # 预构建镜像版（推荐生产环境）
 ├── data/                       # 运行时数据（自动创建，不上传）
 │   ├── tsmusicbot.db           # SQLite 数据库
 │   ├── cookies/                # 登录 Cookie
@@ -351,8 +382,8 @@ teamspeak-music-bot/
 | **网易云 API** | NeteaseCloudMusicApi |
 | **QQ 音乐 API** | @sansenjian/qq-music-api |
 | **哔哩哔哩** | BiliBili Web API（搜索、DASH 音频流、QR 登录） |
-| **前端框架** | Vue 3, Vite 5, Pinia, Vue Router 4 |
-| **界面样式** | SCSS（YesPlayMusic 设计风格） |
+| **前端框架** | Vue 3, Vite 6, Pinia, Vue Router 4 |
+| **界面样式** | Tailwind CSS 4（响应式断点 sm/md/lg） |
 | **图标** | @iconify/vue |
 | **日志** | pino |
 
@@ -419,6 +450,8 @@ pip install -U yt-dlp
   "neteaseApiPort": 3001,
   "qqMusicApiPort": 3200,
   "adminPassword": "",
+  "userPassword": "",
+  "jwtExpiresIn": "7d",
   "adminGroups": [],
   "autoReturnDelay": 300,
   "autoPauseOnEmpty": true
@@ -477,6 +510,21 @@ A：`git pull` 拉取最新代码，然后 `npm install && npm run build && npm 
 > 完整历史请查看 [git log](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot/commits/main) 或 [Releases](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot/releases)。这里只列出重要变更和面向用户的破坏性改动。
 
 ### 最新版本
+
+**全栈鉴权、移动端重设计与新功能**
+
+> ⚠️ **破坏性变更**：从此版本之前升级时，首次启动会被引导到 `/setup` 设置密码，且旧 URL 参数 token 登录方式已失效，需要重新登录。
+
+- **管理员/用户双角色鉴权**：首次启动强制在 `/setup` 设置两套密码，`admin` 可访问设置/修改机器人/登录平台账号，`user` 可播放/搜索/查看。登录态使用 HTTP-only Cookie，WebSocket 同样需要鉴权。
+- **收藏夹**：新增 `/favorites` 页面和独立导航入口，任意歌曲卡片可一键收藏，SQLite 持久化并通过 WebSocket 实时同步到所有客户端。
+- **TS 服务器频道树可视化**：WebUI 侧边抽屉展示当前 TS 服务器完整频道树，高亮机器人所在频道，管理员点击频道即可一键移动机器人。
+- **队列拖拽重排序**：WebUI 播放队列支持鼠标/触屏拖拽调整顺序，同时新增 `!remove <num>` 和 `!reorder <from> <to>` 文字命令。
+- **TS 资料同步可视化开关**：设置页编辑机器人弹窗中新增「TS 资料同步」区域，头像/简介/昵称/离开状态/频道简介/播放提示 6 项独立开关，配置持久化到数据库，频道简介默认关闭。
+- **全面移动端适配**：系统性移动端重构，底部抽屉式播放控制面板、汉堡导航、队列侧滑抽屉、歌词响应式布局、后台自动节流（暂停心跳与 RAF 渲染）、触摸友好的 44px 触控目标。
+- **前端架构升级**：SCSS → Tailwind CSS 4，统一响应式断点，9 个通用基础组件（BaseButton/BaseModal/BaseToggle 等），状态管理扩展（auth/favorites/toast stores）。
+- **Docker 自动发布**：新增 GitHub Actions 手动触发工作流，构建镜像后导出 `docker save | gzip` 的 tar.gz 包，并支持 `docker-compose.prod.yml` 预构建镜像部署。
+- **音频修复**：状态切换时发送静音帧缓解爆音；移除全局 PID 池，改用实例级 PID 隔离，多机器人不再串扰；ffmpeg 终止升级为 `SIGTERM` → `SIGKILL` 分级策略。
+- **后端加固**：BotInstance 异步互斥锁替代布尔标志、`isInvokerAdmin` 真实查询服务器组权限（出错拒绝）、队列 `reorder` 正确处理索引偏移、`config.json` 改为文件锁 + 原子写入。
 
 **机器人形象自动更新（Bot Profile）**
 
