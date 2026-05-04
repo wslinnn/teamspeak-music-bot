@@ -1,0 +1,28 @@
+# TSMusicBot — Docker Compose (预构建镜像版，Linux)
+# 用法：
+#   1. docker load -i tsmusicbot-v1.x.x.tar.gz
+#   2. cd scripts/docker && docker-compose -f docker-compose.prod.yml up -d
+#
+# 或指定镜像版本：
+#   TSMUSICBOT_IMAGE=tsmusicbot:v1.0.0 docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  tsmusicbot:
+    image: ${TSMUSICBOT_IMAGE:-tsmusicbot:latest}
+    container_name: tsmusicbot
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - tsmusicbot-data:/app/data
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  tsmusicbot-data:
+    driver: local

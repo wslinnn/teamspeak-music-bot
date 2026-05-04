@@ -35,9 +35,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Tag image as latest
+        run: docker tag tsmusicbot:${{ github.event.inputs.tag }} tsmusicbot:latest
+
       - name: Export image to tar.gz
         run: |
-          docker save tsmusicbot:${{ github.event.inputs.tag }} | gzip > tsmusicbot-${{ github.event.inputs.tag }}.tar.gz
+          docker save tsmusicbot:${{ github.event.inputs.tag }} tsmusicbot:latest | gzip > tsmusicbot-${{ github.event.inputs.tag }}.tar.gz
           ls -lh tsmusicbot-*.tar.gz
 
       - name: Create or use existing GitHub Release
