@@ -73,6 +73,44 @@
           <label class="block text-xs font-semibold opacity-70 mb-1">服务器密码（可选）</label>
           <input v-model="editForm.serverPassword" type="password" class="input" />
         </div>
+
+        <div class="border-t border-border-default pt-4 mt-2">
+          <h4 class="text-sm font-semibold mb-1">TS 资料同步</h4>
+          <p class="text-xs opacity-65 mb-2">控制机器人在 TeamSpeak 上同步哪些信息（部分功能依赖服务器权限）</p>
+          <div class="space-y-0.5">
+            <BaseToggle
+              v-model="profileForm.avatarEnabled"
+              label="头像跟随"
+              hint="将当前歌曲封面设置为机器人头像"
+            />
+            <BaseToggle
+              v-model="profileForm.descriptionEnabled"
+              label="客户端简介"
+              hint="将正在播放的歌曲信息写入客户端 description"
+            />
+            <BaseToggle
+              v-model="profileForm.nicknameEnabled"
+              label="昵称跟随"
+              hint="昵称随播放歌曲变化（♪ 歌曲 - 艺人 - 机器人名）"
+            />
+            <BaseToggle
+              v-model="profileForm.awayStatusEnabled"
+              label="离开状态"
+              hint="未播放时设为离开（等待播放）"
+            />
+            <BaseToggle
+              v-model="profileForm.channelDescEnabled"
+              label="频道简介"
+              hint="将正在播放写入当前频道 description（需要更高的服务器权限）"
+              warning
+            />
+            <BaseToggle
+              v-model="profileForm.nowPlayingMsgEnabled"
+              label="播放提示消息"
+              hint="新歌曲开始时在频道发送一条提示消息"
+            />
+          </div>
+        </div>
       </div>
       <template #footer="{ close }">
         <BaseButton variant="secondary" @click="close">取消</BaseButton>
@@ -95,6 +133,7 @@ import SettingsBots from '../components/settings/SettingsBots.vue';
 import SettingsPlatforms from '../components/settings/SettingsPlatforms.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import BaseButton from '../components/common/BaseButton.vue';
+import BaseToggle from '../components/common/BaseToggle.vue';
 
 const store = usePlayerStore();
 const toast = useToast();
@@ -115,6 +154,14 @@ const editModalOpen = ref(false);
 const editForm = reactive({
   name: '', serverAddress: '', serverPort: 9987, nickname: '',
   defaultChannel: '', channelPassword: '', serverPassword: '',
+});
+const profileForm = reactive({
+  avatarEnabled: true,
+  descriptionEnabled: true,
+  nicknameEnabled: true,
+  awayStatusEnabled: true,
+  channelDescEnabled: false,
+  nowPlayingMsgEnabled: true,
 });
 let editingBotId: string | null = null;
 
@@ -217,13 +264,32 @@ async function openEditBot(bot: BotStatus) {
     editForm.channelPassword = '';
     editForm.serverPassword = '';
   }
+  try {
+    const res = await http.get(`/api/player/${bot.id}/profile`);
+    profileForm.avatarEnabled = res.data.avatarEnabled ?? true;
+    profileForm.descriptionEnabled = res.data.descriptionEnabled ?? true;
+    profileForm.nicknameEnabled = res.data.nicknameEnabled ?? true;
+    profileForm.awayStatusEnabled = res.data.awayStatusEnabled ?? true;
+    profileForm.channelDescEnabled = res.data.channelDescEnabled ?? false;
+    profileForm.nowPlayingMsgEnabled = res.data.nowPlayingMsgEnabled ?? true;
+  } catch {
+    profileForm.avatarEnabled = true;
+    profileForm.descriptionEnabled = true;
+    profileForm.nicknameEnabled = true;
+    profileForm.awayStatusEnabled = true;
+    profileForm.channelDescEnabled = false;
+    profileForm.nowPlayingMsgEnabled = true;
+  }
   editModalOpen.value = true;
 }
 
 async function saveEditBot() {
   if (!editingBotId) return;
   try {
-    await http.put(`/api/bot/${editingBotId}`, editForm);
+    await Promise.all([
+      http.put(`/api/bot/${editingBotId}`, editForm),
+      http.put(`/api/player/${editingBotId}/profile`, { ...profileForm }),
+    ]);
     editModalOpen.value = false;
     editingBotId = null;
     await store.fetchBots();
