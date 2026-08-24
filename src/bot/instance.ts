@@ -858,6 +858,8 @@ export class BotInstance extends EventEmitter {
         return this.cmdClear();
       case "remove":
         return this.cmdRemove(cmd);
+      case "reorder":
+        return this.cmdReorder(cmd);
       case "mode":
         return this.cmdMode(cmd);
       case "playlist":
@@ -1449,6 +1451,20 @@ export class BotInstance extends EventEmitter {
     });
     this.emit("stateChange");
     return "Queue cleared";
+  }
+
+  /** Fork: manual queue reorder (!reorder / WebUI drag & drop). */
+  private cmdReorder(cmd: ParsedCommand): string {
+    if (!cmd.args) return "Usage: !reorder <from> <to>";
+    const parts = cmd.args.trim().split(/\s+/);
+    if (parts.length !== 2) return "Usage: !reorder <from> <to>";
+    const fromIndex = parseInt(parts[0], 10) - 1;
+    const toIndex = parseInt(parts[1], 10) - 1;
+    if (isNaN(fromIndex) || isNaN(toIndex)) return "Usage: !reorder <from> <to>";
+    const ok = this.queue.reorder(fromIndex, toIndex);
+    if (!ok) return "Invalid reorder positions";
+    this.emit("stateChange");
+    return `Reordered: position ${fromIndex + 1} → ${toIndex + 1}`;
   }
 
   private async cmdRemove(cmd: ParsedCommand): Promise<string> {

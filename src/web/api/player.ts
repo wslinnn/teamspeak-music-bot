@@ -230,6 +230,38 @@ export function createPlayerRouter(
     }
   });
 
+  // Fork: drag & drop queue reorder (drives !reorder like the delete route).
+  router.post(
+    "/:botId/queue/reorder",
+    authorize({ capability: "player.queue", guestFlag: "removeClear" }),
+    async (req, res) => {
+      try {
+        const bot = (req as any).bot;
+        const { fromIndex, toIndex } = req.body;
+        if (
+          typeof fromIndex !== "number" ||
+          typeof toIndex !== "number" ||
+          !Number.isFinite(fromIndex) ||
+          !Number.isFinite(toIndex) ||
+          fromIndex < 0 ||
+          toIndex < 0
+        ) {
+          res.status(400).json({ error: "fromIndex and toIndex must be non-negative numbers" });
+          return;
+        }
+        const cmd = parseCommand(`!reorder ${fromIndex + 1} ${toIndex + 1}`, "!")!;
+        const response = await bot.executeCommand(cmd);
+        if (response.startsWith("Invalid")) {
+          res.status(400).json({ error: response });
+          return;
+        }
+        res.json({ message: response, queue: bot.getQueue() });
+      } catch (err) {
+        res.status(500).json({ error: (err as Error).message });
+      }
+    }
+  );
+
   // Jump to a specific index in the queue (without clearing it)
   router.post("/:botId/play-at", authorize({ capability: "player.control" }), async (req, res) => {
     try {
