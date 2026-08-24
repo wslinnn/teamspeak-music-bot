@@ -81,6 +81,37 @@
         </div>
 
         <div class="border-t border-border-default pt-4 mt-2">
+          <h4 class="text-sm font-semibold mb-1">自定义头像</h4>
+          <p class="text-xs opacity-65 mb-2">空闲时显示自定义头像，播放时显示专辑封面（立即生效，无需点保存）</p>
+          <div class="flex items-center gap-3">
+            <div class="w-16 h-16 rounded-full overflow-hidden bg-interactive-hover flex items-center justify-center shrink-0">
+              <img v-if="customAvatarSrc" :src="customAvatarSrc" alt="自定义头像" class="w-full h-full object-cover" />
+              <Icon v-else icon="mdi:robot-outline" class="text-2xl opacity-40" />
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <button
+                type="button"
+                class="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors"
+                @click="avatarInput?.click()"
+              >上传图片（png/jpg/webp，≤300KB）</button>
+              <button
+                v-if="customAvatarSrc"
+                type="button"
+                class="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] text-left text-text-tertiary hover:text-danger transition-colors"
+                @click="removeAvatar"
+              >移除自定义头像</button>
+            </div>
+            <input
+              ref="avatarInput"
+              type="file"
+              class="hidden"
+              accept="image/png,image/jpeg,image/webp"
+              @change="onAvatarPicked"
+            />
+          </div>
+        </div>
+
+        <div class="border-t border-border-default pt-4 mt-2">
           <h4 class="text-sm font-semibold mb-1">TS 资料同步</h4>
           <p class="text-xs opacity-65 mb-2">控制机器人在 TeamSpeak 上同步哪些信息（部分功能依赖服务器权限）</p>
           <div class="space-y-0.5">
@@ -183,6 +214,71 @@ const profileForm = reactive({
   nowPlayingMsgEnabled: true,
 });
 let editingBotId: string | null = null;
+
+// ── 自定义头像 ──
+const avatarInput = ref<HTMLInputElement | null>(null);
+const customAvatarSrc = ref<string | null>(null);
+let avatarObjectUrl: string | null = null;
+
+function setAvatarPreview(src: string | null, isObjectUrl = false) {
+  if (avatarObjectUrl) {
+    URL.revokeObjectURL(avatarObjectUrl);
+    avatarObjectUrl = null;
+  }
+  if (isObjectUrl && src) avatarObjectUrl = src;
+  customAvatarSrc.value = src;
+}
+
+async function loadCustomAvatar(botId: string) {
+  try {
+    const res = await http.get(`/api/bot/${botId}/avatar`, { responseType: 'blob' });
+    if (res.data?.size) {
+      setAvatarPreview(URL.createObjectURL(res.data), true);
+      return;
+    }
+  } catch {
+    // 404 = 未设置自定义头像
+  }
+  setAvatarPreview(null);
+}
+
+function onAvatarPicked(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !editingBotId) return;
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    toast.error('仅支持 png / jpg / webp 图片');
+    return;
+  }
+  if (file.size > 300 * 1024) {
+    toast.error('图片不能超过 300KB');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const dataUrl = reader.result as string;
+      await http.put(`/api/bot/${editingBotId}/avatar`, { dataUrl });
+      setAvatarPreview(dataUrl);
+      toast.success('自定义头像已更新');
+    } catch {
+      // 拦截器 toast
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function removeAvatar() {
+  if (!editingBotId) return;
+  try {
+    await http.delete(`/api/bot/${editingBotId}/avatar`);
+    setAvatarPreview(null);
+    toast.success('已恢复默认头像');
+  } catch {
+    // 拦截器 toast
+  }
+}
 
 // ── Platform auth state ──
 const neteaseAuth = reactive({ loggedIn: false, nickname: '' });
@@ -299,6 +395,7 @@ async function openEditBot(bot: BotStatus) {
     profileForm.channelDescEnabled = false;
     profileForm.nowPlayingMsgEnabled = true;
   }
+  await loadCustomAvatar(bot.id);
   editModalOpen.value = true;
 }
 
@@ -427,6 +524,7 @@ onUnmounted(() => {
   [neteaseQr, qqQr, bilibiliQr].forEach((qr) => {
     if (qr.pollTimer) clearInterval(qr.pollTimer);
   });
+  setAvatarPreview(null);
 });
 </script>
 
