@@ -22,6 +22,7 @@ name = "audio-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "opus-codec",
  "serde",
  "serde_json",

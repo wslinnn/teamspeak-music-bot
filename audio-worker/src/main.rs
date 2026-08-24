@@ -35,6 +35,9 @@ struct Session {
     /// 是否存在进行中的播放会话：play 置 true；自然耗尽 / stop 置 false。
     /// 帧循环据此区分「会话刚耗尽 → 恰好发一次 trackEnd」与「空转 → 静默」。
     active: bool,
+    /// 外部 PCM 模式（Spotify 边车）：无 ffmpeg、无 EOF，欠载补静音，
+    /// 曲目结束由 Node 控制器调 stop 驱动（对齐 player.ts externalMode）。
+    external: bool,
     /// 本代会话已上报过 error 事件：置位后帧循环不再发 trackEnd。
     /// Node 侧对 error 与 trackEnd 都会触发切歌，双事件会一次跳两首
     /// （旧 node 后端两事件互斥，必须保持该不变量）。
@@ -69,6 +72,7 @@ impl Session {
             ffmpeg_alive: false,
             paused: false,
             active: false,
+            external: false,
             read_error: None,
             eof_tail: None,
             real_frames: 0,
@@ -113,8 +117,9 @@ fn parse_args() -> (String, String) {
 fn new_encoder() -> Encoder {
     let mut enc = Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Voip)
         .expect("创建 Opus 编码器失败（opus-codec）");
-    // 128kbps 立体声音乐码率；后续阶段用 A/B 比对微调。
-    let _ = enc.set_bitrate(Bitrate::Custom(128_000));
+    // Bitrate::Auto 与 node 端 @discordjs/opus 默认一致（libopus AUTO，
+    // 实测同素材 ~101kbps），保证 A/B 听感与带宽对齐。
+    let _ = enc.set_bitrate(Bitrate::Auto);
     enc
 }
 
@@ -378,6 +383,7 @@ async fn stop_session(session: &Arc<Mutex<Session>>) {
     s.paused = false;
     // 会话标记失效：既避免 stop 误触发 trackEnd，也避免 play 切换窗口期的竞态。
     s.active = false;
+    s.external = false;
     s.read_error = None;
     s.eof_tail = None;
     s.frames_played = 0;
@@ -392,8 +398,32 @@ async fn handle_play(
     seek: f64,
     dur: f64,
     ffmpeg_bin: &str,
+    external: bool,
 ) {
     stop_session(session).await;
+    if external {
+        // 外部 PCM：无 ffmpeg、无 EOF，PCM 经 'P' 帧喂入
+        {
+            let mut s = session.lock().await;
+            s.pcm.clear();
+            s.ffmpeg_alive = false;
+            s.paused = false;
+            s.active = true;
+            s.external = true;
+            s.read_error = None;
+            s.eof_tail = None;
+            s.frames_played = 0;
+            s.real_frames = 0;
+            s.seek_offset = seek;
+            s.last_url = url.clone();
+            s.last_dur = dur;
+            s.generation += 1;
+        }
+        send_event(writer, "ready").await;
+        return;
+    }
+    // 普通模式：先 spawn、后原子置位（alive=true 与 gen 同一把锁）。若先置
+    // active 再 spawn，帧循环会在窗口期看到 active && !alive 误发 trackEnd。
     let args = ffmpeg_args(&url, seek);
     let mut cmd = Command::new(ffmpeg_bin);
     cmd.args(&args)
@@ -402,6 +432,7 @@ async fn handle_play(
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
+            // stop_session 已置 inactive，无需再动会话状态
             send_error(writer, "ffmpeg_spawn", &e.to_string()).await;
             return;
         }
@@ -414,6 +445,7 @@ async fn handle_play(
         s.ffmpeg_alive = true;
         s.paused = false;
         s.active = true;
+        s.external = false;
         s.read_error = None;
         s.eof_tail = None;
         s.frames_played = 0;
@@ -492,6 +524,18 @@ async fn frame_loop(
                     notify.notify_one();
                 }
                 Tick::Real(fb)
+            } else if s.external {
+                // 外部 PCM：流无 EOF，欠载补静音保时间线；曲目结束由控制器
+                // 调 stop 驱动（stop 置 active=false → Idle），不发 trackEnd
+                if s.active {
+                    if s.real_frames == 0 && s.pcm.is_empty() {
+                        Tick::Idle // 首块 PCM 未到
+                    } else {
+                        Tick::Silence
+                    }
+                } else {
+                    Tick::Idle
+                }
             } else if !s.ffmpeg_alive {
                 // 缓冲已排空 + 源已结束：会话终态转换点，此刻 real_frames 是终值
                 if s.active {
@@ -577,6 +621,12 @@ async fn encode_and_send(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Linux 下尽力提升调度优先级（renice 负值需要 CAP_SYS_NICE，失败静默）
+    #[cfg(unix)]
+    {
+        let _ = unsafe { libc::nice(-5) };
+    }
+
     let (port_arg, ffmpeg_bin) = parse_args();
     let bind = if port_arg.is_empty() {
         "127.0.0.1:0".to_string()
@@ -610,6 +660,19 @@ async fn main() -> Result<()> {
             Ok(x) => x,
             Err(_) => break, // 连接断开
         };
+        if type_byte == b'P' {
+            // 外部 PCM 喂入（Spotify 边车）：原样进缓冲；上限 8MB 防异常生产者
+            let mut s = session.lock().await;
+            if s.external && s.active {
+                if s.pcm.len() + buf.len() <= 8 * 1024 * 1024 {
+                    s.pcm.extend_from_slice(&buf);
+                } else {
+                    drop(s);
+                    let _ = send_error(&writer, "pcm_overflow", "external PCM buffer over 8MB").await;
+                }
+            }
+            continue;
+        }
         if type_byte != b'C' {
             continue;
         }
@@ -626,7 +689,8 @@ async fn main() -> Result<()> {
                 let url = v["url"].as_str().unwrap_or("").to_string();
                 let seek = v["seek"].as_f64().unwrap_or(0.0);
                 let dur = v["dur"].as_f64().unwrap_or(0.0);
-                handle_play(&session, &writer, &notify, url, seek, dur, &ffmpeg_bin).await;
+                let external = v["external"].as_bool().unwrap_or(false);
+                handle_play(&session, &writer, &notify, url, seek, dur, &ffmpeg_bin, external).await;
             }
             "stop" => stop_session(&session).await,
             "pause" => {
@@ -645,7 +709,7 @@ async fn main() -> Result<()> {
                     (s.last_url.clone(), s.last_dur)
                 };
                 if !url.is_empty() {
-                    handle_play(&session, &writer, &notify, url, sec, dur, &ffmpeg_bin).await;
+                    handle_play(&session, &writer, &notify, url, sec, dur, &ffmpeg_bin, false).await;
                 }
             }
             "set_volume" => {

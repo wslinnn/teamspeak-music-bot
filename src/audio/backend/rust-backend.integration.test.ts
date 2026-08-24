@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { writeFileSync, unlinkSync } from "node:fs";
+import { Readable } from "node:stream";
 import path from "node:path";
 import { RustAudioBackend } from "./rust-backend.js";
 
@@ -119,6 +120,60 @@ describe("RustAudioBackend 端到端", () => {
       expect(events.some((e) => e.startsWith("error")), `应收到 error 事件: ${events}`).toBe(true);
       expect(events.some((e) => e === "trackEnd"), `不应收到 trackEnd: ${events}`).toBe(false);
       console.log("[smoke] 坏源事件序列:", events);
+    },
+    15000,
+  );
+
+  it(
+    "外部 PCM 喂入（pcm-feed）：帧回传、EOF 回调、Worker 不发 trackEnd",
+    async () => {
+      const backend = new RustAudioBackend(logger);
+      const frames: Buffer[] = [];
+      let externalEnded = false;
+      let trackEndCount = 0;
+      backend.on("frame", (b: Buffer) => frames.push(b));
+      backend.on("trackEnd", () => {
+        trackEndCount += 1;
+      });
+
+      // 1.5 秒 48k/立体声/s16le 正弦 PCM，按 16KB 块推送（模拟边车 ffmpeg stdout）
+      const sr = 48000;
+      const n = Math.floor(sr * 1.5);
+      const pcm = Buffer.alloc(n * 4);
+      let off = 0;
+      for (let i = 0; i < n; i++) {
+        const v = Math.round(Math.sin((2 * Math.PI * 440 * i) / sr) * 30000);
+        pcm.writeInt16LE(v, off);
+        pcm.writeInt16LE(v, off + 2);
+        off += 4;
+      }
+      let pos = 0;
+      const readable = new Readable({
+        read() {
+          if (pos >= pcm.length) {
+            this.push(null);
+            return;
+          }
+          this.push(pcm.subarray(pos, pos + 16384));
+          pos += 16384;
+        },
+      });
+
+      backend.playPcmStream(readable, {
+        onExternalEnd: () => {
+          externalEnded = true;
+        },
+      });
+
+      // 流会瞬间推完（缓冲在 Worker 侧），帧按 20ms 节拍回传约 3 秒
+      await new Promise((r) => setTimeout(r, 4500));
+
+      expect(externalEnded, "流 EOF 应回调 onExternalEnd").toBe(true);
+      expect(frames.length, `PCM 帧数量过少: ${frames.length}`).toBeGreaterThan(60);
+      // 外部模式语义：Worker 不发 trackEnd（曲目结束由控制器调 stop 驱动）
+      expect(trackEndCount, "外部模式不应收到 trackEnd").toBe(0);
+      console.log(`[smoke] pcm-feed 收到 ${frames.length} 帧 Opus`);
+      backend.stop();
     },
     15000,
   );

@@ -4,7 +4,10 @@ import type { Readable } from "node:stream";
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { shouldUsePowerShellDownload, cleanupTempDir } from "../player.js";
 import type { Logger } from "../../logger.js";
 import type { IAudioBackend, BackendState, PlayPcmOptions } from "./audio-backend.js";
 
@@ -13,7 +16,7 @@ const require = createRequire(import.meta.url);
 const ffmpegStatic: string | null = require("ffmpeg-static");
 
 type Cmd =
-  | { c: "play"; url: string; seek: number; dur: number }
+  | { c: "play"; url: string; seek: number; dur: number; external?: boolean }
   | { c: "stop" }
   | { c: "pause" }
   | { c: "resume" }
@@ -65,6 +68,19 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   private volume = 75;
   private disposed = false;
   private respawnTimer: ReturnType<typeof setTimeout> | null = null;
+  // 外部 PCM 模式（Spotify 边车）
+  private externalStream: Readable | null = null;
+  private externalHandlers: {
+    data: (chunk: Buffer) => void;
+    end: () => void;
+    error: (err: Error) => void;
+  } | null = null;
+  // 连接建立前缓冲的外部 PCM（边车在 Worker 启动期间就可能开始产出）
+  private pcmPending: Buffer[] = [];
+  private pcmPendingBytes = 0;
+  // jdymusic PowerShell 下载回退
+  private downloader: ChildProcess | null = null;
+  private currentTempDir: string | null = null;
   private framesPlayed = 0;
   private seekOffset = 0;
   private externalActive = false;
@@ -128,9 +144,13 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     sock.on("connect", () => {
       this.connected = true;
       this.logger.info({ port }, "已连接 audio-worker");
-      // 冲刷连接前缓冲的命令
+      // 冲刷连接前缓冲的命令，随后冲刷缓冲的外部 PCM（顺序保证 Worker 先进入
+      // external 会话再收到数据）
       for (const f of this.pending) sock.write(f);
       this.pending = [];
+      for (const p of this.pcmPending) sock.write(p);
+      this.pcmPending = [];
+      this.pcmPendingBytes = 0;
     });
     sock.on("data", (chunk: Buffer) => this.onData(chunk));
     sock.on("close", () => {
@@ -199,6 +219,14 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   }
 
   play(url: string, seekSeconds = 0, songDuration = 0): void {
+    this.detachExternal();
+    this.cleanupJdymusic();
+    // Windows 下 /jdymusic/ CDN 直连会被 RST：与 player.ts 一致，先经
+    // PowerShell(WinHTTP) 下载为本地临时文件再交给 Worker 播放
+    if (shouldUsePowerShellDownload(url)) {
+      this.playViaPowerShellDownload(url, seekSeconds, songDuration);
+      return;
+    }
     this.state = "playing";
     this.seekOffset = seekSeconds;
     this.framesPlayed = 0;
@@ -206,11 +234,133 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     this.send({ c: "play", url, seek: seekSeconds, dur: songDuration });
   }
 
-  playPcmStream(_readable: Readable, _opts?: PlayPcmOptions): void {
-    // 阶段4 才实现（pcm-feed 模式）。当前 Rust Worker 版本未实现外部 PCM 喂入，
-    // 回退告警并上报错误，调用方应改用 node 后端处理 Spotify 边车流。
-    this.logger.warn("Rust 后端暂不支持 playPcmStream（外部 PCM 模式），请使用 node 后端");
-    this.emit("error", new Error("RustAudioBackend.playPcmStream 尚未实现"));
+  private playViaPowerShellDownload(url: string, seekSeconds: number, songDuration: number): void {
+    const tempDir = mkdtempSync(join(tmpdir(), "tsbot-rust-jdy-"));
+    const tempFile = join(tempDir, "song.audio");
+    this.currentTempDir = tempDir;
+
+    const psScript = [
+      "$ErrorActionPreference = 'Stop'",
+      "$ProgressPreference = 'SilentlyContinue'",
+      "$wc = New-Object System.Net.WebClient",
+      "$wc.Headers.Add('User-Agent', $env:DL_UA)",
+      "$wc.Headers.Add('Referer', $env:DL_REFERER)",
+      "$wc.DownloadFile($env:DL_URL, $env:DL_OUT)",
+    ].join("; ");
+
+    this.logger.debug({ tempFile }, "Downloading via PowerShell (jdymusic CDN, rust backend)");
+    const ps = spawn(
+      "powershell",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psScript],
+      {
+        env: {
+          ...process.env,
+          DL_URL: url,
+          DL_OUT: tempFile,
+          DL_UA: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          DL_REFERER: "https://music.163.com/",
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
+    this.downloader = ps;
+
+    ps.on("exit", (code) => {
+      if (this.currentTempDir !== tempDir) {
+        cleanupTempDir(tempDir); // 过期下载（已切歌）
+        return;
+      }
+      this.downloader = null;
+      if (code !== 0 || !existsSync(tempFile)) {
+        this.cleanupJdymusic();
+        this.emit("error", new Error(`jdymusic 下载失败 (exit ${code})`));
+        return;
+      }
+      this.state = "playing";
+      this.seekOffset = seekSeconds;
+      this.framesPlayed = 0;
+      this.send({ c: "play", url: tempFile, seek: seekSeconds, dur: songDuration });
+    });
+    ps.on("error", (err) => {
+      if (this.currentTempDir === tempDir) {
+        this.cleanupJdymusic();
+        this.emit("error", err);
+      }
+    });
+  }
+
+  private cleanupJdymusic(): void {
+    if (this.downloader) {
+      this.downloader.kill();
+      this.downloader = null;
+    }
+    if (this.currentTempDir) {
+      cleanupTempDir(this.currentTempDir);
+      this.currentTempDir = null;
+    }
+  }
+
+  playPcmStream(readable: Readable, opts: PlayPcmOptions = {}): void {
+    // 与 player.ts externalMode 语义一致：stop 作栅栏（不销毁旧流）、PCM 经
+    // 'P' 帧喂入 Worker、欠载由 Worker 补静音、曲目结束由控制器调 stop 驱动
+    this.stop();
+    this.state = "playing";
+    this.externalActive = true;
+    this.seekOffset = 0;
+    this.framesPlayed = 0;
+    this.send({ c: "play", url: "", seek: 0, dur: 0, external: true });
+
+    this.externalStream = readable;
+    const onData = (chunk: Buffer): void => {
+      if (this.externalStream !== readable) return; // 会话已切换，丢弃陈旧 PCM
+      this.sendPcm(chunk);
+    };
+    const onEnd = (): void => {
+      if (this.externalStream !== readable) return;
+      this.detachExternal();
+      opts.onExternalEnd?.();
+    };
+    const onError = (err: Error): void => {
+      if (this.externalStream !== readable) return;
+      this.detachExternal();
+      this.emit("error", err);
+    };
+    this.externalHandlers = { data: onData, end: onEnd, error: onError };
+    readable.on("data", onData);
+    readable.on("end", onEnd);
+    readable.on("error", onError);
+  }
+
+  /** 原始 PCM 字节按 'P' 帧直发 Worker（不走 JSON）；未连接时缓冲（上限 8MB）。 */
+  private sendPcm(buf: Buffer): void {
+    const frame = Buffer.allocUnsafe(5 + buf.length);
+    frame[0] = 0x50; // 'P'
+    frame.writeUInt32BE(buf.length, 1);
+    buf.copy(frame, 5);
+    if (this.connected && this.socket) {
+      this.socket.write(frame);
+      return;
+    }
+    if (this.pcmPendingBytes + frame.length > 8 * 1024 * 1024) {
+      this.logger.warn({ queued: this.pcmPendingBytes }, "外部 PCM 断连缓冲超 8MB，丢弃新数据");
+      return;
+    }
+    this.pcmPending.push(frame);
+    this.pcmPendingBytes += frame.length;
+  }
+
+  /** 解绑外部流监听（不销毁流本身，对齐 player.ts 的 detach 语义）。 */
+  private detachExternal(): void {
+    const st = this.externalStream;
+    const h = this.externalHandlers;
+    if (st && h) {
+      st.removeListener("data", h.data);
+      st.removeListener("end", h.end);
+      st.removeListener("error", h.error);
+    }
+    this.externalStream = null;
+    this.externalHandlers = null;
+    this.externalActive = false;
   }
 
   pause(): void {
@@ -226,6 +376,10 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   stop(): void {
     this.state = "idle";
     this.framesPlayed = 0;
+    this.detachExternal();
+    this.cleanupJdymusic();
+    this.pcmPending = [];
+    this.pcmPendingBytes = 0;
     this.send({ c: "stop" });
   }
 
@@ -270,6 +424,10 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
       clearTimeout(this.respawnTimer);
       this.respawnTimer = null;
     }
+    this.detachExternal();
+    this.cleanupJdymusic();
+    this.pcmPending = [];
+    this.pcmPendingBytes = 0;
     this.socket?.destroy();
     this.socket = null;
     this.child?.kill();
