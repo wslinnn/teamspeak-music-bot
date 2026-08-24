@@ -301,6 +301,52 @@ export function createBotRouter(
     res.json(bot.getStatus());
   });
 
+  // Fork: TS server channel tree for the WebUI server-tree drawer.
+  router.get("/:id/server-tree", requireBotAccess("id"), async (req, res) => {
+    try {
+      const bot = botManager.getBot(req.params.id);
+      if (!bot) {
+        res.status(404).json({ error: "Bot not found" });
+        return;
+      }
+      const tree = await bot.getServerTree();
+      res.json(tree);
+    } catch (err) {
+      logger.error({ err }, "Failed to get server tree");
+      res.status(500).json({ success: false, error: (err as Error).message });
+    }
+  });
+
+  // Fork: one-click move from the server-tree drawer.
+  router.post(
+    "/:id/join-channel",
+    requirePermission("bot.manage"),
+    requireBotAccess("id"),
+    async (req, res) => {
+      try {
+        const bot = botManager.getBot(req.params.id);
+        if (!bot) {
+          res.status(404).json({ error: "Bot not found" });
+          return;
+        }
+        const { channelId, password } = req.body;
+        if (!channelId || typeof channelId !== "string" || channelId.trim().length === 0) {
+          res.status(400).json({ error: "channelId is required" });
+          return;
+        }
+        if (password !== undefined && typeof password !== "string") {
+          res.status(400).json({ error: "password must be a string" });
+          return;
+        }
+        await bot.joinChannelById(channelId, password);
+        res.json({ success: true, message: "Joined channel" });
+      } catch (err) {
+        logger.error({ err }, "Failed to join channel");
+        res.status(500).json({ success: false, error: (err as Error).message });
+      }
+    }
+  );
+
   // Get saved config for a bot
   router.get("/:id/config", requirePermission("bot.manage"), requireBotAccess("id"), (req, res) => {
     const saved = botManager.getBotConfig(req.params.id);

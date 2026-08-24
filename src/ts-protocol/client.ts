@@ -14,6 +14,7 @@ import {
   type Identity,
   type TextMessage,
   type ClientInfo,
+  type ChannelInfo,
   type ClientLeftViewEvent,
   type ClientMovedEvent,
   type VoiceData,
@@ -450,6 +451,33 @@ export class TS3Client extends EventEmitter {
   getChannelId(): bigint {
     if (!this.client) return 0n;
     return this.client.channelID();
+  }
+
+  /** Fork: full channel list for the server-tree view. */
+  async getChannelList(): Promise<ChannelInfo[]> {
+    if (!this.client) return [];
+    try {
+      return await listChannels(this.client);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Fork: full client list for the server-tree view. */
+  async getClientList(): Promise<ClientInfo[]> {
+    if (!this.client) return [];
+    try {
+      return await listClients(this.client);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Fork: move this client to a channel by numeric ID. */
+  async joinChannelById(channelId: bigint, password?: string): Promise<void> {
+    if (!this.client) throw new Error("Not connected");
+    await clientMove(this.client, this.clientId, channelId, password);
+    this.logger.info({ channelId: channelId.toString() }, "Moved to channel by ID");
   }
 
   private voiceFramesSent = 0;
