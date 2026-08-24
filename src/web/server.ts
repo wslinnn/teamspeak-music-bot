@@ -19,6 +19,7 @@ import { createUsersRouter } from "./api/users.js";
 import { createAuditStore } from "../data/audit.js";
 import { createAuditRouter } from "./api/audit.js";
 import { createFavoritesRouter } from "./api/favorites.js";
+import { createSongFavoritesRouter } from "./api/song-favorites.js";
 import { createSavedQueuesRouter } from "./api/saved-queues.js";
 import { createSpotifyRouter } from "./api/spotify.js";
 import type { SpotifyOAuth } from "../music/spotify/spotify-oauth.js";
@@ -203,6 +204,14 @@ export function createWebServer(options: WebServerOptions): WebServer {
     );
   }
   app.use("/api/favorites", requireNotGuest, createFavoritesRouter(options.database, logger));
+  // Fork: song favorites (cross-client), broadcast via WS like on legacy main.
+  // The WS controller is created later — bridge with a no-op indirection.
+  let broadcastToClients: (data: object) => void = () => {};
+  app.use(
+    "/api/song-favorites",
+    requireNotGuest,
+    createSongFavoritesRouter(options.database, (data) => broadcastToClients(data))
+  );
   // Saved queues (Feature 1, #119). Members + admins only (requireNotGuest);
   // the router itself 403s every route unless savedQueuesEnabled is on.
   app.use(
@@ -284,6 +293,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   });
   const controller = setupWebSocket(wss, options.botManager, logger);
   onGuestPolicyChanged = controller.refreshGuestPolicy;
+  broadcastToClients = (data) => controller.broadcast(data);
 
   // ─── Session cleanup interval ──────────────────────────────────────────
   let cleanupTimer: ReturnType<typeof setInterval> | null = null;

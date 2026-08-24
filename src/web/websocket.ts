@@ -6,6 +6,11 @@ import type { Logger } from "../logger.js";
 export interface WebSocketController {
   cleanup: () => void;
   /**
+   * Fork addition: broadcast an arbitrary payload to all connected clients.
+   * Used by fork routes (e.g. song favorites live sync).
+   */
+  broadcast: (data: object, botId?: string) => void;
+  /**
    * Re-apply the current guest-mode policy to every already-open guest socket.
    * If guest mode is disabled, in-flight guest sockets are force-closed; otherwise
    * each guest socket is live re-scoped so out-of-scope bots stop streaming.
@@ -189,5 +194,5 @@ export function setupWebSocket(
     }
   };
 
-  return { cleanup, refreshGuestPolicy };
+  return { cleanup, refreshGuestPolicy, broadcast };
 }
