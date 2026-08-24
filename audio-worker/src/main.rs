@@ -21,6 +21,8 @@ use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, Notify};
 
 const FRAME_MS: u64 = 20;
+/// 与 player.ts 的 BROWSER_UA 保持一致（CDN 头用）
+const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const PCM_FRAME_BYTES: usize = 3840; // 20ms * 48000Hz * 2ch * 2bytes
 const HIGH_WATER: usize = 640 * 1024;
 const LOW_WATER: usize = 256 * 1024;
@@ -36,11 +38,13 @@ struct Session {
     /// 本代会话已上报过 error 事件：置位后帧循环不再发 trackEnd。
     /// Node 侧对 error 与 trackEnd 都会触发切歌，双事件会一次跳两首
     /// （旧 node 后端两事件互斥，必须保持该不变量）。
-    /// read_loop 记录的待上报失败（零产出 / 读错误）。**不在 read_loop 直接发送**：
-    /// 本地文件解码极快时 EOF 可能早于帧循环消费任何数据，此刻 real_frames==0
-    /// 是误报。由帧循环在缓冲排空、会话转换的那一刻统一判定，保证每个 play
-    /// 会话恰好一个终态事件（trackEnd 或 error，天然互斥）。
-    pending_fail: Option<(String, String)>, // (code, msg)
+    /// stdout 管道读错误（罕见）。由帧循环在会话转换点上报。
+    read_error: Option<String>,
+    /// EOF 事实记录（退出码 + stderr 尾部），**无条件记录、不做任何判定**：
+    /// 本地文件解码可能快于帧消费，EOF 时刻 real_frames==0 是常态而非失败。
+    /// 零产出判定完全交给帧循环在缓冲排空的转换点执行（届时 real_frames
+    /// 才是终值），保证每个 play 会话恰好一个终态事件（trackEnd 或 error）。
+    eof_tail: Option<(i32, String)>,
     /// 真实数据帧计数（不含欠载静音帧）：零产出失败判定的依据。
     /// frames_played 含静音帧（时间线计数，供进度计算），不能用作产出判定。
     real_frames: u64,
@@ -65,7 +69,8 @@ impl Session {
             ffmpeg_alive: false,
             paused: false,
             active: false,
-            pending_fail: None,
+            read_error: None,
+            eof_tail: None,
             real_frames: 0,
             volume: 75.0,
             duck_start_gain: 1.0,
@@ -157,7 +162,29 @@ fn apply_gain(pcm: &[u8], start_factor: f32, end_factor: f32) -> Vec<i16> {
 /// 构造 ffmpeg 参数：复刻 player.ts buildFfmpegArgs 的解码/输出部分。
 fn ffmpeg_args(url: &str, seek: f64) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
-    if url.starts_with("http") {
+    let is_http = url.starts_with("http://") || url.starts_with("https://");
+
+    // CDN 头（与 player.ts buildFfmpegArgs 逐条对齐）：B站/网易云的 CDN
+    // 会拒绝无 Referer/UA 的请求，缺失会导致自动跳歌
+    if is_http && (url.contains("bilivideo") || url.contains("bilibili")) {
+        a.push("-headers".into());
+        a.push(format!(
+            "Referer: https://www.bilibili.com
+User-Agent: {}
+",
+            BROWSER_UA
+        ));
+    } else if is_http && (url.contains("music.126.net") || url.contains("music.163.com")) {
+        a.push("-headers".into());
+        a.push(format!(
+            "Referer: https://music.163.com/
+User-Agent: {}
+",
+            BROWSER_UA
+        ));
+    }
+
+    if is_http {
         a.extend_from_slice(&[
             "-reconnect".into(),
             "1".into(),
@@ -248,7 +275,6 @@ async fn ffmpeg_read_loop(
     mut stdout: tokio::process::ChildStdout,
     mut stderr: tokio::process::ChildStderr,
     mut child: Child,
-    writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     notify: Arc<Notify>,
     gen: u64,
 ) {
@@ -291,9 +317,7 @@ async fn ffmpeg_read_loop(
                     Ok(Err(e)) => {
                         let mut s = session.lock().await;
                         if s.generation == gen {
-                            // 记录待上报失败，由帧循环在会话转换时统一发出
-                            s.pending_fail =
-                                Some(("ffmpeg_read".to_string(), e.to_string()));
+                            s.read_error = Some(e.to_string());
                         }
                         drop(s);
                         break;
@@ -320,9 +344,9 @@ async fn ffmpeg_read_loop(
         }
     }
 
-    // stdout EOF：等待子进程退出，取出退出码用于错误研判。
-    // 只做记录、不发事件——此刻 pcm 缓冲可能还有大量未消费数据（本地文件
-    // 解码快于帧消耗），帧循环会在缓冲排空的会话转换点统一判定并发送。
+    // stdout EOF：等待子进程退出。只记录事实（退出码 + stderr 尾部），
+    // 不做任何失败判定——此刻 pcm 缓冲可能还有大量未消费数据，real_frames
+    // 还会增长；零产出与否由帧循环在缓冲排空的转换点用终值判定。
     let status = child.wait().await;
     let mut s = session.lock().await;
     if s.generation == gen {
@@ -339,14 +363,7 @@ async fn ffmpeg_read_loop(
                 .rev()
                 .collect::<Vec<_>>()
                 .join(" | ");
-            // 真实帧为 0 时才构成失败（在帧循环转换点复核，这里的 real_frames
-            // 只是初判，避免白白格式化消息）
-            if s.real_frames == 0 {
-                s.pending_fail = Some((
-                    "ffmpeg_no_output".to_string(),
-                    format!("ffmpeg 退出码 {code} 但 0 字节产出。stderr: {tail}"),
-                ));
-            }
+            s.eof_tail = Some((code, tail));
         }
     }
 }
@@ -361,7 +378,8 @@ async fn stop_session(session: &Arc<Mutex<Session>>) {
     s.paused = false;
     // 会话标记失效：既避免 stop 误触发 trackEnd，也避免 play 切换窗口期的竞态。
     s.active = false;
-    s.pending_fail = None;
+    s.read_error = None;
+    s.eof_tail = None;
     s.frames_played = 0;
     s.real_frames = 0;
 }
@@ -396,7 +414,8 @@ async fn handle_play(
         s.ffmpeg_alive = true;
         s.paused = false;
         s.active = true;
-        s.pending_fail = None;
+        s.read_error = None;
+        s.eof_tail = None;
         s.frames_played = 0;
         s.real_frames = 0;
         s.seek_offset = seek;
@@ -407,9 +426,8 @@ async fn handle_play(
     };
     let rs = session.clone();
     let rn = notify.clone();
-    let rw = writer.clone();
     tokio::spawn(async move {
-        ffmpeg_read_loop(rs, stdout, stderr, child, rw, rn, gen).await;
+        ffmpeg_read_loop(rs, stdout, stderr, child, rn, gen).await;
     });
     send_event(writer, "ready").await;
 }
@@ -475,12 +493,20 @@ async fn frame_loop(
                 }
                 Tick::Real(fb)
             } else if !s.ffmpeg_alive {
-                // 缓冲已排空 + 源已结束：会话终态转换点，此刻判定失败与否
+                // 缓冲已排空 + 源已结束：会话终态转换点，此刻 real_frames 是终值
                 if s.active {
                     s.active = false;
-                    match s.pending_fail.take() {
-                        Some((code, msg)) => Tick::Failed(code, msg),
-                        None => Tick::JustEnded,
+                    let eof = s.eof_tail.take();
+                    if let Some(e) = s.read_error.take() {
+                        Tick::Failed("ffmpeg_read".to_string(), e)
+                    } else if s.real_frames == 0 && eof.is_some() {
+                        let (code, tail) = eof.unwrap();
+                        Tick::Failed(
+                            "ffmpeg_no_output".to_string(),
+                            format!("ffmpeg 退出码 {code} 但 0 真实帧产出。stderr: {tail}"),
+                        )
+                    } else {
+                        Tick::JustEnded
                     }
                 } else {
                     Tick::Idle
