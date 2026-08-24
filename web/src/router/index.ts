@@ -39,12 +39,17 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),
-      meta: { requiresAdmin: true },
+      meta: { blockGuest: true },
     },
     {
+      path: '/first-run',
+      name: 'first-run',
+      component: () => import('../views/FirstRun.vue'),
+    },
+    {
+      // 旧版初始化地址兼容，重定向到上游语义的 /first-run
       path: '/setup',
-      name: 'setup',
-      component: () => import('../views/Setup.vue'),
+      redirect: '/first-run',
     },
     {
       path: '/login',
@@ -73,28 +78,23 @@ router.beforeEach(async (to, from, next) => {
   }
 
   // 首次加载时检查后端状态
-  if (authStore.authEnabled === null) {
+  if (authStore.needsSetup === null) {
     try {
-      await authStore.checkAuthEnabled();
+      await authStore.init();
     } catch (err) {
       console.warn('Failed to check auth status:', err);
       return next();
     }
   }
 
-  // 需要初始化 → 引导到 /setup
+  // 未初始化 → 引导到 /first-run 创建首位管理员
   if (authStore.needsSetup) {
-    return to.path === '/setup' ? next() : next({ path: '/setup' });
+    return to.name === 'first-run' ? next() : next({ path: '/first-run' });
   }
 
-  // 已初始化 → 不允许再访问 /setup
-  if (to.path === '/setup') {
+  // 已初始化 → 不允许再访问 /first-run
+  if (to.name === 'first-run' || to.path === '/setup') {
     return next({ path: '/' });
-  }
-
-  // 鉴权未开启 → 所有页面放行
-  if (authStore.authEnabled === false) {
-    return next();
   }
 
   // 已登录用户访问 /login → 重定向首页
@@ -102,13 +102,13 @@ router.beforeEach(async (to, from, next) => {
     return authStore.isAuthenticated ? next({ path: '/' }) : next();
   }
 
-  // 强制所有用户先登录（除白名单外）
+  // 强制所有用户先登录
   if (!authStore.isAuthenticated) {
     return next({ path: '/login', query: { redirect: to.fullPath } });
   }
 
-  // 管理员专属页
-  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+  // 游客无法访问设置页（上游语义：游客永远不能查看/修改设置）
+  if (to.meta.blockGuest && authStore.isGuest) {
     return next({ path: '/' });
   }
 
