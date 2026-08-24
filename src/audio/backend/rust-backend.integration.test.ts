@@ -61,11 +61,15 @@ describe("RustAudioBackend 端到端", () => {
 
       const backend = new RustAudioBackend(logger);
       const frames: Buffer[] = [];
+      const frameStamps: bigint[] = [];
       let trackEnded = false;
       let errored: Error | null = null;
 
       let trackEndCount = 0;
-      backend.on("frame", (buf: Buffer) => frames.push(buf));
+      backend.on("frame", (buf: Buffer) => {
+        frames.push(buf);
+        frameStamps.push(process.hrtime.bigint());
+      });
       backend.on("trackEnd", () => {
         trackEnded = true;
         trackEndCount += 1;
@@ -100,7 +104,24 @@ describe("RustAudioBackend 端到端", () => {
       expect(frames.length, `Opus 帧数量过少: ${frames.length}`).toBeGreaterThan(40);
       const first = frames[0];
       expect(first.length, "Opus 首帧不应为空").toBeGreaterThan(0);
-      console.log(`[smoke] 收到 ${frames.length} 个 Opus 帧，首帧 ${first.length} 字节`);
+
+      // 帧节拍质量：20ms 帧必须以 ~20ms 间隔到达。慢于实时供帧会让 TS 端
+      // 持续欠载产生爆音（回归：Windows 定时器 15.625ms 分辨率曾把节拍
+      // 量化成 31.25ms，供帧速度仅实时 64%）。均值上限收紧到 23ms 以便
+      // 该回归必然失败；max 留余量容忍测试机负载。
+      const gaps: number[] = [];
+      for (let i = 1; i < frameStamps.length; i++) {
+        gaps.push(Number(frameStamps[i] - frameStamps[i - 1]) / 1e6);
+      }
+      const meanGap = gaps.reduce((a, b) => a + b, 0) / (gaps.length || 1);
+      const maxGap = Math.max(...gaps, 0);
+      expect(meanGap, `帧间隔均值 ${meanGap.toFixed(1)}ms 应接近 20ms（供帧慢于实时=爆音）`).toBeLessThan(23);
+      expect(maxGap, `帧间隔最大 ${maxGap.toFixed(1)}ms`).toBeLessThan(80);
+
+      console.log(
+        `[smoke] 收到 ${frames.length} 个 Opus 帧，首帧 ${first.length} 字节，` +
+          `帧间隔 mean=${meanGap.toFixed(1)}ms max=${maxGap.toFixed(1)}ms`,
+      );
     },
     15000,
   );

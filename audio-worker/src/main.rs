@@ -147,6 +147,25 @@ fn parse_args() -> (String, String) {
     (port, ffmpeg)
 }
 
+// Windows 系统定时器默认分辨率 15.625ms，会把 20ms 的帧节拍量化成 31.25ms
+// （每帧慢 11ms → 供帧速度只有实时的 64% → TS 端持续欠载爆音）。libuv 在
+// Node 侧会调 timeBeginPeriod(1) 提升 resolution，tokio 不会——必须在 worker
+// 里自己做（实测：不调用时帧间隔 31.1ms，调用后 20.0ms）。
+#[cfg(windows)]
+#[link(name = "winmm")]
+extern "system" {
+    fn timeBeginPeriod(period: u32) -> u32;
+}
+
+fn raise_timer_resolution() {
+    #[cfg(windows)]
+    unsafe {
+        timeBeginPeriod(1);
+    }
+    #[cfg(not(windows))]
+    {}
+}
+
 fn new_encoder() -> Encoder {
     let mut enc = Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Voip)
         .expect("创建 Opus 编码器失败（opus-codec）");
@@ -261,12 +280,13 @@ User-Agent: {}
 // ---- 帧协议 ----
 
 async fn write_frame(writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, type_byte: u8, payload: &[u8]) {
+    // 头 + 载荷合并为单次写：单 syscall、单 TCP 段，配合 NODELAY 杜绝拆包
+    let mut buf = Vec::with_capacity(5 + payload.len());
+    buf.push(type_byte);
+    buf.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    buf.extend_from_slice(payload);
     let mut w = writer.lock().await;
-    let mut hdr = [0u8; 5];
-    hdr[0] = type_byte;
-    hdr[1..5].copy_from_slice(&(payload.len() as u32).to_be_bytes());
-    let _ = w.write_all(&hdr).await;
-    let _ = w.write_all(payload).await;
+    let _ = w.write_all(&buf).await;
     let _ = w.flush().await;
 }
 
@@ -662,6 +682,8 @@ async fn encode_and_send(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    raise_timer_resolution();
+
     // Linux 下尽力提升调度优先级（renice 负值需要 CAP_SYS_NICE，失败静默）
     #[cfg(unix)]
     {
@@ -680,6 +702,9 @@ async fn main() -> Result<()> {
     eprintln!("LISTENING {}", local.port());
 
     let (stream, _) = listener.accept().await?;
+    // 关闭 Nagle：20ms 小帧流不允许攒批（头/负载合并写 + NODELAY，
+    // 否则小包与延迟 ACK 交互可能引入簇状到达抖动）
+    stream.set_nodelay(true)?;
     let (mut rd, wr) = stream.into_split();
     let session = Arc::new(Mutex::new(Session::new()));
     let notify = Arc::new(Notify::new());

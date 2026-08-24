@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import type { Readable } from "node:stream";
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
@@ -12,6 +14,8 @@ import type { Logger } from "../../logger.js";
 import type { IAudioBackend, BackendState, PlayPcmOptions } from "./audio-backend.js";
 
 const require = createRequire(import.meta.url);
+// ESM 下 __dirname 不存在（项目 "type": "module"），裸用会在生产模式崩溃
+const __dirname = dirname(fileURLToPath(import.meta.url));
 // 复用仓库现有的 ffmpeg-static 二进制，传给 Worker 使用。
 const ffmpegStatic: string | null = require("ffmpeg-static");
 
@@ -155,6 +159,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   private connect(port: number): void {
     const sock = net.createConnection({ host: "127.0.0.1", port });
     this.socket = sock;
+    sock.setNoDelay(true); // 20ms 帧流禁 Nagle，防簇状到达
     sock.on("connect", () => {
       this.connected = true;
       this.logger.info({ port }, "已连接 audio-worker");
