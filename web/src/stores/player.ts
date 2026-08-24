@@ -10,6 +10,8 @@ export interface Song {
   duration: number;
   coverUrl: string;
   platform: 'netease' | 'qq' | 'bilibili' | 'youtube';
+  /** 播放历史里由谁点歌（仅历史接口返回） */
+  requestedBy?: string;
 }
 
 export interface BotStatus {
