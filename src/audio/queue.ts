@@ -137,6 +137,46 @@ export class PlayQueue {
     return removed;
   }
 
+  /**
+   * Fork: manually reorder the queue (drag & drop in the WebUI / !reorder).
+   * Remaps currentIndex plus the derived index sets (playedIndices, history,
+   * forwardStack) so random history and reversible prev/next stay coherent.
+   */
+  reorder(fromIndex: number, toIndex: number): boolean {
+    if (
+      fromIndex < 0 ||
+      fromIndex >= this.songs.length ||
+      toIndex < 0 ||
+      toIndex >= this.songs.length ||
+      fromIndex === toIndex
+    ) {
+      return false;
+    }
+
+    const [moved] = this.songs.splice(fromIndex, 1);
+    this.songs.splice(toIndex, 0, moved);
+
+    if (this.currentIndex === fromIndex) {
+      this.currentIndex = toIndex;
+    } else if (fromIndex < this.currentIndex && toIndex >= this.currentIndex) {
+      this.currentIndex--;
+    } else if (fromIndex > this.currentIndex && toIndex <= this.currentIndex) {
+      this.currentIndex++;
+    }
+
+    const remap = (idx: number): number => {
+      if (idx === fromIndex) return toIndex;
+      if (fromIndex < idx && idx <= toIndex) return idx - 1;
+      if (toIndex <= idx && idx < fromIndex) return idx + 1;
+      return idx;
+    };
+    this.playedIndices = new Set([...this.playedIndices].map(remap));
+    this.history = this.history.map(remap);
+    this.forwardStack = this.forwardStack.map(remap);
+
+    return true;
+  }
+
   clear(): void {
     this.songs = [];
     this.currentIndex = -1;

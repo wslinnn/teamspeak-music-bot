@@ -743,3 +743,35 @@ describe("PlayQueue", () => {
     });
   });
 });
+
+describe("PlayQueue reorder (fork)", () => {
+  it("moves song from front to back", () => {
+    const queue = new PlayQueue();
+    for (const id of ["a", "b", "c"]) queue.add(makeSong(id));
+    queue.play();
+
+    const ok = queue.reorder(0, 2);
+    expect(ok).toBe(true);
+    expect(queue.list().map((s) => s.id)).toEqual(["b", "c", "a"]);
+    expect(queue.getCurrentIndex()).toBe(2);
+  });
+
+  it("moves song from back to front", () => {
+    const queue = new PlayQueue();
+    for (const id of ["a", "b", "c"]) queue.add(makeSong(id));
+    queue.playAt(1);
+
+    const ok = queue.reorder(2, 0);
+    expect(ok).toBe(true);
+    expect(queue.list().map((s) => s.id)).toEqual(["c", "a", "b"]);
+    expect(queue.getCurrentIndex()).toBe(2);
+  });
+
+  it("rejects out-of-range or equal indices", () => {
+    const queue = new PlayQueue();
+    queue.add(makeSong("a"));
+    expect(queue.reorder(0, 5)).toBe(false);
+    expect(queue.reorder(-1, 0)).toBe(false);
+    expect(queue.reorder(0, 0)).toBe(false);
+  });
+});
