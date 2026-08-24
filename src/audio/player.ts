@@ -754,9 +754,42 @@ export class AudioPlayer extends EventEmitter {
       return Buffer.from(pcm);
     }
 
-    const out = Buffer.alloc(pcm.length);
-    // Most frames are outside the short attack/release windows. Preserve the
-    // old constant-factor hot path instead of doing interpolation per sample.
+    const out = Buffer.allocUnsafe(pcm.length);
+    // PCM is s16le: operate through Int16Array views instead of per-sample
+    // Buffer.readInt16LE/writeInt16LE calls (each a V8→C++ boundary crossing,
+    // ~4x slower on this hot 96k-samples/sec loop). Node's pooled Buffers are
+    // 8-byte aligned and frames are even-sized, but guard anyway and fall
+    // back to the Buffer path if an odd offset ever slips through.
+    if (pcm.byteOffset % 2 === 0 && out.byteOffset % 2 === 0) {
+      const src = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length / 2);
+      const dst = new Int16Array(out.buffer, out.byteOffset, out.length / 2);
+      const clamp = (sample: number): number =>
+        sample > 32767 ? 32767 : sample < -32768 ? -32768 : sample;
+
+      // Most frames are outside the short attack/release windows: constant
+      // factor, no per-sample interpolation.
+      if (startFactor === endFactor) {
+        for (let i = 0; i < src.length; i++) {
+          dst[i] = clamp(Math.round(src[i] * startFactor));
+        }
+        return out;
+      }
+
+      // Stereo s16le: one gain per L/R pair so a ramp never creates a tiny
+      // channel imbalance, spanning the whole 20 ms frame.
+      const stereoFrames = Math.max(1, Math.ceil(src.length / 2));
+      for (let f = 0; f < stereoFrames; f++) {
+        const progress = stereoFrames === 1 ? 0 : f / (stereoFrames - 1);
+        const factor = startFactor + (endFactor - startFactor) * progress;
+        const base = f * 2;
+        for (let i = base; i < base + 2 && i < src.length; i++) {
+          dst[i] = clamp(Math.round(src[i] * factor));
+        }
+      }
+      return out;
+    }
+
+    // Misaligned-buffer fallback (identical math, Buffer accessors).
     if (startFactor === endFactor) {
       for (let i = 0; i < pcm.length; i += 2) {
         const sample = Math.round(pcm.readInt16LE(i) * startFactor);
@@ -764,9 +797,6 @@ export class AudioPlayer extends EventEmitter {
       }
       return out;
     }
-
-    // PCM is fixed at stereo s16le. Use one gain for each L/R pair so a ramp
-    // never creates a tiny channel imbalance, and span the whole 20 ms frame.
     const stereoFrames = Math.max(1, Math.ceil(pcm.length / 4));
     for (let i = 0; i < pcm.length; i += 2) {
       const frameIndex = Math.floor(i / 4);
