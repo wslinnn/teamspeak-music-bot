@@ -39,6 +39,12 @@
         @add="store.addSong(song)"
       />
     </div>
+
+    <div v-if="!loading && hasMore" class="mt-4 flex justify-center">
+      <BaseButton :loading="loadingMore" :disabled="loadingMore" @click="loadMore">
+        加载更多
+      </BaseButton>
+    </div>
   </div>
 </template>
 
@@ -50,11 +56,17 @@ import { usePlayerStore, type Song } from '../stores/player.js';
 import SongCard from '../components/SongCard.vue';
 import SkeletonLoader from '../components/common/SkeletonLoader.vue';
 import EmptyState from '../components/common/EmptyState.vue';
+import BaseButton from '../components/common/BaseButton.vue';
 
 const store = usePlayerStore();
 
+const PAGE_SIZE = 50;
+const MAX_HISTORY = 1000;
+
 const history = ref<Song[]>([]);
 const loading = ref(true);
+const loadingMore = ref(false);
+const hasMore = ref(false);
 const query = ref('');
 
 const filteredHistory = computed(() => {
@@ -65,6 +77,16 @@ const filteredHistory = computed(() => {
   );
 });
 
+async function fetchHistory(limit: number): Promise<Song[]> {
+  const res = await http.get(`/api/player/${store.activeBotId}/history`, {
+    params: { limit },
+  });
+  const list = res.data.history ?? [];
+  // 返回条数达到请求上限且未到渲染上限时，可能还有更早的记录
+  hasMore.value = list.length >= limit && limit < MAX_HISTORY;
+  return list;
+}
+
 async function loadHistory() {
   if (!store.activeBotId) {
     history.value = [];
@@ -73,13 +95,25 @@ async function loadHistory() {
   }
   loading.value = true;
   try {
-    const res = await http.get(`/api/player/${store.activeBotId}/history`);
-    history.value = res.data.history ?? [];
+    history.value = await fetchHistory(PAGE_SIZE);
   } catch (err) {
     console.warn('Failed to load history:', err);
     history.value = [];
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadMore() {
+  if (loadingMore.value || !store.activeBotId) return;
+  loadingMore.value = true;
+  try {
+    const next = Math.min(history.value.length + 100, MAX_HISTORY);
+    history.value = await fetchHistory(next);
+  } catch (err) {
+    console.warn('Failed to load more history:', err);
+  } finally {
+    loadingMore.value = false;
   }
 }
 
