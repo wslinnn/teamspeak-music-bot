@@ -56,7 +56,7 @@ function onVisibilityChange() {
 }
 
 onMounted(() => {
-  authStore.checkAuthEnabled().catch((err) => console.warn('checkAuthEnabled failed:', err));
+  authStore.init().catch((err) => console.warn('auth init failed:', err));
   playerStore.loadTheme();
   connect();
   playerStore.fetchBots();

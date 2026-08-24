@@ -45,7 +45,7 @@
               <span v-else class="text-[11px] px-1.5 py-px rounded font-medium shrink-0 bg-hover-bg text-text-tertiary">离线</span>
             </button>
             <button
-              v-if="authStore.isAdmin"
+              v-if="!authStore.isGuest"
               class="shrink-0 p-1.5 px-2 rounded-[var(--radius-sm)] text-[15px] opacity-40 transition-opacity duration-[var(--transition-fast)] cursor-pointer hover:opacity-100 hover:bg-hover-bg"
               :class="{ 'text-green-500 opacity-90': bot.connected }"
               :title="bot.connected ? `停止 ${bot.name}` : `启动 ${bot.name}`"
@@ -65,16 +65,16 @@
       </button>
       <!-- Desktop-only auth controls -->
       <div class="hidden md:flex items-center gap-4">
-        <RouterLink v-if="authStore.authEnabled && !authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
+        <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
           登录
         </RouterLink>
-        <RouterLink v-if="authStore.isAdmin" to="/settings" class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100">
+        <RouterLink v-if="!authStore.isGuest" to="/settings" class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100">
           <Icon icon="mdi:cog" />
         </RouterLink>
         <div v-if="authStore.isAuthenticated" class="flex items-center gap-2 ml-1 pl-3 border-l border-border-color">
-          <div class="flex items-center gap-1.5 text-sm text-text-secondary">
-            <Icon :icon="authStore.isAdmin ? 'mdi:shield-account' : 'mdi:account'" class="text-lg" />
-            <span>{{ authStore.isAdmin ? '管理员' : '用户' }}</span>
+          <div class="flex items-center gap-1.5 text-sm text-text-secondary" :title="authStore.roleLabel">
+            <Icon :icon="authStore.isAdmin ? 'mdi:shield-account' : authStore.isGuest ? 'mdi:walk' : 'mdi:account'" class="text-lg" />
+            <span>{{ authStore.username }}</span>
           </div>
           <button class="text-[18px] opacity-50 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" title="退出登录" @click="handleLogout">
             <Icon icon="mdi:logout" />
@@ -112,7 +112,7 @@
           <Icon icon="mdi:server" class="mr-3" /> 服务器
         </button>
         <RouterLink
-          v-if="authStore.isAdmin"
+          v-if="!authStore.isGuest"
           to="/settings"
           class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg"
           active-class="opacity-100 !text-primary bg-[rgba(51,94,234,0.1)]"
@@ -124,7 +124,7 @@
         <!-- Mobile auth section -->
         <div class="mt-2 pt-2 border-t border-border-color">
           <RouterLink
-            v-if="authStore.authEnabled && !authStore.isAuthenticated"
+            v-if="!authStore.isAuthenticated"
             to="/login"
             class="flex items-center justify-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-semibold bg-primary text-white transition-all duration-[var(--transition-fast)] hover:brightness-110"
             @click="mobileMenuOpen = false"
@@ -132,10 +132,10 @@
             <Icon icon="mdi:login" class="mr-3" /> 登录
           </RouterLink>
 
-          <div v-if="authStore.authEnabled && authStore.isAuthenticated" class="flex items-center justify-between px-4 py-3">
-            <div class="flex items-center gap-2 text-[15px] font-medium text-text-secondary">
-              <Icon :icon="authStore.isAdmin ? 'mdi:shield-account' : 'mdi:account'" class="text-lg" />
-              <span>{{ authStore.isAdmin ? '管理员' : '用户' }}</span>
+          <div v-if="authStore.isAuthenticated" class="flex items-center justify-between px-4 py-3">
+            <div class="flex items-center gap-2 text-[15px] font-medium text-text-secondary" :title="authStore.roleLabel">
+              <Icon :icon="authStore.isAdmin ? 'mdi:shield-account' : authStore.isGuest ? 'mdi:walk' : 'mdi:account'" class="text-lg" />
+              <span>{{ authStore.username }} · {{ authStore.roleLabel }}</span>
             </div>
             <button
               class="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-md)] text-[13px] font-medium opacity-60 transition-all duration-[var(--transition-fast)] hover:opacity-100 hover:bg-hover-bg"

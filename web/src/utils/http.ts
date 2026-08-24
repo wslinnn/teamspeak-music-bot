@@ -8,12 +8,21 @@ export const http: AxiosInstance = axios.create({
   withCredentials: true,
 });
 
+// 会话相关端点自行处理 401（登录失败内联提示 / 初始化流程引导），不走全局跳转
+const selfHandled401 = new Set([
+  '/api/session/needs-setup',
+  '/api/session/me',
+  '/api/session/login',
+  '/api/session/guest',
+  '/api/session/setup',
+]);
+
 http.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && !selfHandled401.has(error.config?.url ?? '')) {
       const authStore = useAuthStore();
-      authStore.logout();
+      authStore.clearSession();
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

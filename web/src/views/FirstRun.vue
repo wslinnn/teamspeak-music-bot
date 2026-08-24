@@ -2,43 +2,33 @@
   <div class="flex min-h-screen items-center justify-center bg-surface">
     <div class="w-full max-w-[400px] rounded-xl bg-surface-elevated p-10 shadow-xl">
       <h1 class="mb-2 text-center text-[28px] font-bold text-foreground">欢迎使用 TSMusicBot</h1>
-      <p class="mb-8 text-center text-sm text-foreground-muted">请设置管理密码和普通用户密码</p>
+      <p class="mb-8 text-center text-sm text-foreground-muted">创建首位管理员账号以开始使用</p>
       <form @submit.prevent="handleSetup" class="flex flex-col gap-4">
         <input
-          v-model="adminPassword"
-          type="password"
-          aria-label="管理密码"
+          v-model="username"
+          type="text"
+          aria-label="管理员用户名"
           class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
-          placeholder="管理密码"
-          autocomplete="new-password"
+          placeholder="用户名（3-32 位字母/数字/_-.）"
+          autocomplete="username"
           :disabled="authStore.loading"
           autofocus
         />
         <input
-          v-model="confirmAdminPassword"
+          v-model="password"
           type="password"
-          aria-label="确认管理密码"
+          aria-label="密码"
           class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
-          placeholder="确认管理密码"
-          autocomplete="new-password"
-          :disabled="authStore.loading"
-        />
-        <div class="h-px bg-border-color my-1" />
-        <input
-          v-model="userPassword"
-          type="password"
-          aria-label="普通用户密码"
-          class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
-          placeholder="普通用户密码"
+          placeholder="密码（至少 8 位）"
           autocomplete="new-password"
           :disabled="authStore.loading"
         />
         <input
-          v-model="confirmUserPassword"
+          v-model="confirmPassword"
           type="password"
-          aria-label="确认普通用户密码"
+          aria-label="确认密码"
           class="w-full rounded-lg border border-border-default bg-surface px-4 py-3 text-base text-foreground outline-none transition-colors focus:border-primary disabled:opacity-60"
-          placeholder="确认普通用户密码"
+          placeholder="确认密码"
           autocomplete="new-password"
           :disabled="authStore.loading"
         />
@@ -60,40 +50,28 @@ import BaseButton from '../components/common/BaseButton.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
-const adminPassword = ref('');
-const confirmAdminPassword = ref('');
-const userPassword = ref('');
-const confirmUserPassword = ref('');
+const username = ref('');
+const password = ref('');
+const confirmPassword = ref('');
 const localError = ref('');
 
-const canSubmit = computed(() =>
-  adminPassword.value.length > 0 &&
-  userPassword.value.length > 0
-);
+const canSubmit = computed(() => username.value.length > 0 && password.value.length > 0);
 
 async function handleSetup() {
   localError.value = '';
-  if (!adminPassword.value || !userPassword.value) {
-    localError.value = '请输入管理密码和普通用户密码';
+  if (!/^[A-Za-z0-9_\-.]{3,32}$/.test(username.value)) {
+    localError.value = '用户名需 3-32 位字母/数字/_-.';
     return;
   }
-  if (adminPassword.value !== confirmAdminPassword.value) {
-    localError.value = '两次输入的管理密码不一致';
+  if (password.value.length < 8) {
+    localError.value = '密码至少需要 8 个字符';
     return;
   }
-  if (userPassword.value !== confirmUserPassword.value) {
-    localError.value = '两次输入的普通用户密码不一致';
+  if (password.value !== confirmPassword.value) {
+    localError.value = '两次输入的密码不一致';
     return;
   }
-  if (adminPassword.value.length < 4 || userPassword.value.length < 4) {
-    localError.value = '密码至少需要 4 个字符';
-    return;
-  }
-  if (adminPassword.value === userPassword.value) {
-    localError.value = '管理密码和普通用户密码不能相同';
-    return;
-  }
-  const success = await authStore.setup(adminPassword.value, userPassword.value);
+  const success = await authStore.setup(username.value, password.value);
   if (success) {
     router.push('/');
   }
