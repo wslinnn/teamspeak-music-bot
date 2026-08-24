@@ -126,6 +126,22 @@ export interface FavoritePlaylist {
   createdAt: string;
 }
 
+// Song favorites (fork): cross-client song favorites keyed by (songId, platform).
+export interface SongFavoriteEntry {
+  id?: number;
+  songId: string;
+  platform: string;
+  title: string;
+  artist: string;
+  coverUrl: string;
+  duration: number;
+}
+
+export interface SongFavoriteRecord extends SongFavoriteEntry {
+  id: number;
+  createdAt: string;
+}
+
 export interface BotDatabase {
   db: Database.Database;
   addPlayHistory(entry: PlayHistoryEntry): void;
@@ -144,6 +160,10 @@ export interface BotDatabase {
   removeFavorite(userId: string, playlistId: string, platform: string): boolean;
   getFavorites(userId: string): FavoritePlaylist[];
   isFavorited(userId: string, playlistId: string, platform: string): boolean;
+  addSongFavorite(entry: Omit<SongFavoriteEntry, "id">): void;
+  getSongFavorites(): SongFavoriteRecord[];
+  deleteSongFavorite(id: number): boolean;
+  isSongFavorite(songId: string, platform: string): boolean;
   // Saved queues (Feature 1) — upsert by (ownerId, name), capped.
   saveQueue(ownerId: string, name: string, songs: StoredSong[]): SavedQueue;
   listSavedQueues(ownerId: string, includeShared: boolean): SavedQueueMeta[];
@@ -292,6 +312,18 @@ function initTables(db: Database.Database): void {
       UNIQUE(userId, platform, playlistId)
     );
     CREATE INDEX IF NOT EXISTS idx_favorites_userId ON favorite_playlists(userId);
+
+    CREATE TABLE IF NOT EXISTS favorites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      songId TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      coverUrl TEXT NOT NULL,
+      duration INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_song_platform ON favorites(songId, platform);
 
     CREATE TABLE IF NOT EXISTS user_permissions (
       userId     TEXT NOT NULL,
@@ -451,6 +483,21 @@ export function createDatabase(dbPath: string): BotDatabase {
 
   const checkFavorited = db.prepare(`
     SELECT 1 FROM favorite_playlists WHERE userId = ? AND playlistId = ? AND platform = ?
+  `);
+
+  const insertSongFavorite = db.prepare(`
+    INSERT INTO favorites (songId, platform, title, artist, coverUrl, duration)
+    VALUES (@songId, @platform, @title, @artist, @coverUrl, @duration)
+  `);
+
+  const selectSongFavorites = db.prepare(`
+    SELECT * FROM favorites ORDER BY id DESC
+  `);
+
+  const deleteSongFavoriteStmt = db.prepare(`DELETE FROM favorites WHERE id = ?`);
+
+  const checkSongFavorite = db.prepare(`
+    SELECT 1 FROM favorites WHERE songId = ? AND platform = ? LIMIT 1
   `);
 
   // A corrupt/hand-edited songs blob must never throw into a route or the
@@ -631,6 +678,24 @@ export function createDatabase(dbPath: string): BotDatabase {
 
     isFavorited(userId, playlistId, platform) {
       const row = checkFavorited.get(userId, playlistId, platform);
+      return row !== undefined;
+    },
+
+    addSongFavorite(entry) {
+      insertSongFavorite.run(entry);
+    },
+
+    getSongFavorites() {
+      return selectSongFavorites.all() as SongFavoriteRecord[];
+    },
+
+    deleteSongFavorite(id) {
+      const result = deleteSongFavoriteStmt.run(id);
+      return result.changes > 0;
+    },
+
+    isSongFavorite(songId, platform) {
+      const row = checkSongFavorite.get(songId, platform);
       return row !== undefined;
     },
 

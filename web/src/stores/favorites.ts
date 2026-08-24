@@ -21,7 +21,7 @@ export const useFavoritesStore = defineStore('favorites', () => {
   async function fetchFavorites() {
     loading.value = true;
     try {
-      const res = await http.get('/api/favorites');
+      const res = await http.get('/api/song-favorites');
       favorites.value = res.data.favorites ?? [];
     } catch (err) {
       console.warn('fetchFavorites failed:', err);
@@ -41,7 +41,7 @@ export const useFavoritesStore = defineStore('favorites', () => {
   }) {
     const toast = useToast();
     try {
-      await http.post('/api/favorites', {
+      await http.post('/api/song-favorites', {
         songId: song.id,
         platform: song.platform,
         title: song.name,
@@ -60,7 +60,7 @@ export const useFavoritesStore = defineStore('favorites', () => {
   async function removeFavorite(id: number) {
     const toast = useToast();
     try {
-      await http.delete(`/api/favorites/${id}`);
+      await http.delete(`/api/song-favorites/${id}`);
       await fetchFavorites();
       toast.success('已取消收藏');
     } catch (err) {
