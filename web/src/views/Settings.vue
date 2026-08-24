@@ -39,6 +39,8 @@
         />
 
         <SettingsBehavior v-if="activeTab === 'behavior'" />
+
+        <SettingsPermissions v-if="activeTab === 'permissions'" />
       </template>
     </SettingsLayout>
 
@@ -123,30 +125,39 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
 import { usePlayerStore, type BotStatus } from '../stores/player';
 import { useToast } from '../composables/useToast';
+import { useAuthStore } from '../stores/auth';
 import SettingsLayout from '../components/settings/SettingsLayout.vue';
 import SettingsTheme from '../components/settings/SettingsTheme.vue';
 import SettingsGeneral from '../components/settings/SettingsGeneral.vue';
 import SettingsBots from '../components/settings/SettingsBots.vue';
 import SettingsPlatforms from '../components/settings/SettingsPlatforms.vue';
 import SettingsBehavior from '../components/settings/SettingsBehavior.vue';
+import SettingsPermissions from '../components/settings/SettingsPermissions.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import BaseButton from '../components/common/BaseButton.vue';
 import BaseToggle from '../components/common/BaseToggle.vue';
 
 const store = usePlayerStore();
 const toast = useToast();
+const authStore = useAuthStore();
 
-const tabs = [
-  { key: 'general', label: '通用设置', icon: 'mdi:cog' },
-  { key: 'bots', label: '机器人管理', icon: 'mdi:robot' },
-  { key: 'platforms', label: '音乐账号', icon: 'mdi:music-box' },
-  { key: 'behavior', label: '行为设置', icon: 'mdi:tune' },
-];
+const tabs = computed(() => {
+  const list = [
+    { key: 'general', label: '通用设置', icon: 'mdi:cog' },
+    { key: 'bots', label: '机器人管理', icon: 'mdi:robot' },
+    { key: 'platforms', label: '音乐账号', icon: 'mdi:music-box' },
+    { key: 'behavior', label: '行为设置', icon: 'mdi:tune' },
+  ];
+  if (authStore.isAdmin) {
+    list.push({ key: 'permissions', label: '权限', icon: 'mdi:shield-key' });
+  }
+  return list;
+});
 
 // ── General settings state ──
 const currentQuality = ref('exhigh');
