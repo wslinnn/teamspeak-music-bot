@@ -6,6 +6,8 @@
 >
 > **深度复查结论（2026-08-24，第二日）**：豆包实现 + 首轮修复经逐行复查又发现并修复 4 处问题——①error/trackEnd 双事件（上层双触发跳两首）②启动期静音帧灌水（污染零产出判定、时间线先于真实数据）③终态判定记录侧竞态（EOF 早于帧消费时误报，连续 3 轮测试验证根除）④CDN Referer/UA 头缺失（rust 后端播在线源会被拒）。终态判定设计已固化为不变量：**每个 play 会话在缓冲排空的转换点恰好发一个终态事件（trackEnd 或 error）**。
 >
+> **逐行对账结论（2026-08-24，125cb32）**：以 player.ts 全部 865 行为基准逐条映射到 Rust 路径，发现并补齐 6 项缺失语义（卡死看门狗 #89、普通模式欠载不发帧、C1 重挂 resume、外部流 error→onExternalEnd、连续失败熔断、孤儿 ffmpeg 双平台回收），编码器改跨曲复用。集成测试扩至 4 个（新增挂起源看门狗恢复用例），全量 1053/1053。**确认为有意偏差、不再对齐的项**：stop/切歌时 ffmpeg 直接 SIGKILL（node 为 SIGTERM→1.5s→SIGKILL；解码进程无落盘，立即杀更干净）；pause 时立即暂停外部生产者（node 靠 640KB 高水位被动背压；主动暂停更保守）；resume 后首帧 ≤20ms 延迟（node 重置 nextFrameTime 立即出帧）。
+>
 > **阶段4 完成情况（2026-08-24，b02d88f）**——rust 后端与 node 后端达成功能对等：
 > - ✅ pcm-feed（Spotify 外部 PCM）：Worker external 模式 + 'P' 帧 + Node 管道（断连缓冲 8MB，连接后按序冲刷），集成测试 144 帧、Worker 零 trackEnd（对齐 externalMode 语义）；修复重排 handle_play 引入的启动竞态（普通模式先 spawn 后原子置位）
 > - ✅ jdymusic PowerShell 下载回退：复用 player.ts 的判定/清理函数，Windows 下该 CDN 不再断流
