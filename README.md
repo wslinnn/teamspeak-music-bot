@@ -4,6 +4,8 @@
 
 <h1 align="center">TSMusicBot</h1>
 
+> ⚠️ **此分支已进入维护模式**：新版本开发与日常使用请切换到 [`dev` 分支](../../tree/dev)——基于上游 v1.13.0+ 底座（含多用户鉴权、酷狗/Jellyfin/本地音源、`!search` 等全部新功能），并保留本分支的全部自有功能（Tailwind 前端、频道树、队列拖拽、歌曲收藏、Docker 预构建发布）。本分支保留为存档，对应标签 `legacy-main-2026-08`。
+
 <p align="center">
   <strong>TeamSpeak 音乐机器人</strong> — 网易云音乐 + QQ 音乐 + 哔哩哔哩 + YouTube（可选），YesPlayMusic 风格 WebUI 控制面板
 </p>
