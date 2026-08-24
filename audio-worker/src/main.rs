@@ -33,6 +33,17 @@ struct Session {
     /// 是否存在进行中的播放会话：play 置 true；自然耗尽 / stop 置 false。
     /// 帧循环据此区分「会话刚耗尽 → 恰好发一次 trackEnd」与「空转 → 静默」。
     active: bool,
+    /// 本代会话已上报过 error 事件：置位后帧循环不再发 trackEnd。
+    /// Node 侧对 error 与 trackEnd 都会触发切歌，双事件会一次跳两首
+    /// （旧 node 后端两事件互斥，必须保持该不变量）。
+    /// read_loop 记录的待上报失败（零产出 / 读错误）。**不在 read_loop 直接发送**：
+    /// 本地文件解码极快时 EOF 可能早于帧循环消费任何数据，此刻 real_frames==0
+    /// 是误报。由帧循环在缓冲排空、会话转换的那一刻统一判定，保证每个 play
+    /// 会话恰好一个终态事件（trackEnd 或 error，天然互斥）。
+    pending_fail: Option<(String, String)>, // (code, msg)
+    /// 真实数据帧计数（不含欠载静音帧）：零产出失败判定的依据。
+    /// frames_played 含静音帧（时间线计数，供进度计算），不能用作产出判定。
+    real_frames: u64,
     volume: f64,
     // ducking（语音闪避）增益斜坡状态
     duck_start_gain: f64,
@@ -54,6 +65,8 @@ impl Session {
             ffmpeg_alive: false,
             paused: false,
             active: false,
+            pending_fail: None,
+            real_frames: 0,
             volume: 75.0,
             duck_start_gain: 1.0,
             duck_target_gain: 1.0,
@@ -254,15 +267,20 @@ async fn ffmpeg_read_loop(
             }
             if s.pcm.len() >= HIGH_WATER {
                 drop(s);
-                notify.notified().await;
+                // 200ms 超时兜底：stop 后帧循环不再排水，通知可能永不到来，
+                // 靠超时回环检查 generation，及时回收等待中的读任务。
+                let _ = tokio::time::timeout(Duration::from_millis(200), notify.notified()).await;
                 continue;
             }
         }
         tokio::select! {
-            r = stdout.read(&mut buf) => {
+            // 读超时兜底：stdout 停滞（源挂起等）时也能周期性回到循环头检查
+            // generation，让 stop/切歌及时杀掉子进程，避免僵尸 ffmpeg。
+            r = tokio::time::timeout(Duration::from_millis(200), stdout.read(&mut buf)) => {
                 match r {
-                    Ok(0) => break, // EOF：ffmpeg 自然结束
-                    Ok(n) => {
+                    Err(_elapsed) => continue,
+                    Ok(Ok(0)) => break, // EOF：ffmpeg 自然结束
+                    Ok(Ok(n)) => {
                         let mut s = session.lock().await;
                         if s.generation != gen {
                             let _ = child.start_kill();
@@ -270,8 +288,14 @@ async fn ffmpeg_read_loop(
                         }
                         s.pcm.extend_from_slice(&buf[..n]);
                     }
-                    Err(e) => {
-                        let _ = send_error(&writer, "ffmpeg_read", &e.to_string()).await;
+                    Ok(Err(e)) => {
+                        let mut s = session.lock().await;
+                        if s.generation == gen {
+                            // 记录待上报失败，由帧循环在会话转换时统一发出
+                            s.pending_fail =
+                                Some(("ffmpeg_read".to_string(), e.to_string()));
+                        }
+                        drop(s);
                         break;
                     }
                 }
@@ -279,7 +303,17 @@ async fn ffmpeg_read_loop(
             r = stderr.read(&mut stderr_buf), if !stderr_done => {
                 match r {
                     Ok(0) => stderr_done = true,
-                    Ok(n) => stderr_text.push_str(&String::from_utf8_lossy(&stderr_buf[..n])),
+                    Ok(n) => {
+                        stderr_text.push_str(&String::from_utf8_lossy(&stderr_buf[..n]));
+                        // 上界 64KB，防长播/重连风暴下无界增长（只留尾部供错误上报）
+                        if stderr_text.len() > 64 * 1024 {
+                            let mut start = stderr_text.len() - 32 * 1024;
+                            while !stderr_text.is_char_boundary(start) {
+                                start += 1;
+                            }
+                            stderr_text.drain(..start);
+                        }
+                    }
                     Err(_) => stderr_done = true,
                 }
             }
@@ -287,17 +321,14 @@ async fn ffmpeg_read_loop(
     }
 
     // stdout EOF：等待子进程退出，取出退出码用于错误研判。
+    // 只做记录、不发事件——此刻 pcm 缓冲可能还有大量未消费数据（本地文件
+    // 解码快于帧消耗），帧循环会在缓冲排空的会话转换点统一判定并发送。
     let status = child.wait().await;
     let mut s = session.lock().await;
     if s.generation == gen {
         s.ffmpeg_alive = false;
-    }
-    let produced = s.frames_played;
-    drop(s);
-    if let Ok(st) = status {
-        // 没有任何数据产出：无论是非零退出还是"零退出零产出"都视为异常，把 ffmpeg 的
-        // stderr 反馈给 Node，便于定位（比如路径问题、缺少协议等）。
-        if produced == 0 {
+        if let Ok(st) = status {
+            let code = st.code().unwrap_or(-1);
             let tail = stderr_text
                 .lines()
                 .filter(|l| !l.trim().is_empty())
@@ -308,16 +339,14 @@ async fn ffmpeg_read_loop(
                 .rev()
                 .collect::<Vec<_>>()
                 .join(" | ");
-            let _ = send_error(
-                &writer,
-                "ffmpeg_no_output",
-                &format!(
-                    "ffmpeg 退出码 {} 但 0 字节产出。stderr: {}",
-                    st.code().unwrap_or(-1),
-                    tail
-                ),
-            )
-            .await;
+            // 真实帧为 0 时才构成失败（在帧循环转换点复核，这里的 real_frames
+            // 只是初判，避免白白格式化消息）
+            if s.real_frames == 0 {
+                s.pending_fail = Some((
+                    "ffmpeg_no_output".to_string(),
+                    format!("ffmpeg 退出码 {code} 但 0 字节产出。stderr: {tail}"),
+                ));
+            }
         }
     }
 }
@@ -332,7 +361,9 @@ async fn stop_session(session: &Arc<Mutex<Session>>) {
     s.paused = false;
     // 会话标记失效：既避免 stop 误触发 trackEnd，也避免 play 切换窗口期的竞态。
     s.active = false;
+    s.pending_fail = None;
     s.frames_played = 0;
+    s.real_frames = 0;
 }
 
 async fn handle_play(
@@ -365,7 +396,9 @@ async fn handle_play(
         s.ffmpeg_alive = true;
         s.paused = false;
         s.active = true;
+        s.pending_fail = None;
         s.frames_played = 0;
+        s.real_frames = 0;
         s.seek_offset = seek;
         s.last_url = url.clone();
         s.last_dur = dur;
@@ -411,7 +444,7 @@ async fn frame_loop(
         };
 
         if gen != last_gen {
-            encoder = Some(new_encoder());
+            encoder = None; // 新曲目：丢弃旧编码器，首次出帧时惰性重建
             last_gen = gen;
         }
         if paused {
@@ -420,10 +453,16 @@ async fn frame_loop(
 
         // 取一帧 PCM / 判定结束 / 欠载补静音
         enum Tick {
-            Data(Vec<u8>),
-            /// 会话数据耗尽：本次播放自然结束，恰好上报一次 trackEnd。
+            /// 缓冲中的真实 PCM 帧。
+            Real(Vec<u8>),
+            /// 中途欠载的静音垫帧：保 20ms 时间线连续。
+            Silence,
+            /// 会话数据耗尽且正常：上报 trackEnd。
             JustEnded,
-            /// 无进行中的会话（尚未 play / 已结束 / 已 stop）：静默。
+            /// 会话数据耗尽且失败（零真实产出/读错误）：上报 error，不 trackEnd。
+            /// Node 侧对 error 与 trackEnd 都触发切歌，二者必须互斥。
+            Failed(String, String),
+            /// 无进行中的会话（尚未 play / 已结束 / 已 stop / 首个数据块未到）：静默。
             Idle,
         }
         let tick = {
@@ -434,47 +473,77 @@ async fn frame_loop(
                 if s.pcm.len() < LOW_WATER {
                     notify.notify_one();
                 }
-                Tick::Data(fb)
+                Tick::Real(fb)
             } else if !s.ffmpeg_alive {
+                // 缓冲已排空 + 源已结束：会话终态转换点，此刻判定失败与否
                 if s.active {
                     s.active = false;
-                    Tick::JustEnded
+                    match s.pending_fail.take() {
+                        Some((code, msg)) => Tick::Failed(code, msg),
+                        None => Tick::JustEnded,
+                    }
                 } else {
                     Tick::Idle
                 }
+            } else if s.real_frames == 0 && s.pcm.is_empty() {
+                // 首个数据块尚未到达：不发帧（与 node 后端一致，时间线从真实
+                // 数据开始）；否则坏源会先铺一串静音帧，污染零产出判定
+                Tick::Idle
             } else {
-                Tick::Data(vec![0u8; PCM_FRAME_BYTES]) // 欠载：补静音帧保连续
+                Tick::Silence // 中途欠载：补静音帧保连续
             }
         };
+
+        let base = volume_to_factor(volume);
+        let sf = base * dstart as f32;
+        let ef = base * dend as f32;
 
         match tick {
             Tick::JustEnded => {
                 send_event(&writer, "trackEnd").await;
             }
+            Tick::Failed(code, msg) => {
+                send_error(&writer, &code, &msg).await;
+            }
             Tick::Idle => {}
-            Tick::Data(fb) => {
-                if encoder.is_none() {
-                    encoder = Some(new_encoder());
-                }
-                let base = volume_to_factor(volume);
-                let sf = base * dstart as f32;
-                let ef = base * dend as f32;
-                let pcm_i16 = apply_gain(&fb, sf, ef);
-                match encoder.as_mut().unwrap().encode(&pcm_i16, &mut out_buf) {
-                    Ok(n) => {
-                        write_frame(&writer, b'F', &out_buf[..n]).await;
-                        let mut s = session.lock().await;
-                        s.frames_played += 1;
-                        if s.frames_played % 50 == 0 {
-                            let pos_ms =
-                                (s.seek_offset * 1000.0) as u64 + s.frames_played * FRAME_MS;
-                            send_progress(&writer, pos_ms).await;
-                        }
-                    }
-                    Err(e) => send_error(&writer, "opus_encode", &format!("{e:?}")).await,
-                }
+            Tick::Real(fb) => {
+                encode_and_send(&session, &writer, encoder.get_or_insert_with(new_encoder), &mut out_buf, fb, sf, ef, true).await;
+            }
+            Tick::Silence => {
+                let pcm = vec![0u8; PCM_FRAME_BYTES];
+                encode_and_send(&session, &writer, encoder.get_or_insert_with(new_encoder), &mut out_buf, pcm, sf, ef, false).await;
             }
         }
+    }
+}
+
+/// 增益→Opus 编码→回传 F 帧；真实帧单独计数（供"零产出"失败判定）。
+async fn encode_and_send(
+    session: &Arc<Mutex<Session>>,
+    writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    encoder: &mut Encoder,
+    out_buf: &mut [u8],
+    pcm: Vec<u8>,
+    start_factor: f32,
+    end_factor: f32,
+    is_real: bool,
+) {
+    let pcm_i16 = apply_gain(&pcm, start_factor, end_factor);
+    match encoder.encode(&pcm_i16, out_buf) {
+        Ok(n) => {
+            write_frame(writer, b'F', &out_buf[..n]).await;
+            let mut s = session.lock().await;
+            s.frames_played += 1;
+            if is_real {
+                s.real_frames += 1;
+            }
+            if s.frames_played % 50 == 0 {
+                let pos_ms = (s.seek_offset * 1000.0) as u64 + s.frames_played * FRAME_MS;
+                drop(s);
+                send_progress(writer, pos_ms).await;
+            }
+        }
+        Err(e) => send_error(writer, "opus_encode", &format!("{e:?}")).await,
     }
 }
 

@@ -62,9 +62,11 @@ describe("RustAudioBackend 端到端", () => {
       let trackEnded = false;
       let errored: Error | null = null;
 
+      let trackEndCount = 0;
       backend.on("frame", (buf: Buffer) => frames.push(buf));
       backend.on("trackEnd", () => {
         trackEnded = true;
+        trackEndCount += 1;
       });
       backend.on("error", (e: Error) => {
         errored = e;
@@ -90,11 +92,33 @@ describe("RustAudioBackend 端到端", () => {
         throw new Error(`收到 error 事件: ${err.message}`);
       }
       expect(trackEnded, "应收到 trackEnd").toBe(true);
+      // trackEnd 必须恰好一次：上层对 error/trackEnd 都触发切歌，重复会跳歌
+      expect(trackEndCount, "trackEnd 应恰好一次").toBe(1);
       // 1.5 秒音 ≈ 75 帧（20ms/帧）；允许启动延迟，至少 40 帧
       expect(frames.length, `Opus 帧数量过少: ${frames.length}`).toBeGreaterThan(40);
       const first = frames[0];
       expect(first.length, "Opus 首帧不应为空").toBeGreaterThan(0);
       console.log(`[smoke] 收到 ${frames.length} 个 Opus 帧，首帧 ${first.length} 字节`);
+    },
+    15000,
+  );
+
+  it(
+    "源不可用时只上报 error、不追发 trackEnd（双事件会双跳歌）",
+    async () => {
+      const backend = new RustAudioBackend(logger);
+      const events: string[] = [];
+      backend.on("trackEnd", () => events.push("trackEnd"));
+      backend.on("error", (e: Error) => events.push(`error:${e.message.slice(0, 40)}`));
+
+      backend.play(path.resolve("definitely_missing_audio_source.wav"), 0, 10);
+
+      // ffmpeg 派生→失败→退出需要一点时间
+      await new Promise((r) => setTimeout(r, 4000));
+
+      expect(events.some((e) => e.startsWith("error")), `应收到 error 事件: ${events}`).toBe(true);
+      expect(events.some((e) => e === "trackEnd"), `不应收到 trackEnd: ${events}`).toBe(false);
+      console.log("[smoke] 坏源事件序列:", events);
     },
     15000,
   );
