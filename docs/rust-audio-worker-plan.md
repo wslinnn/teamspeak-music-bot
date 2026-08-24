@@ -4,7 +4,16 @@
 > 关键修复：worker 帧循环空转 trackEnd bug（从连接起每 20ms 刷 trackEnd），改为三态（JustEnded 恰好一次 / Idle 静默）。
 > 待做（阶段4）：pcm-feed（Spotify 外部 PCM，当前 rust 后端明确报错回退 node）、LRU 磁盘缓存、neteq 自适应缓冲、Linux 调度优先级；阶段5：真实 TS 服务器 A/B 听感对比与灰度。
 >
-> **深度复查结论（2026-08-24，第二日）**：豆包实现 + 首轮修复经逐行复查又发现并修复 4 处问题——①error/trackEnd 双事件（上层双触发跳两首）②启动期静音帧灌水（污染零产出判定、时间线先于真实数据）③终态判定记录侧竞态（EOF 早于帧消费时误报，连续 3 轮测试验证根除）④CDN Referer/UA 头缺失（rust 后端播在线源会被拒）。另确认无害项：码率 128k vs node 端默认（A/B 待对齐）、jdymusic PowerShell 下载回退在 player.ts 内 rust 路径未覆盖（播放该 CDN 源时报错跳歌，阶段4 处理）。终态判定设计已固化为不变量：**每个 play 会话在缓冲排空的转换点恰好发一个终态事件（trackEnd 或 error）**。
+> **深度复查结论（2026-08-24，第二日）**：豆包实现 + 首轮修复经逐行复查又发现并修复 4 处问题——①error/trackEnd 双事件（上层双触发跳两首）②启动期静音帧灌水（污染零产出判定、时间线先于真实数据）③终态判定记录侧竞态（EOF 早于帧消费时误报，连续 3 轮测试验证根除）④CDN Referer/UA 头缺失（rust 后端播在线源会被拒）。终态判定设计已固化为不变量：**每个 play 会话在缓冲排空的转换点恰好发一个终态事件（trackEnd 或 error）**。
+>
+> **阶段4 完成情况（2026-08-24，b02d88f）**——rust 后端与 node 后端达成功能对等：
+> - ✅ pcm-feed（Spotify 外部 PCM）：Worker external 模式 + 'P' 帧 + Node 管道（断连缓冲 8MB，连接后按序冲刷），集成测试 144 帧、Worker 零 trackEnd（对齐 externalMode 语义）；修复重排 handle_play 引入的启动竞态（普通模式先 spawn 后原子置位）
+> - ✅ jdymusic PowerShell 下载回退：复用 player.ts 的判定/清理函数，Windows 下该 CDN 不再断流
+> - ✅ 码率对齐：`Bitrate::Auto` 与 @discordjs/opus 默认一致（实测同素材 ~101kbps）
+> - ✅ Linux 调度优先级：cfg(unix) libc::nice(-5)（需 CAP_SYS_NICE，失败静默）
+> - ⏭️ **neteq（跳过）**：方案本定位"择机优化"；当前 VecDeque + 绝对时间节拍 + 欠载静音垫帧已覆盖其目标场景（我们是本地有序帧而非网络乱序包）。触发条件：实测出现可听欠载/爆音且水位调优无效时再评估。
+> - ⏭️ **LRU 磁盘缓存（跳过）**：node 后端同样没有（非对等缺口）；且"缓存 Opus 帧"会把音量增益烘焙进帧（增益施加在 PCM→编码之间），正确设计需缓存解码域音频再本地重放——留待重复播放占比实测偏高时立项。
+> - 剩余：阶段5 真实 TS 服务器 A/B 听感对比与灰度。
 
 > 分支：`feat/rust-audio-worker`
 > 依据：`docs/豆包的建议.txt`（系统优化分析报告）+ `docs/豆包的建议续.txt`（Rust 库调研与落地策略）
