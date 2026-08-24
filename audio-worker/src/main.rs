@@ -250,8 +250,21 @@ async fn send_event(writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, e: &st
     write_frame(writer, b'E', &ev_payload(e, None)).await;
 }
 
-async fn send_progress(writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, pos_ms: u64) {
-    write_frame(writer, b'E', &ev_payload("progress", Some(("pos_ms", json!(pos_ms))))).await;
+async fn send_progress(
+    writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    pos_ms: u64,
+    pcm_level: usize,
+) {
+    // 附带 pcm 缓冲水位（字节），Node 侧据此对外部 PCM 流做 pause/resume 闭环背压
+    let obj = json!({ "e": "progress", "pos_ms": pos_ms, "pcm": pcm_level });
+    write_frame(writer, b'E', obj.to_string().as_bytes()).await;
+}
+
+/// 暂停期间也周期上报缓冲水位（外部 PCM 模式下生产者不会停，
+/// Node 需要水位反馈来暂停 Readable，否则长时间暂停会撞 8MB 上限）
+async fn send_buffer_level(writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, pcm_level: usize) {
+    let obj = json!({ "e": "buffer", "pcm": pcm_level });
+    write_frame(writer, b'E', obj.to_string().as_bytes()).await;
 }
 
 async fn send_error(writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, code: &str, msg: &str) {
@@ -474,6 +487,7 @@ async fn frame_loop(
     let mut interval = tokio::time::interval(Duration::from_millis(FRAME_MS));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_gen = 0u64;
+    let mut paused_ticks: u64 = 0;
     let mut encoder: Option<Encoder> = None;
     let mut out_buf = vec![0u8; 4096];
 
@@ -482,11 +496,12 @@ async fn frame_loop(
         let now = Instant::now();
 
         // 快照本帧所需状态（ffmpeg_alive 在下方取帧时另行读取）
-        let (gen, paused, volume, dstart, dend) = {
+        let (gen, paused, external, volume, dstart, dend) = {
             let s = session.lock().await;
             (
                 s.generation,
                 s.paused,
+                s.external,
                 s.volume,
                 s.ducking_at(now),
                 s.ducking_at(now + Duration::from_millis(FRAME_MS)),
@@ -498,8 +513,18 @@ async fn frame_loop(
             last_gen = gen;
         }
         if paused {
+            // 外部 PCM 模式：暂停时生产者仍在喂入，每 500ms 上报水位供 Node 背压
+            if external && paused_ticks % 25 == 0 {
+                let level = {
+                    let s = session.lock().await;
+                    s.pcm.len()
+                };
+                send_buffer_level(&writer, level).await;
+            }
+            paused_ticks += 1;
             continue;
         }
+        paused_ticks = 0;
 
         // 取一帧 PCM / 判定结束 / 欠载补静音
         enum Tick {
@@ -609,8 +634,9 @@ async fn encode_and_send(
             }
             if s.frames_played % 50 == 0 {
                 let pos_ms = (s.seek_offset * 1000.0) as u64 + s.frames_played * FRAME_MS;
+                let level = s.pcm.len();
                 drop(s);
-                send_progress(writer, pos_ms).await;
+                send_progress(writer, pos_ms, level).await;
             }
         }
         Err(e) => send_error(writer, "opus_encode", &format!("{e:?}")).await,

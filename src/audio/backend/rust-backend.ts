@@ -78,6 +78,8 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   // 连接建立前缓冲的外部 PCM（边车在 Worker 启动期间就可能开始产出）
   private pcmPending: Buffer[] = [];
   private pcmPendingBytes = 0;
+  // 外部 PCM 生产者是否因背压被暂停
+  private producerPaused = false;
   // jdymusic PowerShell 下载回退
   private downloader: ChildProcess | null = null;
   private currentTempDir: string | null = null;
@@ -148,6 +150,11 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
       // external 会话再收到数据）
       for (const f of this.pending) sock.write(f);
       this.pending = [];
+      // Worker 重启后外部会话丢失（进程内状态不跨重启）：重发 external play，
+      // 使后续 P 帧重新生效，避免 Node 继续灌 PCM 而 Worker 静默丢弃
+      if (this.externalActive && this.externalStream) {
+        this.send({ c: "play", url: "", seek: 0, dur: 0, external: true });
+      }
       for (const p of this.pcmPending) sock.write(p);
       this.pcmPending = [];
       this.pcmPendingBytes = 0;
@@ -196,9 +203,13 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     if (e === "trackEnd") {
       this.state = "idle";
       this.emit("trackEnd");
-    } else if (e === "ready" || e === "progress") {
+    } else if (e === "ready" || e === "progress" || e === "buffer") {
       if (this.state === "idle") this.state = "playing";
-      // progress 仅用于内部计时，不对外暴露事件；如有需要可扩展
+      // 外部 PCM 闭环背压：按 Worker 上报的缓冲水位 pause/resume 生产者
+      // （对齐 player.ts 的高水位语义；长时间暂停不撞 8MB 上限）
+      if (typeof msg.pcm === "number") {
+        this.applyPcmBackpressure(msg.pcm);
+      }
     } else if (e === "error") {
       this.emit("error", new Error(`audio-worker: ${msg.code ?? "error"} ${msg.msg ?? ""}`));
     }
@@ -361,15 +372,38 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     this.externalStream = null;
     this.externalHandlers = null;
     this.externalActive = false;
+    this.producerPaused = false;
+  }
+
+  /** 按 Worker 上报的缓冲水位对外部 PCM 生产者做 pause/resume（高/低水位对齐 player.ts）。 */
+  private applyPcmBackpressure(level: number): void {
+    const st = this.externalStream;
+    if (!st || typeof (st as { pause?: unknown }).pause !== "function") return;
+    if (level > 640 * 1024 && !this.producerPaused) {
+      this.producerPaused = true;
+      st.pause();
+    } else if (level < 256 * 1024 && this.producerPaused) {
+      this.producerPaused = false;
+      st.resume();
+    }
   }
 
   pause(): void {
     this.state = "paused";
+    // 外部 PCM：即时暂停生产者（水位反馈是第二道保险），避免暂停期间缓冲堆积
+    if (this.externalStream && !this.producerPaused) {
+      this.producerPaused = true;
+      this.externalStream.pause();
+    }
     this.send({ c: "pause" });
   }
 
   resume(): void {
     this.state = "playing";
+    if (this.externalStream && this.producerPaused) {
+      this.producerPaused = false;
+      this.externalStream.resume();
+    }
     this.send({ c: "resume" });
   }
 
