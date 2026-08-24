@@ -21,6 +21,21 @@
           <button
             v-if="botQueue.length > 0"
             class="text-lg opacity-60 transition-opacity hover:opacity-100"
+            @click="openSaveModal"
+            title="保存当前队列为清单"
+          >
+            <Icon icon="mdi:content-save-outline" />
+          </button>
+          <button
+            class="text-lg opacity-60 transition-opacity hover:opacity-100"
+            @click="openListModal"
+            title="已存清单"
+          >
+            <Icon icon="mdi:playlist-music" />
+          </button>
+          <button
+            v-if="botQueue.length > 0"
+            class="text-lg opacity-60 transition-opacity hover:opacity-100"
             @click="clearAndStop"
             title="清空队列并停止播放"
           >
@@ -75,17 +90,89 @@
         </draggable>
       </div>
     </div>
+
+    <!-- Save queue modal -->
+    <BaseModal v-model="saveModalOpen" title="保存当前队列">
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold opacity-70 mb-1">清单名称</label>
+          <input
+            v-model="saveName"
+            class="input"
+            placeholder="例如：周末歌单"
+            maxlength="50"
+            @keyup.enter="saveQueue"
+          />
+        </div>
+        <BaseToggle v-model="saveShared" label="共享清单" hint="所有用户可见（否则仅自己可见）" />
+      </div>
+      <template #footer="{ close }">
+        <BaseButton variant="secondary" @click="close">取消</BaseButton>
+        <BaseButton :loading="savingQueue" :disabled="!saveName.trim()" @click="saveQueue">保存</BaseButton>
+      </template>
+    </BaseModal>
+
+    <!-- Saved queues list modal -->
+    <BaseModal v-model="listModalOpen" title="已存清单">
+      <div v-if="savedLoading" class="py-4">
+        <SkeletonLoader height="48px" class="mb-2" />
+        <SkeletonLoader height="48px" class="mb-2" />
+        <SkeletonLoader height="48px" />
+      </div>
+      <EmptyState v-else-if="savedQueues.length === 0" message="暂无已存清单" icon="mdi:playlist-music-outline" />
+      <div v-else class="flex flex-col gap-1 max-h-[50vh] overflow-y-auto">
+        <div
+          v-for="sq in savedQueues"
+          :key="sq.id"
+          class="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] hover:bg-hover-bg group"
+        >
+          <Icon icon="mdi:playlist-music" class="text-lg opacity-50 shrink-0" />
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium truncate">
+              {{ sq.name }}
+              <span
+                v-if="sq.shared"
+                class="text-[10px] font-semibold px-1 py-px rounded bg-primary/15 text-primary align-middle"
+              >共享</span>
+            </div>
+            <div class="text-xs text-text-tertiary">{{ sq.songCount }} 首</div>
+          </div>
+          <button class="text-sm px-2 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium bg-interactive-hover hover:bg-primary hover:text-white transition-colors" title="替换当前队列并播放" @click="loadQueue(sq, 'replace')">
+            加载
+          </button>
+          <button class="text-sm px-2 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium bg-interactive-hover hover:bg-primary hover:text-white transition-colors" title="追加到队列末尾" @click="loadQueue(sq, 'append')">
+            追加
+          </button>
+          <button class="text-base opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-text-tertiary hover:text-danger" title="删除" @click="deleteQueue(sq)">
+            <Icon icon="mdi:close" />
+          </button>
+        </div>
+      </div>
+    </BaseModal>
   </Teleport>
 </template>
 
 <script setup lang="ts">
-import { watch, computed } from 'vue';
+import { watch, computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import draggable from 'vuedraggable';
 import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
+import { useToast } from '../composables/useToast';
 import CoverArt from './CoverArt.vue';
 import FavoriteButton from './FavoriteButton.vue';
+import BaseModal from './common/BaseModal.vue';
+import BaseButton from './common/BaseButton.vue';
+import BaseToggle from './common/BaseToggle.vue';
+import SkeletonLoader from './common/SkeletonLoader.vue';
+import EmptyState from './common/EmptyState.vue';
+
+interface SavedQueue {
+  id: number;
+  name: string;
+  songCount: number;
+  shared: boolean;
+}
 
 const props = defineProps<{
   open: boolean;
@@ -130,6 +217,88 @@ async function clearAndStop() {
 async function onDragEnd(evt: { oldIndex: number; newIndex: number }) {
   if (evt.oldIndex === evt.newIndex) return;
   await store.reorderQueue(evt.oldIndex, evt.newIndex);
+}
+
+// ── Saved queues（受 设置→行为 的 savedQueuesEnabled 门控）──
+const toast = useToast();
+const saveModalOpen = ref(false);
+const saveName = ref('');
+const saveShared = ref(false);
+const savingQueue = ref(false);
+const listModalOpen = ref(false);
+const savedLoading = ref(false);
+const savedQueues = ref<SavedQueue[]>([]);
+
+function savedQueuesDisabledHint(err: unknown): string {
+  const status = (err as any)?.response?.status;
+  const msg = (err as any)?.response?.data?.error ?? '';
+  if (status === 403 || String(msg).includes('未启用')) {
+    return '此功能未启用：到 设置 → 行为设置 开启「保存/加载播放清单」';
+  }
+  return typeof msg === 'string' && msg ? msg : '操作失败';
+}
+
+function openSaveModal() {
+  saveName.value = '';
+  saveShared.value = false;
+  saveModalOpen.value = true;
+}
+
+async function saveQueue() {
+  if (!store.activeBotId || !saveName.value.trim()) return;
+  savingQueue.value = true;
+  try {
+    await http.post('/api/saved-queues', {
+      botId: store.activeBotId,
+      name: saveName.value.trim(),
+      shared: saveShared.value,
+    });
+    toast.success(`清单「${saveName.value.trim()}」已保存`);
+    saveModalOpen.value = false;
+  } catch (err) {
+    toast.error(savedQueuesDisabledHint(err));
+  } finally {
+    savingQueue.value = false;
+  }
+}
+
+async function openListModal() {
+  listModalOpen.value = true;
+  savedLoading.value = true;
+  try {
+    const res = await http.get('/api/saved-queues');
+    savedQueues.value = res.data.queues ?? [];
+  } catch (err) {
+    toast.error(savedQueuesDisabledHint(err));
+    savedQueues.value = [];
+  } finally {
+    savedLoading.value = false;
+  }
+}
+
+async function loadQueue(sq: SavedQueue, mode: 'replace' | 'append') {
+  if (!store.activeBotId) return;
+  try {
+    await http.post(`/api/saved-queues/${sq.id}/load`, {
+      botId: store.activeBotId,
+      mode,
+    });
+    await store.fetchQueue();
+    toast.success(mode === 'append' ? `已追加 ${sq.songCount} 首` : `已加载「${sq.name}」`);
+    listModalOpen.value = false;
+  } catch (err) {
+    toast.error(savedQueuesDisabledHint(err));
+  }
+}
+
+async function deleteQueue(sq: SavedQueue) {
+  if (!confirm(`删除清单「${sq.name}」？`)) return;
+  try {
+    await http.delete(`/api/saved-queues/${sq.id}`);
+    savedQueues.value = savedQueues.value.filter((q) => q.id !== sq.id);
+  } catch (err) {
+    toast.error(savedQueuesDisabledHint(err));
+  }
 }
 </script>
 
