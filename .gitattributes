@@ -1,1 +1,3 @@
 web/** merge=ours
+# 图标/manifest 是上游维护的静态资产（v1.12.0），跟随上游更新，不做 keep-ours
+web/public/** -merge

@@ -8,6 +8,15 @@
   <!-- 防止部署实例被搜索引擎收录（issue #128） -->
   <meta name="robots" content="noindex, nofollow">
   <title>TSMusicBot</title>
+  <!-- 图标放在 web/public/（Vite 拷到 dist 根）。ico + svg 双声明：支持的浏览器用矢量保清晰，
+       其余回退 ico；ico 必须是真实文件，否则 SPA 兜底会把 index.html 当 favicon 返回（issue #142）。 -->
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any">
+  <!-- iOS 主屏图标（iOS 自己切圆角，用全尺寸方图）；Android 走 manifest。 -->
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+  <!-- 与深色主题 --bg-primary 一致（应用默认从深色启动）。 -->
+  <meta name="theme-color" content="#222222">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
