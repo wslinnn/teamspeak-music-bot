@@ -14,7 +14,9 @@
           :class="getPlatformTailwindClass(song.platform)"
         >{{ getPlatformLabel(song.platform) }}</span>
       </div>
-      <div class="text-xs text-text-secondary">{{ song.artist }}</div>
+      <div class="text-xs text-text-secondary truncate">
+        {{ song.artist }}<span v-if="song.requestedBy" class="text-text-tertiary"> · 点歌 {{ song.requestedBy }}</span>
+      </div>
     </div>
     <div class="w-40 text-xs text-text-secondary truncate hidden md:block">{{ song.album }}</div>
     <div class="w-12 text-xs text-text-tertiary text-right hidden sm:block">{{ formatDuration(song.duration) }}</div>
