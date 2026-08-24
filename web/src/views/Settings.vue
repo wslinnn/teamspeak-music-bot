@@ -37,6 +37,8 @@
           @start-qr="startQrLogin"
           @save-cookie="saveCookie"
         />
+
+        <SettingsBehavior v-if="activeTab === 'behavior'" />
       </template>
     </SettingsLayout>
 
@@ -131,6 +133,7 @@ import SettingsTheme from '../components/settings/SettingsTheme.vue';
 import SettingsGeneral from '../components/settings/SettingsGeneral.vue';
 import SettingsBots from '../components/settings/SettingsBots.vue';
 import SettingsPlatforms from '../components/settings/SettingsPlatforms.vue';
+import SettingsBehavior from '../components/settings/SettingsBehavior.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import BaseButton from '../components/common/BaseButton.vue';
 import BaseToggle from '../components/common/BaseToggle.vue';
@@ -142,6 +145,7 @@ const tabs = [
   { key: 'general', label: '通用设置', icon: 'mdi:cog' },
   { key: 'bots', label: '机器人管理', icon: 'mdi:robot' },
   { key: 'platforms', label: '音乐账号', icon: 'mdi:music-box' },
+  { key: 'behavior', label: '行为设置', icon: 'mdi:tune' },
 ];
 
 // ── General settings state ──
