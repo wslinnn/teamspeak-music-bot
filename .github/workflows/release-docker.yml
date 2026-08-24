@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.2.3)'
+        description: 'Release tag (e.g. v2.1.0 or v2-beta.1)'
         required: true
         type: string
       draft:
@@ -60,10 +60,17 @@ jobs:
               git push origin "$TAG"
             fi
 
+            # beta/rc tags are marked as prerelease
+            PRERELEASE_FLAG=""
+            case "$TAG" in
+              *beta*|*rc*) PRERELEASE_FLAG="--prerelease" ;;
+            esac
+
             gh release create "$TAG" \
               --title "TSMusicBot $TAG" \
               --generate-notes \
-              $DRAFT_FLAG
+              $DRAFT_FLAG \
+              $PRERELEASE_FLAG
           fi
 
       - name: Upload tar.gz to Release
