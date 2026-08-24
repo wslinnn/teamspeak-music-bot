@@ -1,5 +1,9 @@
 # Rust 音频 Worker 重构 — 可行性评估与实施方案（v2）
 
+> ✅ **执行进度（2026-08-24）**：阶段1（IAudioBackend 抽象，094d220）、阶段2（Rust Worker 最小可用：TCP IPC + 外部 ffmpeg + opus-codec + 20ms 节拍 + 音量/闪避 + 背压，9814185）、阶段3（rust-backend 接入 + 工厂探测回退 + 保活自动重启 + dispose）全部完成。集成测试端到端通过（1.5s WAV → 78 帧 Opus + trackEnd），全量 1050/1050。默认 audioBackend=node 行为零变化。
+> 关键修复：worker 帧循环空转 trackEnd bug（从连接起每 20ms 刷 trackEnd），改为三态（JustEnded 恰好一次 / Idle 静默）。
+> 待做（阶段4）：pcm-feed（Spotify 外部 PCM，当前 rust 后端明确报错回退 node）、LRU 磁盘缓存、neteq 自适应缓冲、Linux 调度优先级；阶段5：真实 TS 服务器 A/B 听感对比与灰度。
+
 > 分支：`feat/rust-audio-worker`
 > 依据：`docs/豆包的建议.txt`（系统优化分析报告）+ `docs/豆包的建议续.txt`（Rust 库调研与落地策略）
 > 目标：在不重写 TS 协议栈、音源适配器、Web 前端、业务逻辑的前提下，将**音频管线**（ffmpeg 管理 + Opus 编码 + 20ms 帧计时 + 多级缓冲 + 故障隔离）下沉到独立的 Rust 进程，复用现有 `@honeybbq/teamspeak-client` 做 UDP 发包。
