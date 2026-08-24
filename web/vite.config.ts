@@ -16,5 +16,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        // 拆分 vendor：发版只更新业务 chunk，vendor 命中浏览器缓存
+        manualChunks: {
+          'vue-vendor': ['vue', 'vue-router', 'pinia'],
+          'http-vendor': ['axios'],
+        },
+      },
+    },
   },
 });
