@@ -1,86 +1,118 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { useSession } from '../composables/useSession.js';
-import { usePlayerStore } from '../stores/player.js';
+import { useAuthStore } from '../stores/auth';
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'home', component: () => import('../views/Home.vue') },
-    { path: '/search', name: 'search', component: () => import('../views/Search.vue') },
-    { path: '/library', name: 'library', component: () => import('../views/Library.vue') },
+    {
+      path: '/',
+      name: 'home',
+      component: () => import('../views/Home.vue'),
+    },
+    {
+      path: '/search',
+      name: 'search',
+      component: () => import('../views/Search.vue'),
+    },
     {
       path: '/playlist/:id',
       name: 'playlist',
       component: () => import('../views/Playlist.vue'),
-      meta: { kind: 'playlist' },
     },
     {
-      path: '/album/:id',
-      name: 'album',
-      component: () => import('../views/Playlist.vue'),
-      meta: { kind: 'album' },
+      path: '/lyrics',
+      name: 'lyrics',
+      component: () => import('../views/Lyrics.vue'),
+      meta: { hideNavbar: true },
     },
-    { path: '/lyrics', name: 'lyrics', component: () => import('../views/Lyrics.vue') },
-    { path: '/history', name: 'history', component: () => import('../views/History.vue') },
-    { path: '/saved-queues', name: 'saved-queues', component: () => import('../views/SavedQueues.vue') },
-    { path: '/settings', name: 'settings', component: () => import('../views/Settings.vue') },
-    { path: '/setup', name: 'setup', component: () => import('../views/Setup.vue') },
-    { path: '/bot/:id', name: 'bot', component: () => import('../views/BotRedirect.vue') },
-
-    // Auth views
-    { path: '/login', name: 'login', component: () => import('../views/Login.vue'), meta: { public: true } },
-    { path: '/first-run', name: 'first-run', component: () => import('../views/FirstRunSetup.vue'), meta: { public: true } },
+    {
+      path: '/history',
+      name: 'history',
+      component: () => import('../views/History.vue'),
+    },
+    {
+      path: '/favorites',
+      name: 'favorites',
+      component: () => import('../views/Favorites.vue'),
+    },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('../views/Settings.vue'),
+      meta: { requiresAdmin: true },
+    },
+    {
+      path: '/setup',
+      name: 'setup',
+      component: () => import('../views/Setup.vue'),
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/Login.vue'),
+    },
+    {
+      path: '/bot/:id',
+      name: 'bot',
+      component: () => import('../views/BotRedirect.vue'),
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/NotFound.vue'),
+    },
   ],
 });
 
-const PUBLIC_NAMES = new Set(['login', 'first-run']);
+router.beforeEach(async (to, from, next) => {
+  const authStore = useAuthStore();
 
-router.beforeEach(async (to) => {
-  const session = useSession();
-  if (!session.ready.value) {
-    await session.refresh();
-  }
-
-  if (session.needsSetup.value && to.name !== 'first-run') {
-    return { name: 'first-run' };
-  }
-  if (!session.needsSetup.value && to.name === 'first-run') {
-    return { name: 'home' };
+  // 404 始终放行
+  if (to.name === 'not-found') {
+    return next();
   }
 
-  if (PUBLIC_NAMES.has(to.name as string)) {
-    if (to.name === 'login' && session.isAuthenticated.value) {
-      return { name: 'home' };
-    }
-    return true;
-  }
-
-  if (!session.isAuthenticated.value) {
-    return { name: 'login', query: { next: to.fullPath } };
-  }
-
-  // Guests may never reach settings/setup, even by typing the URL.
-  const GUEST_BLOCKED = new Set(['settings', 'setup']);
-  if (session.isGuest.value && GUEST_BLOCKED.has(to.name as string)) {
-    return { name: 'home' };
-  }
-
-  // Navigation is allowed to proceed to `to` past here (auth/setup redirects above take precedence).
-  // Sync + preserve the dedicated-link scope carried by ?bot.
-  const store = usePlayerStore();
-  const qBot = typeof to.query.bot === 'string' && to.query.bot ? to.query.bot : null;
-  if (qBot) {
-    // URL carries a scope — set tentatively; App.vue's applyScopeFromQuery (after fetchBots) validates/clears it.
-    store.scopedBotId = qBot;
-    return true;
-  }
-  if (store.scopedBotId) {
-    // scoped, but this navigation dropped ?bot → re-attach so the lock survives in-app nav + refresh.
-    if (to.query.bot !== store.scopedBotId) {
-      return { path: to.path, query: { ...to.query, bot: store.scopedBotId }, hash: to.hash };
+  // 首次加载时检查后端状态
+  if (authStore.authEnabled === null) {
+    try {
+      await authStore.checkAuthEnabled();
+    } catch (err) {
+      console.warn('Failed to check auth status:', err);
+      return next();
     }
   }
-  return true;
+
+  // 需要初始化 → 引导到 /setup
+  if (authStore.needsSetup) {
+    return to.path === '/setup' ? next() : next({ path: '/setup' });
+  }
+
+  // 已初始化 → 不允许再访问 /setup
+  if (to.path === '/setup') {
+    return next({ path: '/' });
+  }
+
+  // 鉴权未开启 → 所有页面放行
+  if (authStore.authEnabled === false) {
+    return next();
+  }
+
+  // 已登录用户访问 /login → 重定向首页
+  if (to.path === '/login') {
+    return authStore.isAuthenticated ? next({ path: '/' }) : next();
+  }
+
+  // 强制所有用户先登录（除白名单外）
+  if (!authStore.isAuthenticated) {
+    return next({ path: '/login', query: { redirect: to.fullPath } });
+  }
+
+  // 管理员专属页
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    return next({ path: '/' });
+  }
+
+  next();
 });
 
 export default router;
