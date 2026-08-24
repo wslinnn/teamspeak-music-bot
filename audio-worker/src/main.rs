@@ -108,6 +108,29 @@ impl Session {
         let p = (elapsed / self.duck_dur_ms).clamp(0.0, 1.0);
         self.duck_start_gain + (self.duck_target_gain - self.duck_start_gain) * p
     }
+
+    /// 开始一次新播放会话：复位全部会话状态并自增代际号。
+    /// ffmpeg_alive 由调用方按模式传入——普通模式必须在 spawn 成功后、与
+    /// generation 同一把锁内置 true，否则帧循环会在窗口期看到
+    /// active && !alive 误发 trackEnd（外部模式本就无 ffmpeg）。
+    fn begin(&mut self, url: &str, seek: f64, dur: f64, external: bool) {
+        self.pcm.clear();
+        self.ffmpeg_alive = !external;
+        self.paused = false;
+        self.active = true;
+        self.external = external;
+        self.read_error = None;
+        self.eof_tail = None;
+        self.frames_played = 0;
+        self.real_frames = 0;
+        self.seek_offset = seek;
+        self.last_url = url.to_string();
+        self.last_dur = dur;
+        self.empty_ticks = 0;
+        self.kill_requested = false;
+        self.stall_ended = false;
+        self.generation += 1;
+    }
 }
 
 /// 解析命令行：--port=<p>（0=系统分配）与 --ffmpeg=<bin>（默认 "ffmpeg"）。
@@ -258,23 +281,6 @@ fn ev_payload(e: &str, extra: Option<(&str, Value)>) -> Vec<u8> {
 
 async fn send_event(writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, e: &str) {
     write_frame(writer, b'E', &ev_payload(e, None)).await;
-}
-
-async fn send_progress(
-    writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
-    pos_ms: u64,
-    pcm_level: usize,
-) {
-    // 附带 pcm 缓冲水位（字节），Node 侧据此对外部 PCM 流做 pause/resume 闭环背压
-    let obj = json!({ "e": "progress", "pos_ms": pos_ms, "pcm": pcm_level });
-    write_frame(writer, b'E', obj.to_string().as_bytes()).await;
-}
-
-/// 暂停期间也周期上报缓冲水位（外部 PCM 模式下生产者不会停，
-/// Node 需要水位反馈来暂停 Readable，否则长时间暂停会撞 8MB 上限）
-async fn send_buffer_level(writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, pcm_level: usize) {
-    let obj = json!({ "e": "buffer", "pcm": pcm_level });
-    write_frame(writer, b'E', obj.to_string().as_bytes()).await;
 }
 
 async fn send_error(writer: &Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>, code: &str, msg: &str) {
@@ -440,22 +446,7 @@ async fn handle_play(
         // 外部 PCM：无 ffmpeg、无 EOF，PCM 经 'P' 帧喂入
         {
             let mut s = session.lock().await;
-            s.pcm.clear();
-            s.ffmpeg_alive = false;
-            s.paused = false;
-            s.active = true;
-            s.external = true;
-            s.read_error = None;
-            s.eof_tail = None;
-            s.frames_played = 0;
-            s.real_frames = 0;
-            s.seek_offset = seek;
-            s.last_url = url.clone();
-            s.last_dur = dur;
-            s.empty_ticks = 0;
-            s.kill_requested = false;
-            s.stall_ended = false;
-            s.generation += 1;
+            s.begin(&url, seek, dur, true);
         }
         send_event(writer, "ready").await;
         return;
@@ -488,22 +479,7 @@ async fn handle_play(
     let stderr = child.stderr.take().expect("ffmpeg stderr 应为 piped");
     let gen = {
         let mut s = session.lock().await;
-        s.pcm.clear();
-        s.ffmpeg_alive = true;
-        s.paused = false;
-        s.active = true;
-        s.external = false;
-        s.read_error = None;
-        s.eof_tail = None;
-        s.frames_played = 0;
-        s.real_frames = 0;
-        s.seek_offset = seek;
-        s.last_url = url.clone();
-        s.last_dur = dur;
-        s.empty_ticks = 0;
-        s.kill_requested = false;
-        s.stall_ended = false;
-        s.generation += 1;
+        s.begin(&url, seek, dur, false);
         s.generation
     };
     let rs = session.clone();
@@ -524,7 +500,6 @@ async fn frame_loop(
     let mut interval = tokio::time::interval(Duration::from_millis(FRAME_MS));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_gen = 0u64;
-    let mut paused_ticks: u64 = 0;
     let mut encoder: Option<Encoder> = None;
     let mut out_buf = vec![0u8; 4096];
 
@@ -533,12 +508,11 @@ async fn frame_loop(
         let now = Instant::now();
 
         // 快照本帧所需状态（ffmpeg_alive 在下方取帧时另行读取）
-        let (gen, paused, external, volume, dstart, dend) = {
+        let (gen, paused, volume, dstart, dend) = {
             let s = session.lock().await;
             (
                 s.generation,
                 s.paused,
-                s.external,
                 s.volume,
                 s.ducking_at(now),
                 s.ducking_at(now + Duration::from_millis(FRAME_MS)),
@@ -551,18 +525,9 @@ async fn frame_loop(
             last_gen = gen;
         }
         if paused {
-            // 外部 PCM 模式：暂停时生产者仍在喂入，每 500ms 上报水位供 Node 背压
-            if external && paused_ticks % 25 == 0 {
-                let level = {
-                    let s = session.lock().await;
-                    s.pcm.len()
-                };
-                send_buffer_level(&writer, level).await;
-            }
-            paused_ticks += 1;
+            // 暂停即不发帧；外部生产者由 Node 侧 pause()/resume() 直接暂停
             continue;
         }
-        paused_ticks = 0;
 
         // 取一帧 PCM / 判定结束 / 欠载补静音
         enum Tick {
@@ -687,12 +652,6 @@ async fn encode_and_send(
             s.frames_played += 1;
             if is_real {
                 s.real_frames += 1;
-            }
-            if s.frames_played % 50 == 0 {
-                let pos_ms = (s.seek_offset * 1000.0) as u64 + s.frames_played * FRAME_MS;
-                let level = s.pcm.len();
-                drop(s);
-                send_progress(writer, pos_ms, level).await;
             }
         }
         Err(e) => send_error(writer, "opus_encode", &format!("{e:?}")).await,

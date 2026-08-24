@@ -219,13 +219,8 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     if (e === "trackEnd") {
       this.state = "idle";
       this.emit("trackEnd");
-    } else if (e === "ready" || e === "progress" || e === "buffer") {
+    } else if (e === "ready") {
       if (this.state === "idle") this.state = "playing";
-      // 外部 PCM 闭环背压：按 Worker 上报的缓冲水位 pause/resume 生产者
-      // （对齐 player.ts 的高水位语义；长时间暂停不撞 8MB 上限）
-      if (typeof msg.pcm === "number") {
-        this.applyPcmBackpressure(msg.pcm);
-      }
     } else if (e === "error") {
       // ffmpeg spawn 失败计入熔断（对齐 player.ts 的 spawnFailed/consecutiveFailures）
       if (msg.code === "ffmpeg_spawn") {
@@ -422,22 +417,10 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     this.producerPaused = false;
   }
 
-  /** 按 Worker 上报的缓冲水位对外部 PCM 生产者做 pause/resume（高/低水位对齐 player.ts）。 */
-  private applyPcmBackpressure(level: number): void {
-    const st = this.externalStream;
-    if (!st || typeof (st as { pause?: unknown }).pause !== "function") return;
-    if (level > 640 * 1024 && !this.producerPaused) {
-      this.producerPaused = true;
-      st.pause();
-    } else if (level < 256 * 1024 && this.producerPaused) {
-      this.producerPaused = false;
-      st.resume();
-    }
-  }
-
   pause(): void {
     this.state = "paused";
-    // 外部 PCM：即时暂停生产者（水位反馈是第二道保险），避免暂停期间缓冲堆积
+    // 外部 PCM：即时暂停生产者（实时节拍源，主动暂停即足够防堆积；
+    // 异常生产者由 Worker 侧 8MB 硬上限兜底报错）
     if (this.externalStream && !this.producerPaused) {
       this.producerPaused = true;
       this.externalStream.pause();
