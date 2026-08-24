@@ -63,6 +63,13 @@ struct Session {
     seek_offset: f64,
     last_url: String,
     last_dur: f64,
+    /// 普通模式连续空转 tick 数（node 的 emptyFrameAttempts，看门狗用）
+    empty_ticks: u64,
+    /// 帧循环看门狗请求杀 ffmpeg（read_loop 周期唤醒时执行）
+    kill_requested: bool,
+    /// 本次会话由看门狗终止（而非源自身失败）：终态走 trackEnd 而非
+    /// ffmpeg_no_output error——与 node 端 shouldEndOnStall 恒发 trackEnd 一致
+    stall_ended: bool,
 }
 
 impl Session {
@@ -86,6 +93,9 @@ impl Session {
             seek_offset: 0.0,
             last_url: String::new(),
             last_dur: 0.0,
+            empty_ticks: 0,
+            kill_requested: false,
+            stall_ended: false,
         }
     }
 
@@ -304,12 +314,20 @@ async fn ffmpeg_read_loop(
     loop {
         // 背压：缓冲超 HIGH_WATER 时停读，等帧循环释放通知。
         {
-            let s = session.lock().await;
+            let mut s = session.lock().await;
             if s.generation != gen {
                 let _ = child.start_kill();
                 return; // 已切换曲目，退出过期任务
             }
-            if s.pcm.len() >= HIGH_WATER {
+            if s.kill_requested {
+                // 帧循环看门狗触发（#89 卡死流）：杀掉 ffmpeg → stdout EOF →
+                // 缓冲排空 → 帧循环转换点走 trackEnd（与 node 端恒 trackEnd 一致，
+                // 即便 0 真实帧也不归类为 ffmpeg_no_output）
+                s.kill_requested = false;
+                s.stall_ended = true;
+                drop(s);
+                let _ = child.start_kill();
+            } else if s.pcm.len() >= HIGH_WATER {
                 drop(s);
                 // 200ms 超时兜底：stop 后帧循环不再排水，通知可能永不到来，
                 // 靠超时回环检查 generation，及时回收等待中的读任务。
@@ -401,6 +419,10 @@ async fn stop_session(session: &Arc<Mutex<Session>>) {
     s.eof_tail = None;
     s.frames_played = 0;
     s.real_frames = 0;
+    // 看门狗状态同样复位：陈旧的 kill_requested 会误杀下一曲的 ffmpeg
+    s.empty_ticks = 0;
+    s.kill_requested = false;
+    s.stall_ended = false;
 }
 
 async fn handle_play(
@@ -430,6 +452,9 @@ async fn handle_play(
             s.seek_offset = seek;
             s.last_url = url.clone();
             s.last_dur = dur;
+            s.empty_ticks = 0;
+            s.kill_requested = false;
+            s.stall_ended = false;
             s.generation += 1;
         }
         send_event(writer, "ready").await;
@@ -442,6 +467,15 @@ async fn handle_play(
     cmd.args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    // Linux：父进程（worker）死亡时内核自动 SIGKILL 子进程，杜绝孤儿 ffmpeg
+    // （Windows 等价手段由 Node 侧 taskkill /T 兜底）
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            Ok(())
+        });
+    }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -466,6 +500,9 @@ async fn handle_play(
         s.seek_offset = seek;
         s.last_url = url.clone();
         s.last_dur = dur;
+        s.empty_ticks = 0;
+        s.kill_requested = false;
+        s.stall_ended = false;
         s.generation += 1;
         s.generation
     };
@@ -509,7 +546,8 @@ async fn frame_loop(
         };
 
         if gen != last_gen {
-            encoder = None; // 新曲目：丢弃旧编码器，首次出帧时惰性重建
+            // 新曲目仅更新代际标记；编码器跨曲复用（node 端全程单实例，
+            // 每曲重建会带来首帧编码状态的细微差异）
             last_gen = gen;
         }
         if paused {
@@ -548,6 +586,7 @@ async fn frame_loop(
                 if s.pcm.len() < LOW_WATER {
                     notify.notify_one();
                 }
+                s.empty_ticks = 0; // 有数据即重置空转计数（node 的 emptyFrameAttempts 语义）
                 Tick::Real(fb)
             } else if s.external {
                 // 外部 PCM：流无 EOF，欠载补静音保时间线；曲目结束由控制器
@@ -568,6 +607,9 @@ async fn frame_loop(
                     let eof = s.eof_tail.take();
                     if let Some(e) = s.read_error.take() {
                         Tick::Failed("ffmpeg_read".to_string(), e)
+                    } else if s.stall_ended {
+                        // 看门狗终止：恒走 trackEnd（node 端 shouldEndOnStall 语义）
+                        Tick::JustEnded
                     } else if s.real_frames == 0 && eof.is_some() {
                         let (code, tail) = eof.unwrap();
                         Tick::Failed(
@@ -580,12 +622,26 @@ async fn frame_loop(
                 } else {
                     Tick::Idle
                 }
-            } else if s.real_frames == 0 && s.pcm.is_empty() {
-                // 首个数据块尚未到达：不发帧（与 node 后端一致，时间线从真实
-                // 数据开始）；否则坏源会先铺一串静音帧，污染零产出判定
+            } else if !s.active {
                 Tick::Idle
             } else {
-                Tick::Silence // 中途欠载：补静音帧保连续
+                // 普通模式欠载：与 node 端一致——不发帧（不补静音），累计空转
+                // tick 做卡死看门狗（node 的 shouldEndOnStall / #89）：
+                // 近结尾（≤5s 或时长未知）250 tick ≈ 5s，远结尾 3000 tick ≈ 60s，
+                // 触发后请求杀掉 ffmpeg → EOF → 缓冲排空 → 自然 trackEnd
+                s.empty_ticks += 1;
+                let elapsed = s.seek_offset + (s.frames_played as f64) * FRAME_MS as f64 / 1000.0;
+                let near_end = if s.last_dur > 0.0 {
+                    (s.last_dur - elapsed) <= 5.0
+                } else {
+                    true // 时长未知时保守处理（node 同款）
+                };
+                let threshold: u64 = if near_end { 250 } else { 3000 };
+                if s.empty_ticks >= threshold {
+                    s.empty_ticks = 0;
+                    s.kill_requested = true; // read_loop 周期唤醒时执行 start_kill
+                }
+                Tick::Idle
             }
         };
 

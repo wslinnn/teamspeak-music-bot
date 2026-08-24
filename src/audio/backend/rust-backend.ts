@@ -80,6 +80,9 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   private pcmPendingBytes = 0;
   // 外部 PCM 生产者是否因背压被暂停
   private producerPaused = false;
+  // 连续 spawn/下载失败计数（对齐 player.ts 的 MAX_CONSECUTIVE_FAILURES 熔断）
+  private spawnFailures = 0;
+  private static readonly MAX_SPAWN_FAILURES = 3;
   // jdymusic PowerShell 下载回退
   private downloader: ChildProcess | null = null;
   private currentTempDir: string | null = null;
@@ -123,6 +126,15 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     });
     child.on("exit", (code) => {
       this.logger.warn({ code }, "audio-worker 进程退出");
+      // Windows：杀掉 worker 的整个子进程树（孤儿 ffmpeg；child.kill 只杀进程
+      // 本体不杀子树）。Linux 由 worker 侧 PDEATHSIG 在内核层兜底
+      if (process.platform === "win32" && child.pid) {
+        try {
+          spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+        } catch {
+          /* best-effort */
+        }
+      }
       this.connected = false;
       this.socket?.destroy();
       this.socket = null;
@@ -181,9 +193,13 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
       const payload = this.recvBuf.subarray(5, 5 + len);
       this.recvBuf = this.recvBuf.subarray(5 + len);
       if (type === 0x46) {
-        // 'F' 音频帧：原始 Opus 字节
+        // 'F' 音频帧：原始 Opus 字节。每 50 帧（≈1s）重置失败计数，
+        // 对齐 player.ts 的 HEALTHY_FRAME_RESET
         this.emit("frame", Buffer.from(payload));
         this.framesPlayed += 1;
+        if (this.framesPlayed % 50 === 0) {
+          this.spawnFailures = 0;
+        }
       } else if (type === 0x45) {
         // 'E' 事件
         this.dispatchEvent(payload);
@@ -211,6 +227,10 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
         this.applyPcmBackpressure(msg.pcm);
       }
     } else if (e === "error") {
+      // ffmpeg spawn 失败计入熔断（对齐 player.ts 的 spawnFailed/consecutiveFailures）
+      if (msg.code === "ffmpeg_spawn") {
+        this.spawnFailures++;
+      }
       this.emit("error", new Error(`audio-worker: ${msg.code ?? "error"} ${msg.msg ?? ""}`));
     }
   }
@@ -230,6 +250,13 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   }
 
   play(url: string, seekSeconds = 0, songDuration = 0): void {
+    // 熔断：连续 spawn/下载失败达到上限后拒绝再试（对齐 player.ts MAX_CONSECUTIVE_FAILURES）
+    if (this.spawnFailures >= RustAudioBackend.MAX_SPAWN_FAILURES) {
+      this.logger.error({ failures: this.spawnFailures }, "FFmpeg failures limit reached");
+      this.state = "idle";
+      this.emit("error", new Error("ffmpeg unavailable"));
+      return;
+    }
     this.detachExternal();
     this.cleanupJdymusic();
     // Windows 下 /jdymusic/ CDN 直连会被 RST：与 player.ts 一致，先经
@@ -246,6 +273,11 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   }
 
   private playViaPowerShellDownload(url: string, seekSeconds: number, songDuration: number): void {
+    if (this.spawnFailures >= RustAudioBackend.MAX_SPAWN_FAILURES) {
+      this.state = "idle";
+      this.emit("error", new Error("ffmpeg unavailable"));
+      return;
+    }
     const tempDir = mkdtempSync(join(tmpdir(), "tsbot-rust-jdy-"));
     const tempFile = join(tempDir, "song.audio");
     this.currentTempDir = tempDir;
@@ -284,6 +316,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
       this.downloader = null;
       if (code !== 0 || !existsSync(tempFile)) {
         this.cleanupJdymusic();
+        this.spawnFailures++;
         this.emit("error", new Error(`jdymusic 下载失败 (exit ${code})`));
         return;
       }
@@ -295,6 +328,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     ps.on("error", (err) => {
       if (this.currentTempDir === tempDir) {
         this.cleanupJdymusic();
+        this.spawnFailures++;
         this.emit("error", err);
       }
     });
@@ -331,15 +365,23 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
       this.detachExternal();
       opts.onExternalEnd?.();
     };
+    // 对齐 player.ts：外部流 error 走 onExternalEnd 回调（由控制器善后），
+    // 不 emit "error"——上层 error 会触发切歌，与 node 路径语义不同
     const onError = (err: Error): void => {
       if (this.externalStream !== readable) return;
+      this.logger.warn({ err }, "External PCM stream error");
       this.detachExternal();
-      this.emit("error", err);
+      opts.onExternalEnd?.();
     };
     this.externalHandlers = { data: onData, end: onEnd, error: onError };
     readable.on("data", onData);
     readable.on("end", onEnd);
     readable.on("error", onError);
+
+    // 对齐 player.ts 的 CORRECTION C1：重挂一个曾被 pause 过的共享流（gapless
+    // 换曲场景）必须显式 resume——on('data') 不会自动恢复 flowing===false 的流，
+    // 否则新曲目只会有静音。对首次挂载/流动中的流 resume 是无害幂等操作。
+    readable.resume();
   }
 
   /** 原始 PCM 字节按 'P' 帧直发 Worker（不走 JSON）；未连接时缓冲（上限 8MB）。 */
@@ -360,7 +402,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     this.pcmPendingBytes += frame.length;
   }
 
-  /** 解绑外部流监听（不销毁流本身，对齐 player.ts 的 detach 语义）。 */
+  /** 解绑外部流监听并暂停流动（不销毁流本身，对齐 player.ts 的 detach 语义）。 */
   private detachExternal(): void {
     const st = this.externalStream;
     const h = this.externalHandlers;
@@ -368,6 +410,11 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
       st.removeListener("data", h.data);
       st.removeListener("end", h.end);
       st.removeListener("error", h.error);
+      try {
+        st.pause(); // 陈旧 PCM 不再流动；重挂时由 playPcmStream 的 resume 恢复（C1）
+      } catch {
+        /* best-effort：绝不销毁共享边车流 */
+      }
     }
     this.externalStream = null;
     this.externalHandlers = null;
@@ -449,7 +496,8 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   }
 
   resetFailures(): void {
-    // Rust Worker 内部自管理健康计数，无需 Node 侧处理
+    // 对齐 player.ts：外部（instance 成功路径）显式重置连续失败计数
+    this.spawnFailures = 0;
   }
 
   dispose(): void {

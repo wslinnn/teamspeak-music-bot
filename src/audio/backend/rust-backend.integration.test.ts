@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { Readable } from "node:stream";
+import http from "node:http";
 import path from "node:path";
 import { RustAudioBackend } from "./rust-backend.js";
 
@@ -176,5 +177,47 @@ describe("RustAudioBackend 端到端", () => {
       backend.stop();
     },
     15000,
+  );
+
+  it(
+    "卡死看门狗：源连接后无数据，~5 秒后 trackEnd 恢复（#89 语义）",
+    async () => {
+      // 接受连接但永不响应的 HTTP 服务器：ffmpeg 存活、零输出、自身不超时
+      const server = http.createServer(() => {
+        /* never respond */
+      });
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      const addr = server.address() as { port: number };
+      const url = `http://127.0.0.1:${addr.port}/hang.mp3`;
+
+      const backend = new RustAudioBackend(logger);
+      let trackEndCount = 0;
+      const errs: string[] = [];
+      backend.on("trackEnd", () => {
+        trackEndCount += 1;
+      });
+      backend.on("error", (e: Error) => {
+        errs.push(e.message.slice(0, 60));
+      });
+
+      const t0 = Date.now();
+      backend.play(url, 0, 0); // 时长未知 → node 语义保守按"近结尾"5 秒看门狗
+
+      const deadline = Date.now() + 15000;
+      while (trackEndCount === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      const elapsed = Date.now() - t0;
+      server.close();
+      backend.stop();
+
+      // 看门狗走 trackEnd 路径（node 恒 trackEnd），不是 ffmpeg_no_output error
+      expect(errs, `不应有 error: ${errs}`).toEqual([]);
+      expect(trackEndCount, "应收到恰好一次 trackEnd").toBe(1);
+      // ≈5s 看门狗 + 启动余量；过短说明源秒失败（那是 error 路径）
+      expect(elapsed, `看门狗触发过快: ${elapsed}ms`).toBeGreaterThan(3000);
+      console.log(`[smoke] 看门狗 ${(elapsed / 1000).toFixed(1)}s 后 trackEnd`);
+    },
+    25000,
   );
 });
