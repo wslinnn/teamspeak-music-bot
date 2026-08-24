@@ -26,6 +26,16 @@
 
 > v1.10.0 新增**可选**的 [Jellyfin](https://jellyfin.org/) 音源（由 [@ItsEricRao](https://github.com/ItsEricRao) 在 [PR #123](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot/pull/123) 中贡献）：连接自建 Jellyfin 服务器直接播放你自己的音乐库。默认关闭，在 **设置 → Jellyfin 音乐库** 一键开启；原有在线音源保持默认启用，行为不变。
 
+> **本 Fork 增补**（相对上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot)）：
+>
+> - **Tailwind CSS 4 重设计前端** — 深浅主题、移动端适配（底部抽屉播放控制）、通用组件库（上游为 SCSS）
+> - **TS 服务器频道树** — WebUI 侧边抽屉浏览完整频道树与在线用户，管理员点击频道一键移动机器人
+> - **队列拖拽重排序** — 播放队列鼠标/触屏拖拽，配合 `!reorder <from> <to>` 命令
+> - **跨客户端歌曲收藏** — 任意歌曲一键收藏（`/api/song-favorites`），WebSocket 实时同步
+> - **Docker 预构建镜像发布流** — GitHub Actions 导出 tar.gz，配合 `scripts/docker/docker-compose.prod.yml` 秒级启动
+>
+> 与上游的同步策略与维护说明见 [FORK.md](FORK.md)。
+
 ## 功能特性
 
 - **WebUI 鉴权与细粒度权限（必选）** — 用户名 + 密码登录，多用户、两种角色（管理员 / 成员）；成员可进一步配置**细粒度能力**（播放控制 / 队列管理 / 机器人管理 / 平台登录 / 音质）和**按机器人授权白名单**，所有变更操作由后端逐请求强制校验。bcrypt 加密、HttpOnly 会话 Cookie，CSRF 防护，WebSocket 同样鉴权。首次访问引导创建管理员。从无鉴权旧版本升级时请参阅 [更新升级](#更新升级) 章节
