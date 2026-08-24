@@ -3,7 +3,13 @@ name = "audio-worker"
 version = "0.1.0"
 edition = "2021"
 
-# 阶段2 spike 最小验证工程：只验证 opus-codec 能否在本机（Windows）编译捆绑的
-# libopus 源码。仅引入 opus-codec，不含 tokio/ffmpeg 等，纯粹探明 C 工具链门槛。
+# 阶段2 最小可用原型：独立音频 Worker。
+# 仅调用**外部 ffmpeg 二进制**（禁用进程内 FFmpeg 绑定）；Opus 用 opus-codec
+# （默认捆绑编译 libopus 源码，Windows+MSVC 已实测可编）。
+# 构建需 cmake：用 VS18 BuildTools 自带的即可（见 docs/rust-audio-worker-plan.md 4.7）。
 [dependencies]
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "process", "net", "io-util", "time", "sync"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
 opus-codec = "0.2"

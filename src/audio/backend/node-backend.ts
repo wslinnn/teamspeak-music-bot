@@ -4,6 +4,7 @@ import { AudioPlayer } from "../player.js";
 import type { Logger } from "../../logger.js";
 import type { BotConfig } from "../../data/config.js";
 import type { IAudioBackend, BackendState, PlayPcmOptions } from "./audio-backend.js";
+import { RustAudioBackend, resolveAudioWorkerBin } from "./rust-backend.js";
 
 /**
  * 阶段1 的 Node 音频后端：把现有 {@link AudioPlayer} 原封不动地包一层，对外暴露
@@ -87,11 +88,16 @@ export class NodeAudioBackend extends EventEmitter implements IAudioBackend {
 export function createAudioBackend(config: BotConfig, logger: Logger): IAudioBackend {
   const kind = config.audioBackend ?? "node";
   if (kind === "rust") {
-    logger.warn(
-      { audioBackend: kind },
-      "audioBackend=rust 尚未实现（计划阶段3），回退到 node 后端",
-    );
-    return new NodeAudioBackend(logger);
+    // 启用前探测二进制，缺失则回退 node 后端，避免无效后端进入运行态。
+    if (!resolveAudioWorkerBin()) {
+      logger.warn(
+        { audioBackend: kind },
+        "audioBackend=rust 但 audio-worker 二进制缺失，回退到 node 后端",
+      );
+      return new NodeAudioBackend(logger);
+    }
+    logger.info({ audioBackend: kind }, "使用 Rust Worker 音频后端");
+    return new RustAudioBackend(logger);
   }
   return new NodeAudioBackend(logger);
 }
