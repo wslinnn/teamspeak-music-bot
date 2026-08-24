@@ -69,6 +69,7 @@ export function createBotRouter(
   // NOTE: must be registered before "/:id" so it isn't shadowed by the param route.
   router.get("/settings", requireNotGuest, (_req, res) => {
     res.json({
+      commandPrefix: config.commandPrefix ?? "!",
       idleTimeoutMinutes: config.idleTimeoutMinutes ?? 0,
       autoPauseOnEmpty: config.autoPauseOnEmpty,
       voiceDucking: config.voiceDucking,
@@ -88,6 +89,7 @@ export function createBotRouter(
   // behavior is a bot.manage operation, consistent with PR #80's permission model)
   router.post("/settings", requirePermission("bot.manage"), (req, res) => {
     const {
+      commandPrefix,
       idleTimeoutMinutes,
       autoPauseOnEmpty,
       localAudioEnabled,
@@ -95,6 +97,14 @@ export function createBotRouter(
       guestMode,
       adminGroups,
     } = req.body;
+
+    // Fork: the web Settings page edits the chat command prefix here. Upstream
+    // has no endpoint for it, so this restores the legacy fork capability.
+    const hasPrefix =
+      typeof commandPrefix === "string" &&
+      commandPrefix.trim().length > 0 &&
+      commandPrefix.trim().length <= 8;
+    if (hasPrefix) config.commandPrefix = commandPrefix.trim();
 
     const hasIdle = idleTimeoutMinutes !== undefined;
     if (hasIdle && (typeof idleTimeoutMinutes !== "number" || idleTimeoutMinutes < 0)) {
