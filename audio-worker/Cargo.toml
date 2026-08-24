@@ -1,0 +1,9 @@
+[package]
+name = "audio-worker"
+version = "0.1.0"
+edition = "2021"
+
+# 阶段2 spike 最小验证工程：只验证 opus-codec 能否在本机（Windows）编译捆绑的
+# libopus 源码。仅引入 opus-codec，不含 tokio/ffmpeg 等，纯粹探明 C 工具链门槛。
+[dependencies]
+opus-codec = "0.2"

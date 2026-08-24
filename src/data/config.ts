@@ -166,6 +166,12 @@ export interface BotConfig {
    * back to null.
    */
   defaultPlatform: GateableProvider | null;
+  /**
+   * 音频后端实现选择（Rust Worker 重构灰度开关）。
+   * - "node"（默认）：复用现有 Node 进程内 ffmpeg + @discordjs/opus 实现。
+   * - "rust"：阶段3 才会实现的独立 Rust Worker 进程；当前未实现，会回退 node。
+   */
+  audioBackend: "node" | "rust";
 }
 
 export function getDefaultConfig(): BotConfig {
@@ -192,6 +198,7 @@ export function getDefaultConfig(): BotConfig {
     localAudioEnabled: true,
     savedQueuesEnabled: false,
     playKeepsQueue: false,
+    audioBackend: "node",
     publicUrl: "",
     trustProxy: false,
     guestMode: {

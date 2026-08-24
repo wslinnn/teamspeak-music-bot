@@ -21,7 +21,7 @@
 | 故障隔离 | ✅ 高 | 独立进程崩溃不影响 Node 主进程；Node 侧自动重启 Worker |
 | 跨平台（Windows 开发） | ⚠️ 中风险 | Windows 的 Unix Domain Socket 支持有限；需 TCP `127.0.0.1` 回退。你当前在 win32 开发，这是**首要拦路点** |
 | 构建 / 部署复杂度 | ⚠️ 中风险 | 需引入 Rust 工具链到 `setup.bat`/`install.sh`/Dockerfile；或改为发布预编译二进制 |
-| Windows 下 libopus 编译 | ⚠️ 风险点 | `opus-codec` 开启 `static` 会编译 libopus 源码，需要 C 工具链 + cmake；需验证本机是否具备 |
+| Windows 下 libopus 编译 | ✅ 已实测清除 | `opus-codec` 默认捆绑编译 libopus 源码；本机 MSVC(BuildTools 18) + VS 自带 cmake 可成功编译（详见 4.7） |
 | 开发周期 | ⚠️ Rust 高于 Go | 所有权 / 生命周期 / 流背压更易踩坑，但工具链已就绪，可接受 |
 | 性能收益是否来自语言 | ❌ 否 | 收益来自**进程隔离 + 线程分离 + 缓冲 + 调度优先级**，与语言无关；ffmpeg 本身 CPU 占用不变 |
 
@@ -177,15 +177,18 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bytes = "1.0"
 
-# Opus 编码：opus-codec 安全 FFI，开启 static 静态编译 libopus 源码
-# 注意：static 构建需 cmake + C 工具链；若麻烦可改为系统 libopus 动态链接
-opus-codec = { version = "0.5", features = ["static"] }   # 版本以 cargo add 拉取为准
+# Opus 编码：opus-codec 安全 FFI，默认捆绑编译 libopus 源码（无需系统库）
+# 经本机验证：opus-codec 0.2.0 可在 Windows + MSVC(BuildTools 18) 下成功编译
+# libopus，并真实编码出字节级对齐的 20ms/48k/立体声 Opus 帧。
+# 注意：无 `static` feature（默认即捆绑源码）；构建需 cmake（用 VS 自带的即可）。
+opus-codec = { version = "0.2" }   # 真实存在的最新版为 0.2.0（非 0.5）
 
 # 阶段2 择机接入：自适应 jitter-buffer neteq（默认关闭，先走 VecDeque）
 neteq = { version = "0.9", default-features = false, optional = true }
 
 # 可选：fragmented-webm 封装，未来 web 降级使用（默认关闭）
-transmux = { version = "0.11", optional = true }
+# 真实最新版为 0.24.0（非续篇说的 0.11），MSRV 较高，后置可选
+transmux = { version = "0.24", optional = true }
 
 thiserror = "1.0"
 anyhow = "1.0"
@@ -248,6 +251,19 @@ webm = ["transmux"]
 - Opus 编码参数须与 `@discordjs/opus` 输出**字节级兼容**：采样率 48000、声道 2、帧长 20ms、PCM 3840 字节；建议显式设 `bitrate`/`application=VoIP` 与现有编码器对齐（具体数值在阶段2用 A/B 比对确认）。
 
 ---
+
+### 4.7 阶段2 首验结果（2026-08-24 本机实测）
+
+在 `feat/rust-audio-worker` 分支实测，结论是**首要拦路点已清除、Rust 路线在本机可行**：
+
+- **opus-codec 编译**：`cargo build`（仅依赖 `opus-codec = "0.2"`）在 Windows + **MSVC BuildTools 18** 下成功编译其捆绑的 libopus 源码，并生成 `audio-worker.exe`。
+- **真实编码**：用与 `@discordjs/opus` 对齐的参数（48k / 立体声 / 20ms / `Application::Voip`）编码一帧 3840 字节静音 PCM → 输出 3 字节 Opus 帧，API 可用、字节流可产出。
+- **关键环境坑（必读）**：本机 `cmake` **不在默认 PATH**。opus-codec 的 build.rs 走 `cmake` crate 并自动识别到 "Visual Studio 18 2026" 生成器（说明 MSVC 可被找到），但缺 `cmake` 二进制本身会直接报 `is cmake not installed?`。**解决：无需单独安装 cmake**——VS18 BuildTools 已自带，路径为：
+  `C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`
+  构建前把它加入 PATH 即可（见下方 `setup.bat` 集成建议）。
+- **未验证项（后续阶段）**：tokio 调用外部 ffmpeg、UDS/TCP IPC、neteq 抖动缓冲、与 TS 端实际出声 A/B 比对——这些放到阶段2/3 再逐步验证。
+
+> `setup.bat` / `install.sh` 集成建议：编译前 `set PATH=%PATH%;<VS CMake bin>`（或 `call vcvarsall.bat`），再 `cargo build --release`。CI 预编译二进制可绕开本机工具链。
 
 ## 五、Node 侧适配层（`rust-worker-backend.ts`）
 
@@ -343,7 +359,7 @@ webm = ["transmux"]
 1. **Rust 重写音频管线技术上可行**，核心收益（进程隔离、稳定帧计时、多级缓冲、故障隔离）可拿到；与语言无关的那部分收益同样适用。
 2. 相对原报告建议的 Go，**Rust 主要额外成本**在 Windows 开发态 IPC 回退、引入 Rust 构建链、以及更高开发调试门槛；但本机已具备 `cargo 1.98.0`，且接口边界清晰（仅 3 个事件），风险可控。
 3. 库选型已据续篇修正：**只调用外部 ffmpeg 二进制**（禁进程内绑定）、**Opus 用 `opus-codec`**、**抖动缓冲先 `VecDeque` 再择机 `neteq`**、**transmux 延后**。整套栈多为成熟组件，最大风险点是 `neteq` 的场景适配。
-4. **首要拦路点**是 Windows 下 `opus-codec` 静态编译 libopus 的 C 工具链 + cmake 是否就绪 —— 这是阶段2开工前必须验证的第一项。
+4. **首要拦路点（已实测清除）**：Windows 下 `opus-codec` 编译捆绑 libopus 所需的 **cmake + MSVC 工具链** —— 本机实测：MSVC 用 VS BuildTools 18，cmake 用 VS 自带二进制（加入 PATH 即可），`cargo build` 成功并真实编码出 Opus 帧（详见 4.7）。
 5. 必须保留 `IAudioBackend` + `node-backend` 回滚架构，灰度上线，避免一次性全量改造带来线上故障。
 6. **性能提升主要来自架构与缓冲，而非编程语言**；ffmpeg 仍是 CPU 消耗大头，Rust 不能降低它。
 

@@ -5,7 +5,8 @@ import {
   type TS3TextMessage,
   type TS3VoiceActivity,
 } from "../ts-protocol/client.js";
-import { AudioPlayer } from "../audio/player.js";
+import { createAudioBackend } from "../audio/backend/node-backend.js";
+import type { IAudioBackend } from "../audio/backend/audio-backend.js";
 import { PlayQueue, PlayMode, type QueuedSong } from "../audio/queue.js";
 import type { MusicProvider, Platform, Song } from "../music/provider.js";
 import {
@@ -152,7 +153,7 @@ export class BotInstance extends EventEmitter {
   name: string;
 
   private tsClient: TS3Client;
-  private player: AudioPlayer;
+  private player: IAudioBackend;
   private voiceDucking: VoiceDuckingController;
   private managedVoiceClients: ManagedVoiceClientRegistry;
   private readonly configuredVoiceServerScope: ManagedVoiceClientScope;
@@ -218,7 +219,7 @@ export class BotInstance extends EventEmitter {
     this.avatarStore = options.avatarStore;
 
     this.tsClient = new TS3Client(options.tsOptions, this.logger);
-    this.player = new AudioPlayer(this.logger);
+    this.player = createAudioBackend(this.config, this.logger);
     this.voiceDucking = new VoiceDuckingController(
       this.player,
       this.config.voiceDucking ?? { enabled: false, volumePercent: 30 },
@@ -2009,7 +2010,7 @@ export class BotInstance extends EventEmitter {
     return this.queue.list();
   }
 
-  getPlayer(): AudioPlayer {
+  getPlayer(): IAudioBackend {
     return this.player;
   }
 
