@@ -55,13 +55,29 @@
       </div>
     </div>
 
+    <!-- Category tabs（搜索后显示） -->
+    <div v-if="searched && !loading" class="mb-4 flex flex-wrap gap-2">
+      <button
+        v-for="cat in categories"
+        :key="cat.key"
+        class="rounded-full px-3.5 py-1 text-[13px] font-medium transition-all"
+        :class="activeCategory === cat.key
+          ? 'bg-foreground text-bg-primary'
+          : 'bg-transparent text-foreground-muted hover:bg-interactive-hover hover:text-foreground'"
+        @click="activeCategory = cat.key"
+      >
+        {{ cat.label }}
+        <span class="ml-1 opacity-60">{{ cat.count }}</span>
+      </button>
+    </div>
+
     <!-- Loading -->
     <div v-if="loading" class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
       <SkeletonLoader v-for="n in 10" :key="n" height="220px" border-radius="10px" />
     </div>
 
-    <!-- Results grid -->
-    <div v-else-if="results.length > 0">
+    <!-- Songs results grid -->
+    <div v-else-if="activeCategory === 'songs' && results.length > 0">
       <div class="mb-3 text-sm text-foreground-subtle">
         找到 {{ results.length }} 首歌曲
       </div>
@@ -78,7 +94,61 @@
           @add="store.addSong(song)"
         />
       </TransitionGroup>
+      <div v-if="songsHasMore" class="mt-6 flex justify-center">
+        <BaseButton :loading="loadingMore" :disabled="loadingMore" @click="loadMoreSongs">加载更多</BaseButton>
+      </div>
     </div>
+
+    <!-- Playlists results -->
+    <div v-else-if="activeCategory === 'playlists' && playlists.length > 0" class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+      <button
+        v-for="pl in playlists"
+        :key="`${pl.platform}-${pl.id}`"
+        class="group text-left"
+        :title="`打开歌单：${pl.name}`"
+        @click="openPlaylist(pl)"
+      >
+        <div class="relative aspect-square overflow-hidden rounded-[10px]">
+          <CoverArt :url="pl.coverUrl" :fill="true" :radius="0" />
+          <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
+              <Icon icon="mdi:open-in-new" class="text-2xl" />
+            </div>
+          </div>
+        </div>
+        <div class="mt-2 text-[13px] font-medium truncate">{{ pl.name }}</div>
+        <div class="text-xs text-text-tertiary truncate">{{ pl.songCount }} 首</div>
+      </button>
+    </div>
+
+    <!-- Albums results -->
+    <div v-else-if="activeCategory === 'albums' && albums.length > 0" class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+      <button
+        v-for="ab in albums"
+        :key="`${ab.platform ?? activePlatform}-${ab.id}`"
+        class="group text-left"
+        :title="`播放专辑：${ab.name}`"
+        @click="playAlbum(ab)"
+      >
+        <div class="relative aspect-square overflow-hidden rounded-[10px]">
+          <CoverArt :url="ab.coverUrl" :fill="true" :radius="0" />
+          <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
+              <Icon icon="mdi:play" class="text-2xl" />
+            </div>
+          </div>
+        </div>
+        <div class="mt-2 text-[13px] font-medium truncate">{{ ab.name }}</div>
+        <div class="text-xs text-text-tertiary truncate">{{ ab.artist }}</div>
+      </button>
+    </div>
+
+    <!-- Empty category -->
+    <EmptyState
+      v-else-if="searched && activeCategory !== 'songs'"
+      :message="activeCategory === 'playlists' ? '未找到相关歌单' : '未找到相关专辑'"
+      icon="mdi:playlist-music-outline"
+    />
 
     <!-- Error -->
     <EmptyState
@@ -97,26 +167,57 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { ref, computed, onMounted, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
 import { usePlayerStore, type Song } from '../stores/player';
 import { useToast } from '../composables/useToast';
 import SongGridCard from '../components/SongGridCard.vue';
+import CoverArt from '../components/CoverArt.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import SkeletonLoader from '../components/common/SkeletonLoader.vue';
+import BaseButton from '../components/common/BaseButton.vue';
 
 const store = usePlayerStore();
 const toast = useToast();
 const route = useRoute();
+const router = useRouter();
+
+interface PlaylistHit {
+  id: string;
+  name: string;
+  coverUrl: string;
+  songCount: number;
+  platform: string;
+}
+
+interface AlbumHit {
+  id: string;
+  name: string;
+  artist: string;
+  coverUrl: string;
+  songCount: number;
+  platform?: string;
+}
 
 const searchInput = ref<HTMLInputElement | null>(null);
 const query = ref((route.query.q as string) || '');
 const results = ref<Song[]>([]);
+const playlists = ref<PlaylistHit[]>([]);
+const albums = ref<AlbumHit[]>([]);
 const loading = ref(false);
+const loadingMore = ref(false);
 const searched = ref(false);
 const errorMsg = ref('');
+const activeCategory = ref<'songs' | 'playlists' | 'albums'>('songs');
+const songsHasMore = ref(false);
+
+const categories = computed(() => [
+  { key: 'songs' as const, label: '歌曲', count: results.value.length },
+  { key: 'playlists' as const, label: '歌单', count: playlists.value.length },
+  { key: 'albums' as const, label: '专辑', count: albums.value.length },
+]);
 
 const platformTabs = [
   { key: 'all', label: '全部' },
@@ -127,25 +228,82 @@ const platformTabs = [
 ];
 const activePlatform = ref('all');
 
+const SEARCH_PAGE = 30;
+
+function applyResult(data: { songs?: Song[]; playlists?: PlaylistHit[]; albums?: AlbumHit[] }) {
+  results.value = data.songs ?? [];
+  playlists.value = data.playlists ?? [];
+  albums.value = data.albums ?? [];
+  // /search/all 为多源合并首屏（无 offset 分页）；单平台 /search 支持 offset
+  songsHasMore.value = activePlatform.value !== 'all' && results.value.length >= SEARCH_PAGE;
+}
+
 async function doSearch() {
   if (!query.value.trim()) return;
   loading.value = true;
   searched.value = true;
   errorMsg.value = '';
+  activeCategory.value = 'songs';
   try {
     let res;
     if (activePlatform.value === 'all') {
       res = await http.get('/api/music/search/all', { params: { q: query.value } });
     } else {
-      res = await http.get('/api/music/search', { params: { q: query.value, platform: activePlatform.value } });
+      res = await http.get('/api/music/search', {
+        params: { q: query.value, platform: activePlatform.value, limit: SEARCH_PAGE },
+      });
     }
-    results.value = res.data.songs ?? [];
+    applyResult(res.data);
   } catch (err: unknown) {
     console.error('Search failed:', err);
     errorMsg.value = '搜索失败，请稍后重试';
     results.value = [];
+    playlists.value = [];
+    albums.value = [];
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadMoreSongs() {
+  if (loadingMore.value || activePlatform.value === 'all') return;
+  loadingMore.value = true;
+  try {
+    const res = await http.get('/api/music/search', {
+      params: {
+        q: query.value,
+        platform: activePlatform.value,
+        limit: SEARCH_PAGE,
+        offset: results.value.length,
+      },
+    });
+    const incoming = (res.data.songs ?? []) as Song[];
+    const seen = new Set(results.value.map((s) => `${s.platform}-${s.id}`));
+    const fresh = incoming.filter((s) => !seen.has(`${s.platform}-${s.id}`));
+    results.value = [...results.value, ...fresh];
+    songsHasMore.value = incoming.length >= SEARCH_PAGE && fresh.length > 0;
+  } catch {
+    toast.error('加载更多失败');
+  } finally {
+    loadingMore.value = false;
+  }
+}
+
+function openPlaylist(pl: PlaylistHit) {
+  router.push({ path: `/playlist/${pl.id}`, query: { platform: pl.platform } });
+}
+
+async function playAlbum(ab: AlbumHit) {
+  if (!store.activeBotId) {
+    toast.error('请先选择机器人');
+    return;
+  }
+  const platform = ab.platform ?? (activePlatform.value === 'all' ? 'netease' : activePlatform.value);
+  try {
+    await http.post(`/api/player/${store.activeBotId}/play-album`, { albumId: ab.id, platform });
+    toast.success(`正在播放专辑：${ab.name}`);
+  } catch {
+    // 错误信息由 http 拦截器统一 toast
   }
 }
 
