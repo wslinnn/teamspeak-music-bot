@@ -63,6 +63,8 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   // 本地镜像状态（供 getXxx 返回，避免每次跨进程查询）
   private state: BackendState = "idle";
   private volume = 75;
+  private disposed = false;
+  private respawnTimer: ReturnType<typeof setTimeout> | null = null;
   private framesPlayed = 0;
   private seekOffset = 0;
   private externalActive = false;
@@ -78,6 +80,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   }
 
   private spawnWorker(): void {
+    if (this.disposed) return;
     const bin = this.resolveWorkerBin();
     if (!bin) {
       this.logger.error("未找到 audio-worker 二进制，Rust 后端不可用（应已由工厂回退）");
@@ -103,6 +106,15 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     child.on("exit", (code) => {
       this.logger.warn({ code }, "audio-worker 进程退出");
       this.connected = false;
+      this.socket?.destroy();
+      this.socket = null;
+      if (this.disposed) return;
+      // 故障隔离：上报错误让上层切歌/记录，1 秒后自动重启 Worker（pending 命令重连后补发）
+      this.emit("error", new Error(`audio-worker exited (code ${code ?? "?"})`));
+      this.respawnTimer = setTimeout(() => {
+        this.respawnTimer = null;
+        this.spawnWorker();
+      }, 1000);
     });
     child.on("error", (err) => {
       this.logger.error({ err }, "audio-worker 启动失败");
@@ -250,5 +262,17 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
 
   resetFailures(): void {
     // Rust Worker 内部自管理健康计数，无需 Node 侧处理
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    if (this.respawnTimer) {
+      clearTimeout(this.respawnTimer);
+      this.respawnTimer = null;
+    }
+    this.socket?.destroy();
+    this.socket = null;
+    this.child?.kill();
+    this.child = null;
   }
 }

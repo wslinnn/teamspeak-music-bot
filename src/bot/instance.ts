@@ -588,6 +588,7 @@ export class BotInstance extends EventEmitter {
     this.spotifyController.stop();
     this.currentSourceIsSpotify = false;
     this.player.stop();
+    this.player.dispose?.();
     this.jellyfinReporter?.onStop();
     this.queue.clear();
     this.sweepLocalAudio("disconnected");

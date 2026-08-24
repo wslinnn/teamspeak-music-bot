@@ -76,6 +76,11 @@ export class NodeAudioBackend extends EventEmitter implements IAudioBackend {
   resetFailures(): void {
     this.player.resetFailures();
   }
+
+  dispose(): void {
+    // AudioPlayer 托管 ffmpeg 子进程，stop() 已完成回收
+    this.player.stop();
+  }
 }
 
 /**

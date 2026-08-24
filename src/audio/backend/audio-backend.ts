@@ -41,6 +41,9 @@ export interface IAudioBackend extends EventEmitter {
   stop(): void;
   seek(seconds: number): void;
 
+  /** 实例销毁时的最终清理（如杀掉 Worker 子进程）；stop() 之后由终态路径调用。 */
+  dispose?(): void;
+
   setVolume(vol: number): void;
   getVolume(): number;
 
