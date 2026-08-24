@@ -22,8 +22,8 @@ onMounted(async () => {
   }
   const bot = store.bots.find((b) => b.id === botId);
   if (bot) {
-    store.setScope(botId);
-    router.replace({ path: '/', query: { bot: botId } });
+    store.setActiveBotId(botId);
+    router.replace('/');
   } else {
     notFound.value = true;
   }
