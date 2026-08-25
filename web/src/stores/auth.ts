@@ -36,6 +36,27 @@ export const useAuthStore = defineStore('auth', () => {
 
   function clearSession(): void {
     user.value = null;
+    stopPoll();
+  }
+
+  // ── 会话轮询（上游语义）：每 60s 刷新 /me，权限/角色变更一分钟内自动生效 ──
+  const POLL_INTERVAL_MS = 60_000;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  function ensurePollStarted(): void {
+    if (pollTimer !== null) return;
+    pollTimer = setInterval(() => {
+      if (user.value !== null) {
+        refreshMe().catch(() => {});
+      }
+    }, POLL_INTERVAL_MS);
+  }
+
+  function stopPoll(): void {
+    if (pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
   }
 
   /** 拉取权威会话信息（含 capabilities/bots/guest 开关；登录等接口的响应不带这些字段） */
@@ -84,6 +105,7 @@ export const useAuthStore = defineStore('auth', () => {
         try {
           const me = await http.get('/api/session/me');
           user.value = me.data as SessionUser;
+          ensurePollStarted();
         } catch (meErr: unknown) {
           const meStatus = (meErr as any)?.response?.status;
           if (meStatus && meStatus !== 401) {
@@ -106,6 +128,7 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await http.post('/api/session/login', { username: name, password });
       user.value = { id: res.data.id, username: res.data.username, role: res.data.role };
       await refreshMe().catch(() => {});
+      ensurePollStarted();
       return true;
     } catch (err: unknown) {
       const msg =
@@ -125,6 +148,7 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await http.post('/api/session/guest');
       user.value = { id: res.data.id, username: res.data.username, role: res.data.role };
       await refreshMe().catch(() => {});
+      ensurePollStarted();
       return true;
     } catch (err: unknown) {
       const msg =
@@ -145,6 +169,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = { id: res.data.id, username: res.data.username, role: res.data.role };
       needsSetup.value = false;
       await refreshMe().catch(() => {});
+      ensurePollStarted();
       return true;
     } catch (err: unknown) {
       const msg =
