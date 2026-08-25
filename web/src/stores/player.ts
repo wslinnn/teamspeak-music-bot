@@ -502,6 +502,20 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
+    async playAlbum(albumId: string, platform = 'netease') {
+      if (!this.activeBotId) return;
+      const toast = useToast();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/play-album`, { albumId, platform });
+        this._optimisticPlay();
+        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+        this._syncAfterAction();
+        toast.success('开始播放专辑');
+      } catch {
+        toast.error('播放专辑失败');
+      }
+    },
+
     async pause() {
       if (!this.activeBotId) return;
       // Optimistically update local state for instant UI feedback

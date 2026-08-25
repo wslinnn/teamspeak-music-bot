@@ -134,24 +134,24 @@
 
     <!-- Albums results -->
     <div v-else-if="activeCategory === 'albums' && albums.length > 0" class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-      <button
+      <RouterLink
         v-for="ab in albums"
         :key="`${ab.platform ?? activePlatform}-${ab.id}`"
+        :to="`/album/${ab.id}?platform=${ab.platform ?? (activePlatform === 'all' ? 'netease' : activePlatform)}`"
         class="group text-left"
-        :title="`播放专辑：${ab.name}`"
-        @click="playAlbum(ab)"
+        :title="`打开专辑：${ab.name}`"
       >
         <div class="relative aspect-square overflow-hidden rounded-[10px]">
           <CoverArt :url="ab.coverUrl" :fill="true" :radius="0" />
           <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
             <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
-              <Icon icon="mdi:play" class="text-2xl" />
+              <Icon icon="mdi:open-in-new" class="text-2xl" />
             </div>
           </div>
         </div>
         <div class="mt-2 text-[13px] font-medium truncate">{{ ab.name }}</div>
         <div class="text-xs text-text-tertiary truncate">{{ ab.artist }}</div>
-      </button>
+      </RouterLink>
     </div>
 
     <!-- Empty category -->
@@ -312,20 +312,6 @@ async function loadMoreSongs() {
 
 function openPlaylist(pl: PlaylistHit) {
   router.push({ path: `/playlist/${pl.id}`, query: { platform: pl.platform } });
-}
-
-async function playAlbum(ab: AlbumHit) {
-  if (!store.activeBotId) {
-    toast.error('请先选择机器人');
-    return;
-  }
-  const platform = ab.platform ?? (activePlatform.value === 'all' ? 'netease' : activePlatform.value);
-  try {
-    await http.post(`/api/player/${store.activeBotId}/play-album`, { albumId: ab.id, platform });
-    toast.success(`正在播放专辑：${ab.name}`);
-  } catch {
-    // 错误信息由 http 拦截器统一 toast
-  }
 }
 
 // Re-search when platform filter changes and we already have a query
