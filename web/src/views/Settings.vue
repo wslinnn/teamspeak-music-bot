@@ -45,6 +45,8 @@
         <SettingsPermissions v-if="activeTab === 'permissions'" />
 
         <SettingsUsers v-if="activeTab === 'users'" />
+
+        <SettingsAudit v-if="activeTab === 'audit'" />
       </template>
     </SettingsLayout>
 
@@ -180,6 +182,7 @@ import SettingsBehavior from '../components/settings/SettingsBehavior.vue';
 import SettingsSources from '../components/settings/SettingsSources.vue';
 import SettingsPermissions from '../components/settings/SettingsPermissions.vue';
 import SettingsUsers from '../components/settings/SettingsUsers.vue';
+import SettingsAudit from '../components/settings/SettingsAudit.vue';
 import BaseModal from '../components/common/BaseModal.vue';
 import BaseButton from '../components/common/BaseButton.vue';
 import BaseToggle from '../components/common/BaseToggle.vue';
@@ -199,6 +202,7 @@ const tabs = computed(() => {
     list.push({ key: 'sources', label: '音源', icon: 'mdi:music-box-multiple' });
     list.push({ key: 'permissions', label: '权限', icon: 'mdi:shield-key' });
     list.push({ key: 'users', label: '用户', icon: 'mdi:account-group' });
+    list.push({ key: 'audit', label: '审计', icon: 'mdi:file-document-outline' });
   }
   return list;
 });
