@@ -14,11 +14,11 @@
 
 | 维度 | 结论 |
 |------|------|
-| 功能覆盖 | 上游功能面 main 已覆盖 **约 95%**；真正仍缺的只有 4 处：按用户权限编辑器（D9，二期）、音量滑块拖拽实时预览（#111）、搜索 albums/playlists 分页、Home 每日推荐/推荐歌单多源切换 |
+| 功能覆盖 | ✅ **上游功能面已全覆盖**（2026-08-26 第五轮对账后清完 9 项缺口，见第九节）；剩余差异仅为设计性分歧（见下） |
 | fork 领先项 | 存量优势：歌曲收藏（含独立页）、服务器频道树、队列拖拽重排、已存清单收纳进抽屉、播放历史搜索+分页、WS 4001 断线语义+指数退避、PWA **离线缓存（SW 层）**、移动端控制抽屉、D14 门控口径统一；本轮追赶中反超：音源六项管理开关 |
 | 框架版本 | **两边等价**：Vue 3.5 + TypeScript 5.8 + Vite 6.3。FORK.md 旧表述"上游 Vite 5"已过时（本次勘误） |
 | 样式体系 | 设计性分歧：上游 SCSS（global/mobile/variables 三文件）；main Tailwind 4 + CSS 变量 + 自研 Base* 组件族（10 个） |
-| 前端测试 | 上游领先：web/src 内 6 个单测文件（searchPagination/scope/elapsed/savedQueues/useDecoupledSlider/useSpotifySettings，root vitest 跑）；main 前端零单测 |
+| 前端测试 | main 已移植 useDecoupledSlider（6 条）与 searchPagination（15 条）两组单测；上游另有 scope/elapsed/savedQueues/useSpotifySettings 四组暂未跟 |
 
 ---
 
@@ -101,7 +101,7 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 | 网易云**短信登录** | ❌ 无 UI | ❌ 同样不做（曾于 `17b0943` 误加、已移除）：`loginWithSms` 调的 `/captcha/verify` 只校验验证码**不返回登录 cookie**（正确端点应为 `/login/cellphone`），链路天然走不通；且能收验证码的手机=账号本人=可扫码，场景被扫码登录完全覆盖。`sms/send`/`sms/verify` 属上游遗留死代码，按收敛策略保留后端不删 | 双方一致（不做） |
 | Spotify 配置+OAuth | ✅（useSpotifySettings 含单测） | ✅（D0 配置卡 + D6 授权卡） | 等价 |
 | **音源启用管理** | 仅 Jellyfin 卡可翻转 enabledProviders（其注释自述"唯一入口"） | 六项开关 + 默认音源下拉（D0） | **fork 领先** |
-| **按用户细粒度权限编辑器**（capabilities 矩阵 + bot 白名单，`GET/PUT /api/users/:id/permissions`） | ✅ | ❌（D9，二期搁置） | **上游领先（最大残留）** |
+| **按用户细粒度权限编辑器**（capabilities 矩阵 + bot 白名单，`GET/PUT /api/users/:id/permissions`） | ✅ | ✅（`3872ff7`，BaseModal 形态） | 等价 |
 | 主题 | Settings 内切换按钮 | Navbar 按钮 + 独立主题 Tab | 等价 |
 
 ---
@@ -162,10 +162,9 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 
 两边共消费约 60 个端点（axios+fetch 合并口径）。差异：
 
-**上游消费、main 未消费（3 项）**
-1. `GET/PUT /api/users/:id/permissions` —— D9 权限编辑器（二期搁置，唯一功能性残留）
-2. `POST /api/player/:id/play-by-id` / `add-by-id` —— 按歌 ID 播放/入队；main 恒带完整 song 对象走 `play-song/add-song`，功能等价（载荷更大、不依赖对象在手）
-3. `GET /api/music/album/:id/detail` —— 见第四节备注：**两端后端均未实现该路由**，上游调用即 404 走兜底，非真实能力差
+**上游消费、main 未消费（2 项）**
+1. `POST /api/player/:id/play-by-id` / `add-by-id` —— 按歌 ID 播放/入队；main 恒带完整 song 对象走 `play-song/add-song`，功能等价（载荷更大、不依赖对象在手）
+2. `GET /api/music/album/:id/detail` —— 见第四节备注：**两端后端均未实现该路由**，上游调用即 404 走兜底，非真实能力差
 
 **main 消费、上游未消费（fork 特性面）**
 - `/api/song-favorites` 全族（歌曲收藏）
@@ -195,19 +194,24 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 
 ---
 
-## 九、残留缺口与建议（按价值排序）
+## 九、残留缺口与建议
 
-| # | 缺口 | 工作量 | 建议 |
-|---|------|--------|------|
-| 1 | Queue 已存清单按钮未按 `savedQueuesEnabled` 运行时门控（Queue.vue:227 注释与实现不符） | 10 分钟 | 直接补 v-if（对齐上游 Navbar 门控语义），顺手消注释债 |
-| 2 | #111 音量滑块：上游 `useDecoupledSlider`（含单测）方案现成，main `@change` 无拖动预览 | 0.5 天 | 先桌面端复现（方案 #19 前置），复现即移植——上游实现可直接抄 |
-| 3 | 搜索 albums/playlists 无分页、"全部"聚合无分页 | 0.5 天 | 上游 searchPagination 工具+单测可直译 |
-| 4 | auth 权限 60s 轮询自愈 | 10 分钟 | 上游 `ensurePollStarted` 一段逻辑，照抄即得 |
-| 5 | Home 每日推荐/推荐歌单多源切换（SourceTabs） | 0.5 天 | 视使用习惯决定；多源"我的歌单"main 已在 Library 承接 |
-| 6 | Library 我的歌单加 spotify 源 + 页签记忆 | 10 分钟+ | 小项 |
-| 7 | Navbar bot 卡快捷操作（停止播放/下一首） | 10 分钟 | 可选 |
-| 8 | D9 按用户权限编辑器 | 1-2 天 | 维持二期（低频高交互成本） |
-| 9 | 多源 FM 卡（Jellyfin 电台/QQ 雷达/酷狗电台） | 0.5 天 | main 已有 /fm 多平台后端，缺卡而已 |
+> 2026-08-26 复核确认的 9 项缺口已全部实施（用户拍板不接 /setup 向导）；
+> 全量 1070/1070（含新增前端单测 21 条）、前端构建通过。
+
+| # | 缺口 | 状态 |
+|---|------|------|
+| 1 | Queue 已存清单按钮按 `savedQueuesEnabled` 运行时门控 | ✅ `0c04ba2`（store 加 fetchBotSettings，App 挂载拉取） |
+| 2 | #111 音量滑块拖拽实时预览 | ✅ `5471071`（useDecoupledSlider 原样移植 + 6 条单测） |
+| 3 | 搜索三类目完整分页 | ✅ `44be8ff`（searchPagination 移植 + 15 条单测；"全部"聚合维持不分页，后端无 offset） |
+| 4 | auth 权限 60s 轮询自愈 | ✅ `8098463` |
+| 5 | Home 每日推荐/推荐歌单多源切换 | ✅ `25e812d`（含页签 localStorage 记忆与失效回退） |
+| 6 | Library 我的歌单加 spotify 源 + 页签记忆 | ⏸ 不做：spotify provider 未实现 getUserPlaylists（上游同 501），页签记忆已随 #5 落地同款机制 |
+| 7 | Navbar bot 卡快捷操作（停止播放/播放/下一首） | ✅ `5ce5a8a` |
+| 8 | D9 按用户权限编辑器 | ✅ `3872ff7`（能力矩阵 + bot 白名单，BaseModal 形态） |
+| 9 | 多源 FM 卡（Jellyfin 电台/QQ 雷达/酷狗电台） | ✅ `25e812d` |
+
+另：Playlist"播放全部"权限门控（D14 漏网点）一并修复 `340e858`。
 
 ---
 

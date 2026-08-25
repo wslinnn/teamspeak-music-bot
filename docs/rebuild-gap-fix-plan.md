@@ -6,8 +6,8 @@
 > D3 `a57eea6`、D8 `8c38f27`、D5 `bc3ab24`；
 > P3：D6 `bb287c5`、D7 `17b0943`、专辑详情页 `1b5186e`、FORK.md 记笔随收尾提交。
 > 全量 1049/1049、前端 build 通过。
-> **维持搁置**：D11c TS6（待真实 TS6 部署需求）、#111 音量滑块（未桌面复现，
-> 不盲移植 useDecoupledSlider）、D9 权限编辑器（一期明确的二期项）。
+> **维持搁置**：D11c TS6（待真实 TS6 部署需求）、#111 音量滑块已移植（`5471071`）、
+> D9 权限编辑器已实施（`3872ff7`，见下）。
 > 历史勘误：第四轮页面级对账新增 D12-D14 并勘误第三节（/api/favorites
 > 非死代码）；`a7a4551` 音频边界平滑已按反馈 revert（`a3e0320`）。
 > 本文是第二批；第一批 8 项见 `docs/dormant-features-ui-plans.md`，已完成并
@@ -156,9 +156,11 @@
 **挂载点**：Settings 新 tab"审计"（`v-if="authStore.isAdmin"`，照抄 SettingsUsers 的 tab 挂载方式）：表格（时间/操作者/动作/目标），`GET /api/audit?limit=100&offset=` 分页。
 **工作量**：0.5 天。
 
-### （二期）D9 按用户细粒度权限编辑器
+### D9 按用户细粒度权限编辑器【已实施】
 
-第一批方案 7 明确标记的二期：`GET/PUT /api/users/:id/permissions` 的能力矩阵 + bot 白名单编辑。使用频率低、交互成本高，维持二期不动。
+第一批方案 7 曾标记二期。2026-08-26 随前端对账缺口清零批次落地（`3872ff7`）：
+设置→用户 的成员行"权限"按钮 → BaseModal 能力矩阵 + bot 白名单，
+读写 `GET/PUT /api/users/:id/permissions`，审计留痕走后端。
 
 ### D10 TS 聊天命令 Web 化（vote / follow / move / artist）【低优先级】
 
