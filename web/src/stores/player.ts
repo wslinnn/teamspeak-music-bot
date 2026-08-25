@@ -37,6 +37,16 @@ export interface PlaylistItem {
   platform: string;
 }
 
+/** 歌单收藏（/api/favorites）：与歌曲收藏（song-favorites）是两套并存的功能 */
+export interface FavoritePlaylist {
+  id: number;
+  platform: string;
+  playlistId: string;
+  name: string;
+  coverUrl: string;
+  songCount: number;
+}
+
 interface TimingState {
   serverElapsed: number;
   serverSyncTime: number;
@@ -67,6 +77,9 @@ export const usePlayerStore = defineStore('player', {
     userPlaylists: [] as PlaylistItem[],
     bilibiliPopular: [] as Song[],
     lastFetchTime: 0,
+
+    // 歌单收藏（按 WebUI 用户隔离）
+    favoritedPlaylists: [] as FavoritePlaylist[],
   }),
 
   getters: {
@@ -218,6 +231,47 @@ export const usePlayerStore = defineStore('player', {
     loadTheme() {
       const saved = localStorage.getItem('theme') as 'dark' | 'light' | null;
       if (saved) this.theme = saved;
+    },
+
+    // ── 歌单收藏（D12：/api/favorites 族）──
+    async fetchFavoritedPlaylists() {
+      try {
+        const res = await http.get('/api/favorites');
+        this.favoritedPlaylists = res.data.favorites ?? [];
+      } catch {
+        // 非关键数据，静默失败
+      }
+    },
+
+    isPlaylistFavorited(playlistId: string, platform: string): boolean {
+      return this.favoritedPlaylists.some((f) => f.playlistId === playlistId && f.platform === platform);
+    },
+
+    async addPlaylistFavorite(pl: { platform: string; playlistId: string; name: string; coverUrl: string; songCount: number }) {
+      const toast = useToast();
+      try {
+        await http.post('/api/favorites', pl);
+        await this.fetchFavoritedPlaylists();
+        toast.success('已收藏歌单');
+      } catch (err: any) {
+        // 409 = 已收藏过（红心状态过期），重新同步即可收敛
+        if (err?.response?.status === 409) {
+          await this.fetchFavoritedPlaylists();
+          return;
+        }
+        toast.error('收藏失败');
+      }
+    },
+
+    async removePlaylistFavorite(favId: number) {
+      const toast = useToast();
+      try {
+        await http.delete(`/api/favorites/${favId}`);
+        await this.fetchFavoritedPlaylists();
+        toast.success('已取消收藏');
+      } catch {
+        toast.error('取消收藏失败');
+      }
     },
 
     async startBotInstance(id: string) {

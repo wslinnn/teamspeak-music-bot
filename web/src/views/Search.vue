@@ -116,6 +116,16 @@
               <Icon icon="mdi:open-in-new" class="text-2xl" />
             </div>
           </div>
+          <div class="absolute right-1.5 top-1.5 z-[10]">
+            <PlaylistFavoriteButton
+              :playlist-id="pl.id"
+              :platform="pl.platform"
+              :name="pl.name"
+              :cover-url="pl.coverUrl"
+              :song-count="pl.songCount"
+              overlay
+            />
+          </div>
         </div>
         <div class="mt-2 text-[13px] font-medium truncate">{{ pl.name }}</div>
         <div class="text-xs text-text-tertiary truncate">{{ pl.songCount }} 首</div>
@@ -177,6 +187,7 @@ import { usePlayerStore, type Song } from '../stores/player';
 import { useToast } from '../composables/useToast';
 import SongGridCard from '../components/SongGridCard.vue';
 import CoverArt from '../components/CoverArt.vue';
+import PlaylistFavoriteButton from '../components/PlaylistFavoriteButton.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import SkeletonLoader from '../components/common/SkeletonLoader.vue';
 import BaseButton from '../components/common/BaseButton.vue';

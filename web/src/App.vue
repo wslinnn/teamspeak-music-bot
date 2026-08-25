@@ -63,6 +63,10 @@ onMounted(async () => {
   await playerStore.fetchBots();
   const routeBot = route.query.bot;
   playerStore.applyScopeFromQuery(typeof routeBot === 'string' ? routeBot : null);
+  // 非游客预取歌单收藏（搜索/歌单页红心与 Library 页共用）
+  if (!authStore.isGuest) {
+    playerStore.fetchFavoritedPlaylists();
+  }
   startSyncTimer();
   document.addEventListener('visibilitychange', onVisibilityChange);
 });

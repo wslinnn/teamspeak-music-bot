@@ -32,6 +32,12 @@ const router = createRouter({
       component: () => import('../views/History.vue'),
     },
     {
+      path: '/library',
+      name: 'library',
+      component: () => import('../views/Library.vue'),
+      meta: { blockGuest: true },
+    },
+    {
       path: '/favorites',
       name: 'favorites',
       component: () => import('../views/Favorites.vue'),

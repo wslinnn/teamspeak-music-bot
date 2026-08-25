@@ -11,7 +11,15 @@
       <div class="flex gap-8 mb-9">
         <CoverArt :url="playlist.coverUrl" :size="200" :radius="14" :show-shadow="true" />
         <div class="flex flex-col justify-center">
-          <h1 class="text-[28px] font-extrabold mb-2">{{ playlist.name }}</h1>
+          <h1 class="text-[28px] font-extrabold mb-2 flex items-center gap-3">{{ playlist.name }}
+            <PlaylistFavoriteButton
+              :playlist-id="(route.params.id as string)"
+              :platform="(route.query.platform as string) || 'netease'"
+              :name="playlist.name"
+              :cover-url="playlist.coverUrl"
+              :song-count="songs.length"
+            />
+          </h1>
           <p class="text-sm text-text-secondary mb-2 line-clamp-3" v-if="playlist.description">{{ playlist.description }}</p>
           <div class="text-xs text-text-tertiary mb-4">
             {{ songs.length }} 首歌曲
@@ -54,6 +62,7 @@ import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import CoverArt from '../components/CoverArt.vue';
 import SongCard from '../components/SongCard.vue';
+import PlaylistFavoriteButton from '../components/PlaylistFavoriteButton.vue';
 
 const store = usePlayerStore();
 const route = useRoute();
