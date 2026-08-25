@@ -182,6 +182,15 @@ export class AudioPlayer extends EventEmitter {
   private sessionId = 0;
   private static readonly BUFFER_HIGH_WATER = 640 * 1024;
   private static readonly BUFFER_LOW_WATER = 256 * 1024;
+  /** 起播/跳转预缓冲门：攒够 300ms PCM（57.6KB @192KB/s）或源 EOF 才开始
+   * 消费，消除"边下边播"窗口的间歇欠载爆音。external 无门。 */
+  private static readonly PREBUFFER_BYTES = 57_600;
+  /** 本会话预缓冲门已开 */
+  private prebuffered = false;
+  /** 下一真实帧做 20ms 淡入（0→目标增益）：会话开始/恢复后置位 */
+  private fadeInPending = false;
+  /** 暂停淡出：帧循环 drain 一帧（增益→0）后进入 paused */
+  private fadeOutPending = false;
   private ffmpegPaused = false;
   private spawnFailed = false;
   private consecutiveFailures = 0;
@@ -233,6 +242,10 @@ export class AudioPlayer extends EventEmitter {
     this.ffmpegPaused = false;
     this.spawnFailed = false;
     this.emptyFrameAttempts = 0;
+    // 预缓冲门重新武装；新会话首帧淡入
+    this.prebuffered = false;
+    this.fadeInPending = true;
+    this.fadeOutPending = false;
     this.currentSongDuration = songDuration;
 
     if (this.consecutiveFailures >= AudioPlayer.MAX_CONSECUTIVE_FAILURES) {
@@ -454,6 +467,10 @@ export class AudioPlayer extends EventEmitter {
     this.spawnFailed = false;
     this.emptyFrameAttempts = 0;
     this.currentSongDuration = 0;
+    // external 模式无预缓冲门（边车供流欠载补静音保时间线）；首帧淡入
+    this.prebuffered = true;
+    this.fadeInPending = true;
+    this.fadeOutPending = false;
 
     // Same ingestion + high-water backpressure as the ffmpeg.stdout handler,
     // but pausing the Readable instead of ffmpeg.stdout. sessionId-guarded so
@@ -530,8 +547,20 @@ export class AudioPlayer extends EventEmitter {
   }
 
   stop(): void {
+    // 流边界淡出：切歌/跳转/停止会让旧流在任意波形处硬切（暂停路径已有
+    // drain，这里补 stop 路径）。在会话栅栏 sessionId++ 之前同步发出旧会话
+    // 缓冲的最后一帧（增益→0），消除点击跳转瞬间的尖锐爆音。
+    if (
+      (this.state === "playing" || this.fadeOutPending) &&
+      !this.externalMode &&
+      this.pcmBuffer.length >= PCM_FRAME_BYTES
+    ) {
+      const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
+      this.pcmBuffer = this.pcmBuffer.subarray(PCM_FRAME_BYTES);
+      this.sendFrame(pcmFrame, null, 0);
+    }
     // 3. 递增 ID 是最有效的逻辑“隔离墙”
-    this.sessionId++; 
+    this.sessionId++;
     this.frameLoopRunning = false;
     
     // 立即清空缓冲区，确保切歌瞬间静音 （
@@ -570,6 +599,9 @@ export class AudioPlayer extends EventEmitter {
     this.seekOffset = 0;
     this.framesPlayed = 0;
     this.healthyFrames = 0;
+    this.prebuffered = false;
+    this.fadeInPending = false;
+    this.fadeOutPending = false;
   }
 
   private forceCleanup(proc: ChildProcess, pid: number): void {
@@ -613,8 +645,31 @@ export class AudioPlayer extends EventEmitter {
       // 这里的校验能防止旧的定时器回调处理新 Session 的逻辑 （
       if (loopSessionId !== this.sessionId || !this.frameLoopRunning) return;
 
-      if (this.state === "playing") this.sendNextFrame();
-      else if (this.state === "paused") this.nextFrameTime = performance.now();
+      if (this.state === "playing") {
+        // 预缓冲门：非 external 会话攒够 PREBUFFER_BYTES（或源已结束/退出）
+        // 才开始消费；等待期不出帧，缓冲不足一帧时由下方看门狗累计（与
+        // Rust Worker 的门语义一致）
+        if (!this.externalMode && !this.prebuffered) {
+          if (this.pcmBuffer.length >= AudioPlayer.PREBUFFER_BYTES || !this.ffmpeg) {
+            this.prebuffered = true;
+            this.sendNextFrame();
+          }
+        } else {
+          this.sendNextFrame();
+        }
+      } else if (this.state === "paused") {
+        // 暂停淡出：drain 最后一帧（末帧增益→0）。门未开（尚未出过声）或
+        // 欠载中无帧可淡时仅清除标记（与 Rust Worker 的 draining 语义一致）
+        if (this.fadeOutPending) {
+          this.fadeOutPending = false;
+          if (this.prebuffered && this.pcmBuffer.length >= PCM_FRAME_BYTES) {
+            const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
+            this.pcmBuffer = this.pcmBuffer.subarray(PCM_FRAME_BYTES);
+            this.sendFrame(pcmFrame, null, 0);
+          }
+        }
+        this.nextFrameTime = performance.now();
+      }
 
       // 检测pcmBuffer不足PCM_FRAME_BYTES导致连续循环卡死：
       // 条件1: FFmpeg仍在运行但缓冲区不足一帧，且连续多次无法获取数据
@@ -634,7 +689,10 @@ export class AudioPlayer extends EventEmitter {
       // unknown-duration stream would auto-advance ~5s later. Because the if is
       // now false while paused, the else resets emptyFrameAttempts to 0, so a
       // resumed healthy stream starts fresh and never ends instantly.
-      if (this.state === "playing" && !this.externalMode && this.ffmpeg !== null && this.pcmBuffer.length < PCM_FRAME_BYTES) {
+      // 预缓冲门未开时同样累计（Worker 侧语义：从 play 起预算 5s/60s 内必须
+      // 交齐 500ms，否则视同卡死源），否则"部分填充后挂起"（缓冲 ≥1 帧但
+      // 永远到不了门限）会绕过看门狗造成永久静音
+      if (this.state === "playing" && !this.externalMode && this.ffmpeg !== null && (this.pcmBuffer.length < PCM_FRAME_BYTES || !this.prebuffered)) {
         this.emptyFrameAttempts++;
         
         // End the track when FFmpeg has gone silent: quickly if we're near the
@@ -717,8 +775,20 @@ export class AudioPlayer extends EventEmitter {
       }
     }
 
+    // 会话首帧/恢复首帧做 20ms 淡入（0→目标增益），消除波形硬切爆音
+    const fadeIn = this.fadeInPending;
+    this.fadeInPending = false;
+    this.sendFrame(pcmFrame, fadeIn ? 0 : null, null);
+  }
+
+  /** 增益→Opus 编码→发帧（真实帧统一路径；淡入/淡出经 override 因子注入）。 */
+  private sendFrame(
+    pcmFrame: Buffer,
+    startOverride: number | null,
+    endOverride: number | null,
+  ): void {
     try {
-      const adjusted = this.applyVolume(pcmFrame);
+      const adjusted = this.applyVolume(pcmFrame, startOverride, endOverride);
       const opusFrame = this.encoder.encode(adjusted);
       this.emit("frame", opusFrame);
       this.framesPlayed++;
@@ -742,13 +812,18 @@ export class AudioPlayer extends EventEmitter {
     }
   }
 
-  private applyVolume(pcm: Buffer): Buffer {
+  private applyVolume(
+    pcm: Buffer,
+    startOverride: number | null = null,
+    endOverride: number | null = null,
+  ): Buffer {
     const baseFactor = volumeToFactor(this.volume);
     const now = performance.now();
     const startDuckingGain = this.duckingGainAt(now);
     const endDuckingGain = this.duckingGainAt(now + FRAME_DURATION_MS);
-    const startFactor = baseFactor * startDuckingGain;
-    const endFactor = baseFactor * endDuckingGain;
+    // 边界淡入/淡出：首帧 0→目标、暂停末帧 目标→0（override 优先于 ducking）
+    const startFactor = startOverride ?? baseFactor * startDuckingGain;
+    const endFactor = endOverride ?? baseFactor * endDuckingGain;
 
     if (startFactor >= 1 && endFactor >= 1) {
       return Buffer.from(pcm);
@@ -835,8 +910,22 @@ export class AudioPlayer extends EventEmitter {
       this.play(this.currentUrl, seconds, this.currentSongDuration);
     }
   }
-  pause(): void { if (this.state === "playing") this.state = "paused"; }
-  resume(): void { if (this.state === "paused") { this.state = "playing"; this.nextFrameTime = performance.now(); } }
+  pause(): void {
+    if (this.state === "playing") {
+      this.state = "paused";
+      // 置淡出标记：帧循环在暂停态 drain 最后一帧（增益→0），消除暂停边界
+      // 的波形硬切爆音（≤20ms 内完成；与 Rust Worker 语义一致）
+      this.fadeOutPending = true;
+    }
+  }
+  resume(): void {
+    if (this.state === "paused") {
+      this.state = "playing";
+      this.nextFrameTime = performance.now();
+      this.fadeInPending = true;
+    }
+    this.fadeOutPending = false; // pause 后立即 resume：取消未消费的淡出
+  }
   resetFailures(): void { this.consecutiveFailures = 0; }
   setVolume(vol: number): void { this.volume = Math.max(0, Math.min(100, vol)); }
   getVolume(): number { return this.volume; }
