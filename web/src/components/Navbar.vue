@@ -18,7 +18,21 @@
 
     <div class="ml-auto flex items-center gap-2 md:gap-4">
       <!-- Bot selector (always shown when at least one bot exists) -->
-      <div v-if="store.bots.length > 0" class="relative" ref="selectorRef">
+      <div v-if="store.isScoped" class="flex items-center gap-1.5">
+        <div class="flex items-center gap-2 md:gap-2.5 px-3 md:px-5 py-2 md:py-2.5 bg-bg-secondary rounded-[var(--radius-md)] text-base font-semibold min-h-[44px]">
+          <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="activeBot?.connected ? 'bg-green-500' : 'bg-text-tertiary'" />
+          <span class="hidden sm:inline max-w-[160px] truncate whitespace-nowrap">{{ activeBot?.name ?? '专属机器人' }}</span>
+          <span class="text-[11px] px-1.5 py-px rounded font-medium shrink-0 bg-[rgba(234,179,8,0.15)] text-yellow-500">专属模式</span>
+        </div>
+        <button
+          class="px-2.5 py-1.5 rounded-[var(--radius-sm)] text-[12px] font-medium opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 hover:bg-hover-bg"
+          title="退出专属模式"
+          @click="exitScope"
+        >
+          退出
+        </button>
+      </div>
+      <div v-else-if="store.bots.length > 0" class="relative" ref="selectorRef">
         <button class="flex items-center gap-2 md:gap-2.5 px-3 md:px-5 py-2 md:py-2.5 bg-bg-secondary rounded-[var(--radius-md)] text-base font-semibold min-h-[44px] transition-colors duration-[var(--transition-fast)] cursor-pointer hover:bg-hover-bg" @click="dropdownOpen = !dropdownOpen">
           <span class="w-2.5 h-2.5 rounded-full shrink-0" :class="activeBot?.connected ? 'bg-green-500' : 'bg-text-tertiary'" />
           <span class="hidden sm:inline max-w-[160px] truncate whitespace-nowrap">{{ activeBot?.name ?? '选择机器人' }}</span>
@@ -53,6 +67,13 @@
               @click.stop="togglePower(bot)"
             >
               <Icon :icon="bot.connected ? 'mdi:power' : 'mdi:power-off'" />
+            </button>
+            <button
+              class="shrink-0 p-1.5 px-2 rounded-[var(--radius-sm)] text-[15px] opacity-40 transition-opacity duration-[var(--transition-fast)] cursor-pointer hover:opacity-100 hover:bg-hover-bg"
+              title="复制专属链接"
+              @click.stop="copyBotLink(bot.id)"
+            >
+              <Icon icon="mdi:link-variant" />
             </button>
           </div>
           <div class="h-px my-1" />
@@ -151,15 +172,28 @@
 
   <ServerTreeDrawer v-model="serverTreeOpen" />
 
+  <!-- 专属链接弹窗（复制失败时可手动选中文本复制） -->
+  <BaseModal v-model="linkDialog.open" :title="`${linkDialog.name} 的专属链接`">
+    <p class="text-xs text-foreground-subtle mb-3">打开该链接的访客将只看到并控制这台机器人</p>
+    <input ref="linkInputRef" class="input" :value="linkDialog.url" readonly @focus="($event.target as HTMLInputElement).select()" />
+    <template #footer>
+      <BaseButton variant="secondary" @click="linkDialog.open = false">关闭</BaseButton>
+      <BaseButton @click="copyLinkFromDialog">{{ linkDialog.copied ? '已复制' : '复制链接' }}</BaseButton>
+    </template>
+  </BaseModal>
+
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, nextTick, reactive, ref, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useRouter } from 'vue-router';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
+import { http } from '../utils/http';
 import ServerTreeDrawer from './ServerTreeDrawer.vue';
+import BaseModal from './common/BaseModal.vue';
+import BaseButton from './common/BaseButton.vue';
 
 const store = usePlayerStore();
 const authStore = useAuthStore();
@@ -170,6 +204,81 @@ const mobileMenuOpen = ref(false);
 const serverTreeOpen = ref(false);
 const selectorRef = ref<HTMLElement | null>(null);
 const togglingBots = ref<Record<string, boolean>>({});
+
+// ── 专属链接（D13）──
+const publicBaseUrl = ref('');
+const linkInputRef = ref<HTMLInputElement | null>(null);
+const linkDialog = reactive({ open: false, url: '', name: '', copied: false });
+
+async function loadPublicBaseUrl() {
+  try {
+    const res = await http.get('/api/config/public-url');
+    if (res.data.publicUrl) publicBaseUrl.value = res.data.publicUrl as string;
+  } catch {
+    // 忽略——回退到 window.location.origin
+  }
+}
+
+function resolveBaseUrl(): string {
+  return publicBaseUrl.value || window.location.origin;
+}
+
+async function tryClipboardWrite(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // 落到 execCommand 兜底
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    ta.style.pointerEvents = 'none';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function copyBotLink(id: string) {
+  const bot = store.bots.find((b) => b.id === id);
+  linkDialog.url = `${resolveBaseUrl()}/bot/${id}`;
+  linkDialog.name = bot?.name ?? '机器人';
+  linkDialog.copied = false;
+  linkDialog.open = true;
+  // 静默尝试直接复制；失败时用户可在弹窗里手动复制
+  const ok = await tryClipboardWrite(linkDialog.url);
+  if (ok) linkDialog.copied = true;
+  await nextTick();
+  linkInputRef.value?.focus();
+  linkInputRef.value?.select();
+}
+
+async function copyLinkFromDialog() {
+  const ok = await tryClipboardWrite(linkDialog.url);
+  if (ok) {
+    linkDialog.copied = true;
+  } else {
+    linkInputRef.value?.focus();
+    linkInputRef.value?.select();
+  }
+}
+
+/** 退出专属模式：先清 scope 再跳转，路由守卫看到空 scope 才不会把 ?bot= 补回来 */
+function exitScope() {
+  store.clearScope();
+  dropdownOpen.value = false;
+  router.push('/');
+}
 
 function handleLogout() {
   authStore.logout();
@@ -205,6 +314,7 @@ function onClickOutside(e: MouseEvent) {
 
 onMounted(() => {
   document.addEventListener('click', onClickOutside);
+  loadPublicBaseUrl();
 });
 
 onUnmounted(() => {

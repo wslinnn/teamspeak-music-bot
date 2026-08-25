@@ -53,6 +53,8 @@ export const usePlayerStore = defineStore('player', {
   state: () => ({
     bots: [] as BotStatus[],
     activeBotId: null as string | null,
+    /** 专属链接锁定（?bot=）：非空时 UI 锁定单 bot。真源是 URL，不持久化 */
+    scopedBotId: null as string | null,
     /** Per-bot queues keyed by botId */
     queues: {} as Record<string, Song[]>,
     /** Per-bot timing state keyed by botId */
@@ -70,6 +72,10 @@ export const usePlayerStore = defineStore('player', {
   getters: {
     activeBot(): BotStatus | null {
       return this.bots.find((b) => b.id === this.activeBotId) ?? this.bots[0] ?? null;
+    },
+    /** 专属链接模式下为 true（UI 锁定单 bot，隐藏切换入口） */
+    isScoped(): boolean {
+      return this.scopedBotId !== null;
     },
     currentSong(): Song | null {
       return this.activeBot?.currentSong ?? null;
@@ -128,10 +134,35 @@ export const usePlayerStore = defineStore('player', {
     },
 
     setActiveBotId(id: string) {
+      // 专属链接锁定期间禁止切换到其他 bot
+      if (this.scopedBotId !== null && id !== this.scopedBotId) return;
       this.activeBotId = id;
       // Fetch queue for newly active bot if we don't have it yet
       if (!this.queues[id]) {
         this.fetchQueue();
+      }
+    },
+
+    /** 锁定到单个 bot（专属链接）。先设 scope 再切 active，避免 setActiveBotId 的守卫拦下 */
+    setScope(id: string) {
+      this.scopedBotId = id;
+      this.activeBotId = id;
+      if (!this.queues[id]) {
+        this.fetchQueue();
+      }
+    },
+
+    clearScope() {
+      this.scopedBotId = null;
+    },
+
+    /** 用 URL 的 ?bot= 对账 scope：id 存在则锁定，过期/无权限则清除（绝不锁定到幻影） */
+    applyScopeFromQuery(requestedId: string | null) {
+      const valid = requestedId && this.bots.some((b) => b.id === requestedId) ? requestedId : null;
+      if (valid) {
+        this.setScope(valid);
+      } else if (requestedId) {
+        this.clearScope();
       }
     },
 
@@ -169,6 +200,10 @@ export const usePlayerStore = defineStore('player', {
       this.bots = this.bots.filter((b) => b.id !== botId);
       delete this.queues[botId];
       delete this.timings[botId];
+      // 锁定的 bot 被移除时解除锁定，避免 UI 锁在幻影上
+      if (this.scopedBotId === botId) {
+        this.clearScope();
+      }
     },
 
     setQueue(botId: string, queue: Song[]) {

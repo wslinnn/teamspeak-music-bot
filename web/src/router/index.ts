@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
+import { usePlayerStore } from '../stores/player';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -110,6 +111,16 @@ router.beforeEach(async (to, from, next) => {
   // 游客无法访问设置页（上游语义：游客永远不能查看/修改设置）
   if (to.meta.blockGuest && authStore.isGuest) {
     return next({ path: '/' });
+  }
+
+  // 专属链接作用域（D13）：URL 带 ?bot= 时记录锁定（App.vue 在 fetchBots 后校验）；
+  // 已锁定但本次导航丢了参数 → 补回，保证站内跳转/刷新不脱离锁定
+  const playerStore = usePlayerStore();
+  const qBot = typeof to.query.bot === 'string' && to.query.bot ? to.query.bot : null;
+  if (qBot) {
+    playerStore.scopedBotId = qBot;
+  } else if (playerStore.scopedBotId) {
+    return next({ path: to.path, query: { ...to.query, bot: playerStore.scopedBotId }, hash: to.hash });
   }
 
   next();

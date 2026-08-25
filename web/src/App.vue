@@ -55,11 +55,14 @@ function onVisibilityChange() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   authStore.init().catch((err) => console.warn('auth init failed:', err));
   playerStore.loadTheme();
   connect();
-  playerStore.fetchBots();
+  // 先拿到 bot 列表再校验 ?bot= 专属锁定（路由守卫只是先记录，这里才决定锁不锁）
+  await playerStore.fetchBots();
+  const routeBot = route.query.bot;
+  playerStore.applyScopeFromQuery(typeof routeBot === 'string' ? routeBot : null);
   startSyncTimer();
   document.addEventListener('visibilitychange', onVisibilityChange);
 });
