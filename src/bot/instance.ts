@@ -27,11 +27,8 @@ import {
 import type { JellyfinPlaybackReporter } from "../music/jellyfin.js";
 import { BotProfileManager } from "./profile.js";
 import type { AvatarStore } from "../data/avatars.js";
-import {
-  decideOccupancyAction,
-  occupancyFromClientList,
-  shouldResumeOnReturn,
-} from "./auto-pause.js";
+import { decideOccupancyAction, shouldResumeOnReturn } from "./auto-pause.js";
+import { ChannelView } from "./channel-view.js";
 import { isSpotifyUri } from "../music/spotify/webapi.js";
 import path from "node:path";
 import { SpotifyController } from "../music/spotify/controller.js";
@@ -182,6 +179,8 @@ export class BotInstance extends EventEmitter {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private channelUserCount = 0;
   private autoPaused = false;
+  /** 事件源的"我的频道里有谁"视图：自动暂停/闲置判定的唯一权威（fork） */
+  private readonly channelView = new ChannelView();
   /** True while the audible track is served by the Spotify sidecar (external
    *  PCM mode) — drives fence/handoff decisions in resolveAndPlay + cmdStop. */
   private currentSourceIsSpotify = false;
@@ -426,6 +425,15 @@ export class BotInstance extends EventEmitter {
     this.tsClient.on("connected", () => {
       // Fresh connection — clear any stale auto-pause flag from a prior session.
       this.autoPaused = false;
+      // 事件源频道视图重置 + 播种：自机 enterview 已在握手期送达（库靠它定位
+      // clid），视图即已建立；clientlist 对账仅为修正兜底（≥2 客户端时会超时，
+      // 失败即放弃，不承担决策）。
+      this.channelView.reset();
+      const selfId = this.tsClient.getClientId();
+      const selfChannel = this.tsClient.getChannelId();
+      if (selfId && selfChannel) this.channelView.onSelfKnown(selfId, selfChannel);
+      void this.reconcileChannelView();
+      this.applyChannelView();
       this._startIdlePoller();
       this._startJellyfinReportPoller();
     });
@@ -441,30 +449,37 @@ export class BotInstance extends EventEmitter {
       this.voiceDucking.handleVoiceActivity(activity.clientId);
     });
 
-    // React near-instantly to channel membership changes. The 30s idle
-    // poller remains the fallback if any of these events are missed.
+    // Channel membership is tracked EVENT-SOURCED in channelView (enter carries
+    // the target cid, moved carries ctid; leave consults the mirror). Decisions
+    // (auto-pause / idle-disconnect) read the view — the flaky full-server
+    // clientlist query is demoted to a periodic reconcile, never load-bearing.
     //
     // clientEnter additionally arms auto-RESUME directly from the event,
     // because the occupancy query (clientlist) times out whenever another
-    // client is present — i.e. exactly when a listener returns — so it cannot
-    // be used to confirm the return. See _resumeIfReturning().
-    this.tsClient.on("clientEnter", () => {
+    // client is present — i.e. exactly when a listener returns. See
+    // _resumeIfReturning().
+    this.tsClient.on("clientEnter", (info: { id: number; channelID: bigint }) => {
+      this.channelView.onEnter(info);
       this._resumeIfReturning();
-      void this.refreshOccupancy();
+      this.applyChannelView();
     });
     this.tsClient.on("clientLeave", (event: { id: number }) => {
+      this.channelView.onLeave(event.id);
       this.voiceDucking.removeSpeaker(event.id);
-      void this.refreshOccupancy();
+      this.applyChannelView();
     });
-    this.tsClient.on("clientMoved", (event: { id: number }) => {
+    this.tsClient.on("clientMoved", (event: { id: number; targetChannelID: bigint }) => {
+      this.channelView.onMoved(event);
       if (event.id === this.tsClient.getClientId()) {
         // Moving the bot invalidates every activity deadline from its old
         // channel even if no individual leave events arrive.
         this.voiceDucking.reset(false);
+        // 新频道成员由 enterview 回放/对账重建，在此之前占用未知（不动作）
+        void this.reconcileChannelView();
       } else {
         this.voiceDucking.removeSpeaker(event.id);
       }
-      void this.refreshOccupancy();
+      this.applyChannelView();
     });
   }
 
@@ -524,20 +539,6 @@ export class BotInstance extends EventEmitter {
     if (!this.connected) return;
     if (shouldResumeOnReturn(this.autoPaused, this.player.getState())) {
       this.handleOccupancy(1);
-    }
-  }
-
-  private async refreshOccupancy(): Promise<void> {
-    if (!this.connected) return;
-    try {
-      const clients = await this.tsClient.getClientsInChannel();
-      // A 0-length result means the clientlist query failed (the bot is always
-      // in its own channel) — occupancy is unknown, so don't act. Acting on it
-      // would mis-read it as "empty" and falsely auto-pause / idle-disconnect.
-      const userCount = occupancyFromClientList(clients.length);
-      if (userCount !== null) this.handleOccupancy(userCount);
-    } catch {
-      // ignore — the 30s poll is the fallback
     }
   }
 
@@ -629,18 +630,42 @@ export class BotInstance extends EventEmitter {
   }
 
   private _startIdlePoller(): void {
-    // 每 30 秒检查一次频道人数
+    // 每 30 秒做一次对账：占用判定已由事件源的 channelView 承担，这里仅在
+    // clientlist 查询能成功时（基本只剩独处场景）提供一次权威快照修正。
     const poll = async () => {
       if (!this.connected) return;
-      try {
-        const clients = await this.tsClient.getClientsInChannel();
-        // null = clientlist query failed (occupancy unknown) → don't act.
-        const userCount = occupancyFromClientList(clients.length);
-        if (userCount !== null) this.handleOccupancy(userCount);
-      } catch { /* ignore */ }
+      await this.reconcileChannelView();
       setTimeout(poll, 30_000);
     };
     setTimeout(poll, 30_000);
+  }
+
+  /** 用一次 clientlist 快照对账频道视图。查询失败（≥2 客户端时超时）即放弃——
+   *  它从不承担决策，只做修正。成功返回得包含 bot 自身（≥1），空数组视为失败。 */
+  private async reconcileChannelView(): Promise<void> {
+    if (!this.connected) return;
+    try {
+      const clients = await this.tsClient.getClientsInChannel();
+      if (clients.length === 0) return; // query failed → occupancy stays event-sourced
+      const selfId = this.tsClient.getClientId();
+      const selfChannel = this.tsClient.getChannelId();
+      if (!selfId || !selfChannel) return;
+      this.channelView.reconcileAll(
+        clients.map((c) => ({ id: c.id, channelID: c.channelID })),
+        selfId,
+        selfChannel,
+      );
+      this.applyChannelView();
+    } catch {
+      // ignore — events remain the source of truth
+    }
+  }
+
+  /** 把频道视图的占用结论交给自动暂停/闲置判定；未知（known=false）一律不动作 */
+  private applyChannelView(): void {
+    if (!this.connected) return;
+    const occ = this.channelView.occupancy();
+    if (occ.known) this.handleOccupancy(occ.count);
   }
 
   private handleOccupancy(userCount: number): void {
@@ -1348,11 +1373,22 @@ export class BotInstance extends EventEmitter {
     return "Paused";
   }
 
-  private cmdResume(): string {
-    this.player.resume();
-    if (this.queue.current()?.platform === "spotify") {
-      this.spotifyController.resume().catch((err) =>
-        this.logger.warn({ err }, "Spotify resume failed"));
+  private async cmdResume(): Promise<string> {
+    // 意图驱动："继续"不区分 paused 还是恢复后的 idle——idle 且队列有当前曲
+    //（忠实恢复的暂停态）时直接起播当前曲，否则该命令对用户是假成功。
+    if (this.player.getState() === "idle") {
+      const current = this.queue.current();
+      if (current) {
+        this.player.resetFailures();
+        const ok = await this.resolveAndPlay(current);
+        if (!ok) return "Failed to resume";
+      }
+    } else {
+      this.player.resume();
+      if (this.queue.current()?.platform === "spotify") {
+        this.spotifyController.resume().catch((err) =>
+          this.logger.warn({ err }, "Spotify resume failed"));
+      }
     }
     // User-initiated resume — drop any auto-pause flag.
     this.autoPaused = false;
@@ -1814,6 +1850,9 @@ export class BotInstance extends EventEmitter {
         mode: snap.mode,
         isFmMode: this.isFmMode,
         fmPlatform: this.isFmMode && this.fmProvider ? this.fmProvider.platform : "",
+        // 快照由 stateChange 驱动（播放/暂停/停止都会触发），这里读当前状态
+        // 即代表"关机那一刻"的播放态——忠实恢复依据它决定是否续播
+        wasPlaying: this.player.getState() === "playing",
       });
     } catch (err) {
       this.logger.warn({ err }, "queue snapshot persist failed");
@@ -1851,13 +1890,16 @@ export class BotInstance extends EventEmitter {
       this.isFmMode = true;
       this.fmProvider = this.getProviderFor(st.fmPlatform as Platform);
     }
+    // 忠实恢复：关机前在播 → 从当前曲重新起播（URL 重解析，进度归零）；
+    // 关机前是暂停/空闲 → 只恢复队列不出声（播放器保持 idle，用户点播放经
+    // cmdResume 的 idle 起播语义从当前曲开始）。频道无人时由自动暂停兜底。
     const current = this.queue.current();
-    if (current) {
+    if (current && st.wasPlaying) {
       this.player.resetFailures();
       await this.resolveAndPlay(current);
     }
     this.logger.info(
-      { count: st.songs.length, index: st.currentIndex },
+      { count: st.songs.length, index: st.currentIndex, wasPlaying: st.wasPlaying },
       "Restored live queue from snapshot",
     );
   }

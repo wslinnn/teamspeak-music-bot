@@ -720,7 +720,7 @@ describe("BotInstance.setupPlayerEvents — controller trackEnded wiring", () =>
 describe("BotInstance transport delegation — spotify current song", () => {
   function makeCmdCtx(currentPlatform: string) {
     return {
-      player: { pause: vi.fn(), resume: vi.fn(), stop: vi.fn() },
+      player: { pause: vi.fn(), resume: vi.fn(), stop: vi.fn(), getState: vi.fn(() => "paused" as const), resetFailures: vi.fn() },
       spotifyController: {
         pause: vi.fn(async () => {}),
         resume: vi.fn(async () => {}),
@@ -1483,7 +1483,7 @@ describe("BotInstance live-queue persistence (#119)", () => {
 
   it("clears the persisted row when the queue is empty", () => {
     const db = createDatabase(":memory:");
-    db.saveQueueState({ botId: "bot1", songs: [song119("a")], currentIndex: 0, mode: "seq", isFmMode: false, fmPlatform: "" });
+    db.saveQueueState({ botId: "bot1", songs: [song119("a")], currentIndex: 0, mode: "seq", isFmMode: false, fmPlatform: "", wasPlaying: false });
     const ctx = makeCtx(true, db);
     persistQueueSnapshot.call(ctx); // queue is empty
     expect(db.getQueueState("bot1")).toBeNull();
@@ -1491,7 +1491,7 @@ describe("BotInstance live-queue persistence (#119)", () => {
 
   it("restores and resumes the current track on restore", async () => {
     const db = createDatabase(":memory:");
-    db.saveQueueState({ botId: "bot1", songs: [song119("a"), song119("b")], currentIndex: 1, mode: "loop", isFmMode: false, fmPlatform: "" });
+    db.saveQueueState({ botId: "bot1", songs: [song119("a"), song119("b")], currentIndex: 1, mode: "loop", isFmMode: false, fmPlatform: "", wasPlaying: true });
     const ctx = makeCtx(true, db);
     await restoreQueueFromSnapshot.call(ctx);
     expect(ctx.queue.list().map((s: any) => s.id)).toEqual(["a", "b"]);
@@ -1500,9 +1500,19 @@ describe("BotInstance live-queue persistence (#119)", () => {
     expect(ctx.resolveAndPlay).toHaveBeenCalledTimes(1);
   });
 
+  it("restores the queue WITHOUT auto-playing when it was paused/idle at shutdown", async () => {
+    const db = createDatabase(":memory:");
+    db.saveQueueState({ botId: "bot1", songs: [song119("a"), song119("b")], currentIndex: 1, mode: "loop", isFmMode: false, fmPlatform: "", wasPlaying: false });
+    const ctx = makeCtx(true, db);
+    await restoreQueueFromSnapshot.call(ctx);
+    expect(ctx.queue.list().map((s: any) => s.id)).toEqual(["a", "b"]);
+    expect(ctx.queue.getCurrentIndex()).toBe(1);
+    expect(ctx.resolveAndPlay).not.toHaveBeenCalled();
+  });
+
   it("restores FM mode + provider from the snapshot", async () => {
     const db = createDatabase(":memory:");
-    db.saveQueueState({ botId: "bot1", songs: [song119("a")], currentIndex: 0, mode: "random", isFmMode: true, fmPlatform: "qq" });
+    db.saveQueueState({ botId: "bot1", songs: [song119("a")], currentIndex: 0, mode: "random", isFmMode: true, fmPlatform: "qq", wasPlaying: true });
     const ctx = makeCtx(true, db);
     await restoreQueueFromSnapshot.call(ctx);
     expect(ctx.isFmMode).toBe(true);
@@ -1511,7 +1521,7 @@ describe("BotInstance live-queue persistence (#119)", () => {
 
   it("does nothing when the feature is disabled", async () => {
     const db = createDatabase(":memory:");
-    db.saveQueueState({ botId: "bot1", songs: [song119("a")], currentIndex: 0, mode: "seq", isFmMode: false, fmPlatform: "" });
+    db.saveQueueState({ botId: "bot1", songs: [song119("a")], currentIndex: 0, mode: "seq", isFmMode: false, fmPlatform: "", wasPlaying: false });
     const ctx = makeCtx(false, db);
     await restoreQueueFromSnapshot.call(ctx);
     expect(ctx.queue.list()).toEqual([]);
@@ -1522,7 +1532,7 @@ describe("BotInstance live-queue persistence (#119)", () => {
     vi.useFakeTimers();
     try {
       const db = createDatabase(":memory:");
-      db.saveQueueState({ botId: "bot1", songs: [song119("a")], currentIndex: 0, mode: "seq", isFmMode: false, fmPlatform: "" });
+      db.saveQueueState({ botId: "bot1", songs: [song119("a")], currentIndex: 0, mode: "seq", isFmMode: false, fmPlatform: "", wasPlaying: false });
       const ctx = makeCtx(true, db);
       ctx.queue.add(song119("a"));
       ctx.queue.play();

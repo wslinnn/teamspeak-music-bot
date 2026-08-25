@@ -299,8 +299,8 @@ describe("database", () => {
 
   describe("queue_state", () => {
     it("upserts, reads back, and clears per bot", () => {
-      botDb.saveQueueState({ botId: "b1", songs: [sq("a")], currentIndex: 0, mode: "loop", isFmMode: true, fmPlatform: "netease" });
-      botDb.saveQueueState({ botId: "b1", songs: [sq("a"), sq("b")], currentIndex: 1, mode: "seq", isFmMode: false, fmPlatform: "" });
+      botDb.saveQueueState({ botId: "b1", songs: [sq("a")], currentIndex: 0, mode: "loop", isFmMode: true, fmPlatform: "netease", wasPlaying: true });
+      botDb.saveQueueState({ botId: "b1", songs: [sq("a"), sq("b")], currentIndex: 1, mode: "seq", isFmMode: false, fmPlatform: "", wasPlaying: false });
       const st = botDb.getQueueState("b1")!;
       expect(st.songs.map((s) => s.id)).toEqual(["a", "b"]);
       expect(st.currentIndex).toBe(1);
@@ -311,7 +311,7 @@ describe("database", () => {
     });
 
     it("round-trips FM flags and degrades a corrupt blob", () => {
-      botDb.saveQueueState({ botId: "b2", songs: [sq("a")], currentIndex: 0, mode: "random", isFmMode: true, fmPlatform: "qq" });
+      botDb.saveQueueState({ botId: "b2", songs: [sq("a")], currentIndex: 0, mode: "random", isFmMode: true, fmPlatform: "qq", wasPlaying: true });
       const st = botDb.getQueueState("b2")!;
       expect(st.isFmMode).toBe(true);
       expect(st.fmPlatform).toBe("qq");
