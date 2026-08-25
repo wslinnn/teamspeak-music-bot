@@ -50,6 +50,8 @@ export interface PlayHistoryEntry {
   album: string;
   platform: "netease" | "qq" | "bilibili" | "youtube" | "local" | "kugou" | "spotify" | "jellyfin";
   coverUrl: string;
+  /** 歌曲时长（秒）。旧记录/未知为 0——历史页时长显示与进度条跳转依赖它 */
+  duration?: number;
   requestedBy?: string;
 }
 
@@ -232,6 +234,9 @@ function migrateSchema(db: Database.Database): void {
   if (!historyColNames.includes("requestedBy")) {
     db.exec("ALTER TABLE play_history ADD COLUMN requestedBy TEXT NOT NULL DEFAULT ''");
   }
+  if (!historyColNames.includes("duration")) {
+    db.exec("ALTER TABLE play_history ADD COLUMN duration REAL NOT NULL DEFAULT 0");
+  }
 }
 
 function initTables(db: Database.Database): void {
@@ -246,6 +251,7 @@ function initTables(db: Database.Database): void {
       platform TEXT NOT NULL,
       coverUrl TEXT NOT NULL,
       requestedBy TEXT NOT NULL DEFAULT '',
+      duration REAL NOT NULL DEFAULT 0,
       playedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -410,8 +416,8 @@ export function createDatabase(dbPath: string): BotDatabase {
   ensureGuestUser(db);
 
   const insertHistory = db.prepare(`
-    INSERT INTO play_history (botId, songId, songName, artist, album, platform, coverUrl, requestedBy)
-    VALUES (@botId, @songId, @songName, @artist, @album, @platform, @coverUrl, @requestedBy)
+    INSERT INTO play_history (botId, songId, songName, artist, album, platform, coverUrl, requestedBy, duration)
+    VALUES (@botId, @songId, @songName, @artist, @album, @platform, @coverUrl, @requestedBy, @duration)
   `);
 
   const selectHistory = db.prepare(`
@@ -565,7 +571,8 @@ export function createDatabase(dbPath: string): BotDatabase {
     db,
 
     addPlayHistory(record) {
-      insertHistory.run({ ...record, requestedBy: record.requestedBy ?? "" });
+      // duration 缺省 0（历史记录可缺时长，接口层兜底）
+      insertHistory.run({ duration: 0, ...record, requestedBy: record.requestedBy ?? "" });
     },
 
     getPlayHistory(botId, limit) {

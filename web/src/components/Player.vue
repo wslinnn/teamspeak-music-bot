@@ -188,6 +188,8 @@ async function onProgressClick(e: MouseEvent) {
   const rect = bar.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   const duration = currentSong.value?.duration ?? 0;
+  // 时长未知（旧播放历史记录等）：禁用点击，否则 ratio*0 恒为 0 会跳回开头
+  if (duration <= 0) return;
   const seekTime = ratio * duration;
   await store.seek(seekTime);
 }

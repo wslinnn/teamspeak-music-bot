@@ -975,6 +975,19 @@ export class BotInstance extends EventEmitter {
         this.logger.warn({ songId: song.id, name: song.name }, "No URL available, skipping");
         return false;
       }
+      // 时长回填：播放历史等来源的歌曲可能缺 duration——进度条增长与点击
+      // 跳转都依赖它（除以 0 会导致进度条不动、每次点击跳回开头）。按
+      // songId 重新解析详情补全，失败不阻塞播放。
+      if (!song.duration || song.duration <= 0) {
+        try {
+          const detail = await provider.getSongDetail(song.id);
+          if (detail?.duration && detail.duration > 0) {
+            song.duration = detail.duration;
+          }
+        } catch {
+          this.logger.debug({ songId: song.id }, "duration 回填失败（getSongDetail）");
+        }
+      }
       // Re-check connection state AFTER the network round-trip — the URL
       // resolve can take multiple seconds and the user may have called stop
       // during that window. Without this, we'd spawn ffmpeg on a
@@ -1066,6 +1079,7 @@ export class BotInstance extends EventEmitter {
           platform: song.platform,
           coverUrl: song.coverUrl,
           requestedBy: song.requestedBy,
+          duration: song.duration,
         });
         await this.syncProfileToSong(song);
         this.emit("stateChange");
@@ -1099,6 +1113,7 @@ export class BotInstance extends EventEmitter {
         platform: song.platform,
         coverUrl: song.coverUrl,
         requestedBy: song.requestedBy,
+        duration: song.duration,
       });
       // Keep TeamSpeak-side profile updates on the same path for play/next/FM.
       await this.syncProfileToSong(song);

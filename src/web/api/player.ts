@@ -722,7 +722,7 @@ export function createPlayerRouter(
       name: r.songName,
       artist: r.artist,
       album: r.album,
-      duration: 0,
+      duration: r.duration ?? 0,
       coverUrl: r.coverUrl,
       platform: r.platform,
       playedAt: r.playedAt,
