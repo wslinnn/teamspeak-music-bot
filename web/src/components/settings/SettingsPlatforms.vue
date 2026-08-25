@@ -59,12 +59,36 @@
         </BaseButton>
       </div>
     </div>
+
+    <!-- Spotify OAuth（配置入口在「音源」页的连接卡片） -->
+    <div class="rounded-xl bg-interactive-hover p-5">
+      <div class="flex items-center gap-3 mb-4">
+        <Icon icon="mdi:spotify" class="text-[28px] text-[#1DB954]" />
+        <div>
+          <div class="text-[15px] font-semibold">Spotify</div>
+          <div class="text-xs" :class="spotifyStatusView.tone === 'ok' ? 'text-success' : 'text-foreground-subtle'">
+            {{ spotifyStatusView.label }}
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <BaseButton size="sm" :loading="connecting" :disabled="spotifyStatusView.tone === 'off'" @click="connectSpotify">
+          <Icon icon="mdi:open-in-new" class="mr-1" /> 连接 Spotify
+        </BaseButton>
+        <BaseButton size="sm" variant="secondary" :disabled="spotifyLoading" @click="loadSpotifyStatus">刷新</BaseButton>
+      </div>
+      <p class="text-xs text-text-tertiary mt-3">
+        走 OAuth 网页授权；回调地址由服务器公网地址（public-url）决定，需公网可达才能完成授权。
+      </p>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue';
+import { reactive, ref, computed, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
+import { http } from '../../utils/http';
+import { useToast } from '../../composables/useToast';
 import BaseButton from '../common/BaseButton.vue';
 import LoadingSpinner from '../common/LoadingSpinner.vue';
 
@@ -125,4 +149,59 @@ function qrStatusText(platform: string, status: QrState['status']) {
     default: return `请使用${name}APP扫码`;
   }
 }
+
+// ── Spotify OAuth（D6）：状态展示 + 跳转授权 ──
+interface SpotifyStatus {
+  authorized: boolean;
+  backend: string;
+  deviceName: string;
+  binaryAvailable: boolean;
+}
+
+const toast = useToast();
+const spotifyStatus = ref<SpotifyStatus | null>(null);
+const spotifyUnavailable = ref(false);
+const spotifyLoading = ref(false);
+const connecting = ref(false);
+
+const spotifyStatusView = computed(() => {
+  if (spotifyUnavailable.value) return { label: '未配置（先到「音源」页填写 Spotify 连接信息）', tone: 'off' as const };
+  if (!spotifyStatus.value) return { label: '未知', tone: 'warn' as const };
+  if (!spotifyStatus.value.binaryAvailable) return { label: '未检测到 librespot 可执行文件', tone: 'warn' as const };
+  if (!spotifyStatus.value.authorized) return { label: '未授权（点击"连接 Spotify"登录）', tone: 'warn' as const };
+  return { label: `已就绪 · 后端 ${spotifyStatus.value.backend}`, tone: 'ok' as const };
+});
+
+async function loadSpotifyStatus() {
+  spotifyLoading.value = true;
+  try {
+    const res = await http.get('/api/spotify/status');
+    spotifyStatus.value = res.data;
+    spotifyUnavailable.value = false;
+  } catch (err: any) {
+    // 404 = 服务端未启用 Spotify（未配置 clientId 时路由不挂载）
+    spotifyUnavailable.value = err?.response?.status === 404;
+    spotifyStatus.value = null;
+  } finally {
+    spotifyLoading.value = false;
+  }
+}
+
+async function connectSpotify() {
+  connecting.value = true;
+  try {
+    const res = await http.get('/api/spotify/login');
+    if (res.data.url) {
+      window.location.href = res.data.url as string;
+      return;
+    }
+    toast.error('获取授权链接失败');
+  } catch {
+    // 错误信息由 http 拦截器统一 toast
+  } finally {
+    connecting.value = false;
+  }
+}
+
+onMounted(loadSpotifyStatus);
 </script>
