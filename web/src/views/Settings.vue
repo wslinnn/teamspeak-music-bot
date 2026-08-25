@@ -32,10 +32,11 @@
 
         <SettingsPlatforms
           v-if="activeTab === 'platforms'"
-          :auth-states="{ netease: neteaseAuth, qq: qqAuth, bilibili: bilibiliAuth }"
-          :qr-states="{ netease: neteaseQr, qq: qqQr, bilibili: bilibiliQr }"
+          :auth-states="{ netease: neteaseAuth, qq: qqAuth, bilibili: bilibiliAuth, kugou: kugouAuth }"
+          :qr-states="{ netease: neteaseQr, qq: qqQr, bilibili: bilibiliQr, kugou: kugouQr }"
           @start-qr="startQrLogin"
           @save-cookie="saveCookie"
+          @refresh-auth="checkAuthStatus"
         />
 
         <SettingsBehavior v-if="activeTab === 'behavior'" />
@@ -298,6 +299,7 @@ async function removeAvatar() {
 const neteaseAuth = reactive({ loggedIn: false, nickname: '' });
 const qqAuth = reactive({ loggedIn: false, nickname: '' });
 const bilibiliAuth = reactive({ loggedIn: false, nickname: '' });
+const kugouAuth = reactive({ loggedIn: false, nickname: '' });
 
 interface QrState {
   loading: boolean;
@@ -310,9 +312,11 @@ interface QrState {
 const neteaseQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null });
 const qqQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null });
 const bilibiliQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null });
+const kugouQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null });
 
 function getQrState(platform: string): QrState {
   if (platform === 'bilibili') return bilibiliQr;
+  if (platform === 'kugou') return kugouQr;
   return platform === 'netease' ? neteaseQr : qqQr;
 }
 
@@ -466,14 +470,16 @@ async function createBot(form: { name: string; serverAddress: string; serverPort
 // ── Platform handlers ──
 async function checkAuthStatus() {
   try {
-    const [nRes, qRes, bRes] = await Promise.all([
+    const [nRes, qRes, bRes, kRes] = await Promise.all([
       http.get('/api/auth/status', { params: { platform: 'netease' } }),
       http.get('/api/auth/status', { params: { platform: 'qq' } }),
       http.get('/api/auth/status', { params: { platform: 'bilibili' } }),
+      http.get('/api/auth/status', { params: { platform: 'kugou' } }),
     ]);
     Object.assign(neteaseAuth, nRes.data);
     Object.assign(qqAuth, qRes.data);
     Object.assign(bilibiliAuth, bRes.data);
+    Object.assign(kugouAuth, kRes.data);
   } catch (err) {
     console.debug('checkAuthStatus failed:', err);
   }
