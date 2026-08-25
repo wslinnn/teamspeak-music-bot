@@ -62,7 +62,7 @@
           <Icon :icon="modeIcon" />
           <span class="text-[11px] font-medium">{{ modeLabel }}</span>
         </button>
-        <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-left hidden sm:inline">{{ formatTime(currentSong?.duration ?? 0) }}</span>
+        <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-left hidden sm:inline">{{ formatTime(activeDuration) }}</span>
       </div>
 
       <div class="w-[240px] flex items-center justify-end gap-2">
@@ -119,6 +119,10 @@ function openServerTree() {
 const store = usePlayerStore();
 const activeBot = computed(() => store.activeBot);
 const currentSong = computed(() => store.currentSong);
+// 进度条分母与总时长：试听曲优先 effectiveDuration（B1），否则完整曲长
+const activeDuration = computed(
+  () => activeBot.value?.effectiveDuration ?? currentSong.value?.duration ?? 0,
+);
 const showBotBadge = computed(() => store.bots.length > 1);
 
 function toggleLyrics() {
@@ -150,7 +154,7 @@ function formatTime(seconds: number): string {
 
 function updateProgress() {
   currentElapsed.value = store.elapsed;
-  const duration = currentSong.value?.duration ?? 0;
+  const duration = activeDuration.value;
   progressPercent.value = duration > 0
     ? Math.min((currentElapsed.value / duration) * 100, 100)
     : 0;
@@ -187,7 +191,7 @@ async function onProgressClick(e: MouseEvent) {
   if (!bar) return;
   const rect = bar.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  const duration = currentSong.value?.duration ?? 0;
+  const duration = activeDuration.value;
   // 时长未知（旧播放历史记录等）：禁用点击，否则 ratio*0 恒为 0 会跳回开头
   if (duration <= 0) return;
   const seekTime = ratio * duration;

@@ -201,6 +201,8 @@ export function createPlayerRouter(
       paused: st.paused,
       volume: st.volume,
       playMode: st.playMode,
+      // 试听曲的实际可播时长（进度条分母/总时长显示用，B1）
+      effectiveDuration: st.effectiveDuration,
     });
   });
 

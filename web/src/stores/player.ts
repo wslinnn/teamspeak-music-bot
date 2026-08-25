@@ -25,6 +25,8 @@ export interface BotStatus {
   volume: number;
   playMode: string;
   elapsed?: number;
+  /** 试听曲的实际可播时长（秒）；进度条分母与总时长优先用它（B1） */
+  effectiveDuration?: number;
 }
 
 export interface PlaylistItem {
@@ -89,7 +91,9 @@ export const usePlayerStore = defineStore('player', {
       const botId = this.activeBotId ?? this.bots[0]?.id;
       if (!botId || !this.activeBot?.currentSong) return 0;
       const timing = this.timings[botId] ?? defaultTiming();
-      const maxDuration = this.activeBot.currentSong.duration || Infinity;
+      // 试听曲按 effectiveDuration 钳制（B1）：否则进度条按完整曲长走不完
+      const maxDuration =
+        (this.activeBot.effectiveDuration ?? this.activeBot.currentSong.duration) || Infinity;
       if (!timing.wasPlaying || timing.serverSyncTime === 0) return Math.min(timing.serverElapsed, maxDuration);
       if (this.isPaused) return Math.min(timing.serverElapsed, maxDuration);
       return Math.min(timing.serverElapsed + (Date.now() - timing.serverSyncTime) / 1000, maxDuration);
@@ -241,6 +245,7 @@ export const usePlayerStore = defineStore('player', {
           bot.paused = res.data.paused ?? bot.paused;
           if (typeof res.data.volume === 'number') bot.volume = res.data.volume;
           if (res.data.playMode) bot.playMode = res.data.playMode;
+          if (typeof res.data.effectiveDuration === 'number') bot.effectiveDuration = res.data.effectiveDuration;
         }
         this._setTiming(this.activeBotId, {
           serverElapsed: res.data.elapsed,
