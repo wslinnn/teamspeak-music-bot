@@ -40,6 +40,8 @@
 
         <SettingsBehavior v-if="activeTab === 'behavior'" />
 
+        <SettingsSources v-if="activeTab === 'sources'" />
+
         <SettingsPermissions v-if="activeTab === 'permissions'" />
 
         <SettingsUsers v-if="activeTab === 'users'" />
@@ -79,6 +81,11 @@
           <label class="block text-xs font-semibold opacity-70 mb-1">服务器密码（可选）</label>
           <input v-model="editForm.serverPassword" type="password" class="input" />
         </div>
+        <BaseToggle
+          v-model="editForm.autoStart"
+          label="随服务自启"
+          hint="进程/Docker 重启后自动连接该机器人"
+        />
 
         <div class="border-t border-border-default pt-4 mt-2">
           <h4 class="text-sm font-semibold mb-1">自定义头像</h4>
@@ -170,6 +177,7 @@ import SettingsGeneral from '../components/settings/SettingsGeneral.vue';
 import SettingsBots from '../components/settings/SettingsBots.vue';
 import SettingsPlatforms from '../components/settings/SettingsPlatforms.vue';
 import SettingsBehavior from '../components/settings/SettingsBehavior.vue';
+import SettingsSources from '../components/settings/SettingsSources.vue';
 import SettingsPermissions from '../components/settings/SettingsPermissions.vue';
 import SettingsUsers from '../components/settings/SettingsUsers.vue';
 import BaseModal from '../components/common/BaseModal.vue';
@@ -188,6 +196,7 @@ const tabs = computed(() => {
     { key: 'behavior', label: '行为设置', icon: 'mdi:tune' },
   ];
   if (authStore.isAdmin) {
+    list.push({ key: 'sources', label: '音源', icon: 'mdi:music-box-multiple' });
     list.push({ key: 'permissions', label: '权限', icon: 'mdi:shield-key' });
     list.push({ key: 'users', label: '用户', icon: 'mdi:account-group' });
   }
@@ -204,6 +213,7 @@ const editModalOpen = ref(false);
 const editForm = reactive({
   name: '', serverAddress: '', serverPort: 9987, nickname: '',
   defaultChannel: '', channelPassword: '', serverPassword: '',
+  autoStart: false,
 });
 const profileForm = reactive({
   avatarEnabled: true,
@@ -371,6 +381,7 @@ async function openEditBot(bot: BotStatus) {
     editForm.defaultChannel = res.data.defaultChannel ?? '';
     editForm.channelPassword = res.data.channelPassword ?? '';
     editForm.serverPassword = res.data.serverPassword ?? '';
+    editForm.autoStart = res.data.autoStart === true;
   } catch {
     editForm.serverAddress = '';
     editForm.serverPort = 9987;
@@ -428,7 +439,7 @@ async function deleteBot(botId: string, botName: string) {
   }
 }
 
-async function createBot(form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; serverPassword: string }) {
+async function createBot(form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; channelPassword: string; serverPassword: string; autoStart: boolean }) {
   if (!form.name || !form.serverAddress) return;
   try {
     await http.post('/api/bot', {
@@ -437,8 +448,9 @@ async function createBot(form: { name: string; serverAddress: string; serverPort
       serverPort: form.serverPort || 9987,
       nickname: form.nickname || form.name,
       defaultChannel: form.defaultChannel || undefined,
+      channelPassword: form.channelPassword || undefined,
       serverPassword: form.serverPassword || undefined,
-      autoStart: false,
+      autoStart: form.autoStart === true,
     });
     await store.fetchBots();
     toast.success('机器人已创建');
