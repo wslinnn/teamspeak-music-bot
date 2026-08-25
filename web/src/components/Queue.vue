@@ -128,23 +128,25 @@
           class="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-sm)] hover:bg-hover-bg group"
         >
           <Icon icon="mdi:playlist-music" class="text-lg opacity-50 shrink-0" />
-          <div class="flex-1 min-w-0">
-            <div class="text-sm font-medium truncate">
-              {{ sq.name }}
-              <span
-                v-if="sq.shared"
-                class="text-[10px] font-semibold px-1 py-px rounded bg-primary/15 text-primary align-middle"
-              >共享</span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium truncate">
+                {{ sq.name }}
+                <span
+                  v-if="sq.shared"
+                  class="text-[10px] font-semibold px-1 py-px rounded bg-primary/15 text-primary align-middle"
+                  >共享</span>
+              </div>
+              <div class="text-xs text-text-tertiary">
+                {{ sq.songCount }} 首<template v-if="sq.ownerName"> · 创建人 {{ sq.ownerName }}</template>
+              </div>
             </div>
-            <div class="text-xs text-text-tertiary">{{ sq.songCount }} 首</div>
-          </div>
           <button class="text-sm px-2 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium bg-interactive-hover hover:bg-primary hover:text-white transition-colors" title="替换当前队列并播放" @click="loadQueue(sq, 'replace')">
             加载
           </button>
           <button class="text-sm px-2 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium bg-interactive-hover hover:bg-primary hover:text-white transition-colors" title="追加到队列末尾" @click="loadQueue(sq, 'append')">
             追加
           </button>
-          <button class="text-base opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-text-tertiary hover:text-danger" title="删除" @click="deleteQueue(sq)">
+          <button v-if="sq.canDelete" class="text-base opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-text-tertiary hover:text-danger" title="删除" @click="deleteQueue(sq)">
             <Icon icon="mdi:close" />
           </button>
         </div>
@@ -174,6 +176,9 @@ interface SavedQueue {
   name: string;
   songCount: number;
   shared: boolean;
+  ownerName?: string | null;
+  /** 后端按调用者算好的删除权：私有=本人；共享=创建人或 admin */
+  canDelete?: boolean;
 }
 
 const props = defineProps<{

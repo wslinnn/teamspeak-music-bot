@@ -1,5 +1,6 @@
 <template>
   <button
+    v-if="!auth.isGuest"
     class="flex h-7 w-7 items-center justify-center rounded-full text-lg transition-all duration-200 hover:bg-interactive-hover"
     :class="isActive ? 'text-danger' : 'text-foreground-muted hover:text-foreground'"
     @click.stop="toggle"
@@ -13,6 +14,7 @@
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useFavoritesStore } from '../stores/favorites';
+import { useAuthStore } from '../stores/auth';
 
 const props = defineProps<{
   songId: string;
@@ -24,6 +26,8 @@ const props = defineProps<{
 }>();
 
 const favoritesStore = useFavoritesStore();
+// 歌曲收藏按 WebUI 用户隔离，游客无此接口权限——红心直接不显示
+const auth = useAuthStore();
 const isActive = computed(() =>
   favoritesStore.isFavorite(props.songId, props.platform)
 );

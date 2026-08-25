@@ -18,6 +18,7 @@ import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerStore } from './stores/player.js';
 import { useAuthStore } from './stores/auth';
+import { useFavoritesStore } from './stores/favorites';
 import { useWebSocket } from './composables/useWebSocket.js';
 import { useToast } from './composables/useToast';
 import Navbar from './components/Navbar.vue';
@@ -28,6 +29,7 @@ const route = useRoute();
 const router = useRouter();
 const playerStore = usePlayerStore();
 const authStore = useAuthStore();
+const favoritesStore = useFavoritesStore();
 const toast = useToast();
 const theme = computed(() => playerStore.theme);
 const { connect } = useWebSocket();
@@ -66,8 +68,9 @@ onMounted(async () => {
   await playerStore.fetchBots();
   const routeBot = route.query.bot;
   playerStore.applyScopeFromQuery(typeof routeBot === 'string' ? routeBot : null);
-  // 非游客预取歌单收藏（搜索/歌单页红心与 Library 页共用）与功能开关（已存清单显隐）
+  // 非游客预取歌曲收藏（全站红心即时可用，不必先进收藏页）与歌单收藏/功能开关
   if (!authStore.isGuest) {
+    favoritesStore.fetchFavorites();
     playerStore.fetchFavoritedPlaylists();
     playerStore.fetchBotSettings();
     playerStore.fetchAuthStatus();
