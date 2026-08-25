@@ -80,6 +80,9 @@ export const usePlayerStore = defineStore('player', {
 
     // 歌单收藏（按 WebUI 用户隔离）
     favoritedPlaylists: [] as FavoritePlaylist[],
+
+    // 已存清单功能开关（GET /api/bot/settings；控制 Queue 抽屉的清单按钮显隐）
+    savedQueuesEnabled: false,
   }),
 
   getters: {
@@ -240,6 +243,16 @@ export const usePlayerStore = defineStore('player', {
         this.favoritedPlaylists = res.data.favorites ?? [];
       } catch {
         // 非关键数据，静默失败
+      }
+    },
+
+    /** 拉取 bot 全局设置里的功能开关（当前只消费 savedQueuesEnabled） */
+    async fetchBotSettings() {
+      try {
+        const res = await http.get('/api/bot/settings');
+        this.savedQueuesEnabled = res.data?.savedQueuesEnabled === true;
+      } catch {
+        // 拉不到保持默认（隐藏），后端禁用时清单接口本就 403
       }
     },
 

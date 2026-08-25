@@ -19,7 +19,7 @@
         </div>
         <div class="flex items-center gap-2">
           <button
-            v-if="botQueue.length > 0"
+            v-if="canUseSavedQueues && botQueue.length > 0"
             class="text-lg opacity-60 transition-opacity hover:opacity-100"
             @click="openSaveModal"
             title="保存当前队列为清单"
@@ -27,6 +27,7 @@
             <Icon icon="mdi:content-save-outline" />
           </button>
           <button
+            v-if="canUseSavedQueues"
             class="text-lg opacity-60 transition-opacity hover:opacity-100"
             @click="openListModal"
             title="已存清单"
@@ -189,6 +190,8 @@ const botQueue = computed(() => store.queue);
 // 队列操作显隐（D14）：清空=控制权或游客 removeClear；移除单曲=入队权或游客 removeClear
 const canClear = computed(() => auth.can('player.control') || auth.guestCan('removeClear'));
 const canRemove = computed(() => auth.can('player.queue') || auth.guestCan('removeClear'));
+// 已存清单：需管理员在 设置→行为 开启（savedQueuesEnabled），且游客无此功能
+const canUseSavedQueues = computed(() => store.savedQueuesEnabled && !auth.isGuest);
 
 // Fetch queue when panel opens
 watch(() => props.open, (isOpen) => {

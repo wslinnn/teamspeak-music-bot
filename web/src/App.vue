@@ -66,9 +66,10 @@ onMounted(async () => {
   await playerStore.fetchBots();
   const routeBot = route.query.bot;
   playerStore.applyScopeFromQuery(typeof routeBot === 'string' ? routeBot : null);
-  // 非游客预取歌单收藏（搜索/歌单页红心与 Library 页共用）
+  // 非游客预取歌单收藏（搜索/歌单页红心与 Library 页共用）与功能开关（已存清单显隐）
   if (!authStore.isGuest) {
     playerStore.fetchFavoritedPlaylists();
+    playerStore.fetchBotSettings();
   }
   // Spotify OAuth 回跳结果（/?spotify=success|error）：提示并清掉查询参数
   const spotifyResult = route.query.spotify;
