@@ -34,7 +34,7 @@
             <Icon icon="mdi:playlist-music" />
           </button>
           <button
-            v-if="botQueue.length > 0"
+            v-if="botQueue.length > 0 && canClear"
             class="text-lg opacity-60 transition-opacity hover:opacity-100"
             @click="clearAndStop"
             title="清空队列并停止播放"
@@ -82,7 +82,7 @@
                 :cover-url="song.coverUrl"
                 :duration="song.duration"
               />
-              <button class="text-sm opacity-0 p-1 rounded-[var(--radius-sm)] transition-opacity text-text-tertiary hover:text-text-primary group-hover:opacity-100" @click="removeSong(i)" title="移除">
+              <button v-if="canRemove" class="text-sm opacity-0 p-1 rounded-[var(--radius-sm)] transition-opacity text-text-tertiary hover:text-text-primary group-hover:opacity-100" @click="removeSong(i)" title="移除">
                 <Icon icon="mdi:close" />
               </button>
             </div>
@@ -158,6 +158,7 @@ import { Icon } from '@iconify/vue';
 import draggable from 'vuedraggable';
 import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
+import { useAuthStore } from '../stores/auth';
 import { useToast } from '../composables/useToast';
 import CoverArt from './CoverArt.vue';
 import FavoriteButton from './FavoriteButton.vue';
@@ -183,7 +184,11 @@ defineEmits<{
 }>();
 
 const store = usePlayerStore();
+const auth = useAuthStore();
 const botQueue = computed(() => store.queue);
+// 队列操作显隐（D14）：清空=控制权或游客 removeClear；移除单曲=入队权或游客 removeClear
+const canClear = computed(() => auth.can('player.control') || auth.guestCan('removeClear'));
+const canRemove = computed(() => auth.can('player.queue') || auth.guestCan('removeClear'));
 
 // Fetch queue when panel opens
 watch(() => props.open, (isOpen) => {

@@ -1,13 +1,14 @@
 <template>
   <div
     class="group relative cursor-pointer overflow-hidden rounded-[var(--radius-md)] bg-surface-card transition-all duration-200 hover:brightness-[1.02]"
-    @click="$emit('play')"
+    :class="{ 'cursor-default': !showPlay }"
+    @click="showPlay && $emit('play')"
   >
     <!-- Cover -->
     <div class="relative aspect-square overflow-hidden">
       <CoverArt :url="song.coverUrl" :fill="true" :radius="0" />
       <!-- Hover play overlay -->
-      <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+      <div v-if="showPlay" class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
         <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
           <Icon icon="mdi:play" class="text-2xl" />
         </div>
@@ -37,6 +38,7 @@
             :duration="song.duration"
           />
           <button
+            v-if="showPlayNext"
             class="flex h-7 w-7 items-center justify-center rounded-full text-foreground-muted transition-all duration-200 hover:bg-interactive-hover hover:text-primary"
             @click.stop="$emit('playnext')"
             title="下一首播放"
@@ -44,6 +46,7 @@
             <Icon icon="mdi:playlist-play" class="text-lg" />
           </button>
           <button
+            v-if="showAdd"
             class="flex h-7 w-7 items-center justify-center rounded-full text-foreground-muted transition-all duration-200 hover:bg-interactive-hover hover:text-primary"
             @click.stop="$emit('add')"
             title="添加到队列"
@@ -64,9 +67,16 @@ import CoverArt from './CoverArt.vue';
 import FavoriteButton from './FavoriteButton.vue';
 import { formatDuration } from '../utils/format';
 import { getPlatformLabel, getPlatformTailwindClass } from '../utils/platform';
+import { useAuthStore } from '../stores/auth';
 
 const props = defineProps<{ song: Song }>();
 defineEmits<{ play: []; playnext: []; add: [] }>();
+
+// 操作按钮显隐（D14）：无权限的入口直接不渲染，避免点击后 403
+const auth = useAuthStore();
+const showPlay = computed(() => auth.can('player.control') || auth.guestCan('playNow'));
+const showPlayNext = computed(() => auth.can('player.control') || auth.guestCan('playNext'));
+const showAdd = computed(() => auth.can('player.queue') || auth.guestCan('addToQueue'));
 
 const platformLabel = computed(() => getPlatformLabel(props.song.platform));
 const platformBadgeClass = computed(() => getPlatformTailwindClass(props.song.platform));

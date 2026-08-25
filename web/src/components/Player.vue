@@ -5,7 +5,8 @@
     <div class="h-[var(--player-height)] flex items-center px-6 relative frosted-glass">
       <!-- Progress bar -->
       <div
-        class="absolute -top-1.5 left-0 right-0 h-3 cursor-pointer z-[101] flex items-center px-0"
+        class="absolute -top-1.5 left-0 right-0 h-3 z-[101] flex items-center px-0"
+        :class="canTransport ? 'cursor-pointer' : ''"
         ref="progressBarRef"
         @click="onProgressClick"
         @mousemove="onProgressHover"
@@ -49,16 +50,16 @@
 
       <div class="flex-1 flex justify-center items-center gap-5">
         <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-right hidden sm:inline">{{ formatTime(currentElapsed) }}</span>
-        <button aria-label="上一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.prev()">
+        <button v-if="canControl" aria-label="上一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.prev()">
           <Icon icon="mdi:skip-previous" />
         </button>
-        <button :aria-label="store.isPlaying ? '暂停' : '播放'" class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-lg text-white transition-transform duration-[var(--transition-fast)] hover:scale-[1.08] active:scale-95" @click="togglePlay">
+        <button v-if="canTransport" :aria-label="store.isPlaying ? '暂停' : '播放'" class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-lg text-white transition-transform duration-[var(--transition-fast)] hover:scale-[1.08] active:scale-95" @click="togglePlay">
           <Icon :icon="store.isPlaying ? 'mdi:pause' : 'mdi:play'" />
         </button>
-        <button aria-label="下一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.next()">
+        <button v-if="canSkip" aria-label="下一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.next()">
           <Icon icon="mdi:skip-next" />
         </button>
-        <button :aria-label="`播放模式: ${modeLabel}`" class="hidden sm:flex items-center gap-1 text-lg opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="cycleMode" :title="modeLabel">
+        <button v-if="canModeCtl" :aria-label="`播放模式: ${modeLabel}`" class="hidden sm:flex items-center gap-1 text-lg opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="cycleMode" :title="modeLabel">
           <Icon :icon="modeIcon" />
           <span class="text-[11px] font-medium">{{ modeLabel }}</span>
         </button>
@@ -67,17 +68,20 @@
 
       <div class="w-[240px] flex items-center justify-end gap-2">
         <!-- Desktop volume -->
-        <Icon icon="mdi:volume-high" class="text-lg opacity-60 hidden sm:block" />
-        <input
-          type="range"
-          min="0"
-          max="100"
-          :value="activeBot?.volume ?? 75"
-          @change="onVolumeChange"
-          class="volume-slider hidden sm:block"
-        />
+        <template v-if="canTransport">
+          <Icon icon="mdi:volume-high" class="text-lg opacity-60 hidden sm:block" />
+          <input
+            type="range"
+            min="0"
+            max="100"
+            :value="activeBot?.volume ?? 75"
+            @change="onVolumeChange"
+            class="volume-slider hidden sm:block"
+          />
+        </template>
         <!-- Mobile volume button -->
         <button
+          v-if="canTransport || canModeCtl"
           class="sm:hidden text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100"
           aria-label="音量与播放设置"
           @click="mobileControlsOpen = true"
@@ -99,6 +103,7 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerStore } from '../stores/player.js';
+import { useAuthStore } from '../stores/auth';
 import CoverArt from './CoverArt.vue';
 import Queue from './Queue.vue';
 import PlayingIndicator from './PlayingIndicator.vue';
@@ -117,8 +122,14 @@ function openServerTree() {
 }
 
 const store = usePlayerStore();
+const auth = useAuthStore();
 const activeBot = computed(() => store.activeBot);
 const currentSong = computed(() => store.currentSong);
+// 按钮显隐门控（D14）：member 走 capabilities，游客走 guestMode 逐项开关
+const canControl = computed(() => auth.can('player.control'));
+const canTransport = computed(() => auth.can('player.control') || auth.guestCan('transport'));
+const canSkip = computed(() => auth.can('player.control') || auth.guestCan('skip'));
+const canModeCtl = computed(() => auth.can('player.control') || auth.guestCan('playMode'));
 // 进度条分母与总时长：试听曲优先 effectiveDuration（B1），否则完整曲长
 const activeDuration = computed(
   () => activeBot.value?.effectiveDuration ?? currentSong.value?.duration ?? 0,
@@ -187,6 +198,7 @@ function onVisibilityChange() {
 }
 
 async function onProgressClick(e: MouseEvent) {
+  if (!canTransport.value) return;
   const bar = progressBarRef.value;
   if (!bar) return;
   const rect = bar.getBoundingClientRect();

@@ -33,7 +33,7 @@
         </div>
 
         <!-- Volume section -->
-        <div class="mb-6">
+        <div v-if="canTransport" class="mb-6">
           <div class="flex items-center justify-between mb-3">
             <span class="text-sm font-medium text-text-secondary">音量</span>
             <span class="text-sm text-text-primary font-semibold tabular-nums">{{ sliderVolume }}%</span>
@@ -53,10 +53,10 @@
         </div>
 
         <!-- Divider -->
-        <div class="h-px bg-border-color mb-5" />
+        <div v-if="canTransport && canModeCtl" class="h-px bg-border-color mb-5" />
 
         <!-- Play mode section -->
-        <div class="grid grid-cols-4 gap-2">
+        <div v-if="canModeCtl" class="grid grid-cols-4 gap-2">
           <button
             v-for="mode in modes"
             :key="mode.key"
@@ -77,6 +77,7 @@
 import { computed, ref, watch } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../stores/player.js';
+import { useAuthStore } from '../stores/auth';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -87,6 +88,9 @@ const emit = defineEmits<{
 }>();
 
 const store = usePlayerStore();
+const auth = useAuthStore();
+const canTransport = computed(() => auth.can('player.control') || auth.guestCan('transport'));
+const canModeCtl = computed(() => auth.can('player.control') || auth.guestCan('playMode'));
 const activeBot = computed(() => store.activeBot);
 const storeVolume = computed(() => activeBot.value?.volume ?? 75);
 const currentMode = computed(() => activeBot.value?.playMode ?? 'seq');

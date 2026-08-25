@@ -6,6 +6,12 @@ export interface SessionUser {
   id: string;
   username: string;
   role: 'admin' | 'member' | 'guest';
+  /** 细粒度能力（/api/session/me 返回；admin 恒全量） */
+  capabilities?: string[];
+  /** 可控 bot 白名单："all" 或 id 列表 */
+  bots?: 'all' | string[];
+  /** 游客模式逐项开关（仅 role=guest 时有值） */
+  guest?: Record<string, boolean> | null;
 }
 
 const ROLE_LABELS: Record<SessionUser['role'], string> = {
@@ -32,6 +38,32 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = null;
   }
 
+  /** 拉取权威会话信息（含 capabilities/bots/guest 开关；登录等接口的响应不带这些字段） */
+  async function refreshMe(): Promise<void> {
+    const me = await http.get('/api/session/me');
+    user.value = me.data as SessionUser;
+  }
+
+  /** 是否具备某项能力（admin 恒有） */
+  function can(cap: string): boolean {
+    const u = user.value;
+    return !!u && (u.role === 'admin' || (u.capabilities ?? []).includes(cap));
+  }
+
+  /** 游客模式逐项开关（transport/skip/playMode/playNow/playNext/addToQueue/removeClear…） */
+  function guestCan(flag: string): boolean {
+    const u = user.value;
+    return !!u && u.role === 'guest' && u.guest?.[flag] === true;
+  }
+
+  /** 是否可控制指定 bot（bot 白名单） */
+  function canControlBot(botId: string): boolean {
+    const u = user.value;
+    if (!u) return false;
+    if (u.role === 'admin' || u.bots === 'all') return true;
+    return Array.isArray(u.bots) && u.bots.includes(botId);
+  }
+
   /** 首次加载：查询初始化状态并尝试从 Cookie 恢复会话 */
   async function init(): Promise<void> {
     if (initPromise) return initPromise;
@@ -51,7 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (!needsSetup.value) {
         try {
           const me = await http.get('/api/session/me');
-          user.value = { id: me.data.id, username: me.data.username, role: me.data.role };
+          user.value = me.data as SessionUser;
         } catch (meErr: unknown) {
           const meStatus = (meErr as any)?.response?.status;
           if (meStatus && meStatus !== 401) {
@@ -73,6 +105,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await http.post('/api/session/login', { username: name, password });
       user.value = { id: res.data.id, username: res.data.username, role: res.data.role };
+      await refreshMe().catch(() => {});
       return true;
     } catch (err: unknown) {
       const msg =
@@ -91,6 +124,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await http.post('/api/session/guest');
       user.value = { id: res.data.id, username: res.data.username, role: res.data.role };
+      await refreshMe().catch(() => {});
       return true;
     } catch (err: unknown) {
       const msg =
@@ -110,6 +144,7 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await http.post('/api/session/setup', { username: name, password });
       user.value = { id: res.data.id, username: res.data.username, role: res.data.role };
       needsSetup.value = false;
+      await refreshMe().catch(() => {});
       return true;
     } catch (err: unknown) {
       const msg =
@@ -145,10 +180,14 @@ export const useAuthStore = defineStore('auth', () => {
     isAdmin,
     isGuest,
     init,
+    refreshMe,
     login,
     loginGuest,
     setup,
     logout,
     clearSession,
+    can,
+    guestCan,
+    canControlBot,
   };
 });
