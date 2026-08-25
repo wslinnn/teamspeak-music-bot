@@ -15,7 +15,7 @@
 | 维度 | 结论 |
 |------|------|
 | 功能覆盖 | 上游功能面 main 已覆盖 **约 95%**；真正仍缺的只有 4 处：按用户权限编辑器（D9，二期）、音量滑块拖拽实时预览（#111）、搜索 albums/playlists 分页、Home 每日推荐/推荐歌单多源切换 |
-| fork 领先项 | 歌曲收藏（含独立页）、服务器频道树、队列拖拽重排、已存清单收纳进抽屉、播放历史搜索+分页、WS 4001 断线语义+指数退避、音源六项管理开关、网易云短信登录、PWA、浅色主题导航按钮、修改密码防误登出、移动端控制抽屉、D14 门控口径统一 |
+| fork 领先项 | 存量优势：歌曲收藏（含独立页）、服务器频道树、队列拖拽重排、已存清单收纳进抽屉、播放历史搜索+分页、WS 4001 断线语义+指数退避、PWA **离线缓存（SW 层）**、移动端控制抽屉、D14 门控口径统一；本轮追赶中反超：音源六项管理开关、网易云短信登录 |
 | 框架版本 | **两边等价**：Vue 3.5 + TypeScript 5.8 + Vite 6.3。FORK.md 旧表述"上游 Vite 5"已过时（本次勘误） |
 | 样式体系 | 设计性分歧：上游 SCSS（global/mobile/variables 三文件）；main Tailwind 4 + CSS 变量 + 自研 Base* 组件族（10 个） |
 | 前端测试 | 上游领先：web/src 内 6 个单测文件（searchPagination/scope/elapsed/savedQueues/useDecoupledSlider/useSpotifySettings，root vitest 跑）；main 前端零单测 |
@@ -179,19 +179,21 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 
 ## 八、fork 独有功能汇总（上游合并候选）
 
-| 功能 | 入口 | 备注 |
-|------|------|------|
-| 歌曲收藏（跨端按用户） | `/favorites` 页 + 卡片红心 + WS 事件 | 上游仅有歌单收藏 |
-| TS 服务器频道树/加入频道 | Navbar"服务器" + ServerTreeDrawer | — |
-| 队列拖拽重排 | Queue 抽屉 | 上游无重排 |
-| 播放历史搜索+分页 | History 页 | 上游一次性全量 |
-| WS 4001 认证失效语义 + 指数退避 | useWebSocket | 上游为裸 401+3s 死循环 |
-| 音源六项管理开关 + 默认音源 | 设置→音源（D0） | 上游只能翻转 jellyfin |
-| 网易云短信登录 | 设置→音乐账号（D7） | 上游无 UI |
-| PWA 离线缓存 | vite-plugin-pwa | — |
-| 修改密码防误登出（selfHandled401） | utils/http.ts | 上游 401 语义混用 |
-| 移动端播放控制抽屉 | MobilePlayerControls | 上游为 App 级 mini player |
-| 浅色主题一键切换（Navbar） | Navbar/SettingsTheme | 上游入口仅 Settings |
+> 标注口径：【存量】= 本轮工作之前就在 main 上的 fork 原生功能；【反超】= 本轮追赶上游时把其休眠后端做全 UI 而形成的超集。避免把"新近反超"误读为"历史优势"。
+
+| 功能 | 入口 | 性质 | 备注 |
+|------|------|------|------|
+| 歌曲收藏（跨端按用户） | `/favorites` 页 + 卡片红心 + WS 事件 | 存量 | 上游仅有歌单收藏 |
+| TS 服务器频道树/加入频道 | Navbar"服务器" + ServerTreeDrawer | 存量 | — |
+| 队列拖拽重排 | Queue 抽屉 | 存量 | 上游无重排 |
+| 播放历史搜索+分页 | History 页 | 存量 | 上游一次性全量 |
+| WS 4001 认证失效语义 + 指数退避 | useWebSocket | 存量 | 上游为裸 401+3s 死循环；fork 前端早已等待 4001，B3 是后端对齐 |
+| PWA 离线缓存（Service Worker） | vite-plugin-pwa（构建生成 sw.js + workbox 预缓存） | 存量 | **可安装基座两边都有**（site.webmanifest + icon-192/512/maskable + theme-color 为上游原有，public 文件两侧一致）；fork 独有的是 SW 离线缓存层，上游无任何 Service Worker |
+| 移动端播放控制抽屉 | MobilePlayerControls | 存量 | 上游为 App 级 mini player |
+| 修改密码防误登出（selfHandled401） | utils/http.ts | 反超（实现细节） | D2 配套：main 统一 axios 拦截器才需要；上游用裸 fetch 无此问题 |
+| 音源六项管理开关 + 默认音源 | 设置→音源（D0） | 反超 | 底层配置/端点为上游的；上游只有 Jellyfin 卡一个翻转入口（其注释自述） |
+| 网易云短信登录 | 设置→音乐账号（D7） | 反超 | 上游后端有 sms 端点但前端从未消费 |
+| 浅色主题一键切换（Navbar） | Navbar/SettingsTheme | 存量（细节） | 两边都有主题；差的是入口位置 |
 
 ---
 
