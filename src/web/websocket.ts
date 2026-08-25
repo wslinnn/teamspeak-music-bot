@@ -183,8 +183,10 @@ export function setupWebSocket(
       const w = ws as unknown as { isGuest?: boolean; botScope?: "all" | Set<string> };
       if (!w.isGuest) continue;
       if (!cfg.enabled) {
+        // 4001 = 认证失效（与 upgrade 阶段的关闭码一致，B3）：前端据此提示
+        // 重新登录而不是盲目重连
         try {
-          ws.close(1008, "guest mode disabled");
+          ws.close(4001, "guest mode disabled");
         } catch {
           // socket may already be closing; ignore
         }

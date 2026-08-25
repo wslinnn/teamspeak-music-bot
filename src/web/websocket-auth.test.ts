@@ -18,8 +18,9 @@ function buildServer(sessions: ReturnType<typeof createSessionStore>) {
     if (req.url !== "/ws") return socket.destroy();
     const r = validateSessionFromHeaders(req.headers.cookie as string | undefined, sessions);
     if (!r) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-      socket.destroy();
+      // 与生产一致（B3）：完成握手后以 4001 关闭，让浏览器端拿到认证失败
+      // 关闭码而非裸 401（浏览器只会报 1006）
+      wss.handleUpgrade(req, socket, head, (ws) => ws.close(4001, "session expired"));
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
@@ -51,14 +52,15 @@ describe("WebSocket auth at upgrade", () => {
     botDb.close();
   });
 
-  it("rejects upgrade without cookie (server-side close before open)", async () => {
+  it("closes an unauthenticated upgrade with 4001 (auth-failure close code)", async () => {
     const ws = new WSClient(`ws://127.0.0.1:${port}/ws`);
-    const result = await new Promise<string>((resolve) => {
-      ws.on("open", () => resolve("opened"));
+    const result = await new Promise<{ code: number } | string>((resolve) => {
+      ws.on("close", (code: number) => resolve({ code }));
       ws.on("unexpected-response", (_req, res) => resolve(`status:${res.statusCode}`));
       ws.on("error", () => resolve("error"));
     });
-    expect(result).toMatch(/^status:401$|^error$/);
+    // 前端 useWebSocket 以 4001 停止重连并引导重新登录（B3 契约）
+    expect(result).toEqual({ code: 4001 });
   });
 
   it("accepts upgrade with a valid cookie", async () => {
@@ -162,7 +164,7 @@ describe("WebSocket refreshGuestPolicy", () => {
     controller.refreshGuestPolicy({ enabled: false, bots: "all" });
 
     expect(guest.closeCalls.length).toBe(1);
-    expect(guest.closeCalls[0].code).toBe(1008);
+    expect(guest.closeCalls[0].code).toBe(4001);
     expect(member.closeCalls.length).toBe(0);
   });
 

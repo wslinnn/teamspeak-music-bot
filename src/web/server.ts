@@ -268,14 +268,15 @@ export function createWebServer(options: WebServerOptions): WebServer {
     }
     const result = validateSessionFromHeaders(req.headers.cookie as string | undefined, sessions);
     if (!result) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-      socket.destroy();
+      // 认证失败：完成握手后以 4001 关闭（B3）。前端 useWebSocket 以 4001
+      // 判定"请重新登录"并停止重连；裸 401 拒绝只会让浏览器报 1006，前端
+      // 陷入无效重连循环、与 HTTP 401 跳转互相打架。
+      wss.handleUpgrade(req, socket, head, (ws) => ws.close(4001, "session expired"));
       return;
     }
     // Guest sessions are only valid while guest mode is enabled.
     if (result.role === "guest" && !options.config.guestMode.enabled) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-      socket.destroy();
+      wss.handleUpgrade(req, socket, head, (ws) => ws.close(4001, "guest mode disabled"));
       return;
     }
     const guestBots = options.config.guestMode.bots;
