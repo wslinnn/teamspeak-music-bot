@@ -517,14 +517,29 @@ async fn frame_loop(
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
     notify: Arc<Notify>,
 ) {
-    let mut interval = tokio::time::interval(Duration::from_millis(FRAME_MS));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_gen = 0u64;
     let mut encoder: Option<Encoder> = None;
     let mut out_buf = vec![0u8; 4096];
+    // 诊断插桩（TSBOT_AUDIO_DEBUG=1）：worker 自身发帧间隔（写入
+    // audio-worker-debug.log），与 Node 侧到达统计分离，用于定位
+    // 延迟产生在哪一段
+    let audio_debug = std::env::var("TSBOT_AUDIO_DEBUG").ok().as_deref() == Some("1");
+    let (mut dbg_last, mut dbg_count, mut dbg_sum, mut dbg_max, mut dbg_over40) =
+        (Instant::now(), 0u64, 0.0f64, 0.0f64, 0u64);
+
+    // 绝对时间线发帧节拍（逐行对齐 player.ts 的 nextFrameTime 链）：
+    // 下一帧时刻固定为 next += 20ms，永不丢弃错过的帧——被 OS 定时器分辨率
+    // （Windows 15.625ms 量化）延迟唤醒时，后续迭代 sleep_until 立即返回、
+    // 连续补发追赶。tokio interval 的 MissedTickBehavior::Delay 会丢弃
+    // 错过的 tick，在量化环境下每秒只发 ~32 帧（64% 实时速度 = 慢放）。
+    let mut next_frame_at = Instant::now();
 
     loop {
-        interval.tick().await;
+        let now = Instant::now();
+        if next_frame_at > now {
+            tokio::time::sleep_until(next_frame_at.into()).await;
+        }
+        next_frame_at += Duration::from_millis(FRAME_MS);
         let now = Instant::now();
 
         // 快照本帧所需状态（ffmpeg_alive 在下方取帧时另行读取）
@@ -545,7 +560,8 @@ async fn frame_loop(
             last_gen = gen;
         }
         if paused {
-            // 暂停即不发帧；外部生产者由 Node 侧 pause()/resume() 直接暂停
+            // 暂停即不发帧；重置时间线（对齐 player.ts 暂停时 nextFrameTime=now）
+            next_frame_at = Instant::now();
             continue;
         }
 
@@ -644,6 +660,23 @@ async fn frame_loop(
             Tick::Idle => {}
             Tick::Real(fb) => {
                 encode_and_send(&session, &writer, encoder.get_or_insert_with(new_encoder), &mut out_buf, fb, sf, ef, true).await;
+                if audio_debug {
+                    let t = Instant::now();
+                    let gap = t.duration_since(dbg_last).as_secs_f64() * 1000.0;
+                    dbg_last = t;
+                    dbg_count += 1;
+                    dbg_sum += gap;
+                    if gap > dbg_max { dbg_max = gap; }
+                    if gap > 40.0 { dbg_over40 += 1; }
+                    if dbg_count % 250 == 0 {
+                        use std::io::Write;
+                        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("audio-worker-debug.log") {
+                            let _ = writeln!(f,
+                                "[worker-send] frames={} mean={:.1}ms max={:.1}ms over40={}",
+                                dbg_count, dbg_sum / dbg_count as f64, dbg_max, dbg_over40);
+                        }
+                    }
+                }
             }
             Tick::Silence => {
                 let pcm = vec![0u8; PCM_FRAME_BYTES];

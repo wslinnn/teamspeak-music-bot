@@ -16,6 +16,11 @@ import type { IAudioBackend, BackendState, PlayPcmOptions } from "./audio-backen
 const require = createRequire(import.meta.url);
 // ESM 下 __dirname 不存在（项目 "type": "module"），裸用会在生产模式崩溃
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// 诊断插桩（TSBOT_AUDIO_DEBUG=1 开启）：每 250 帧输出一次到达间隔统计，
+// 用于定位爆音/慢放发生在哪一段（worker→TCP→Node vs Node→UDP）。
+const AUDIO_DEBUG = process.env.TSBOT_AUDIO_DEBUG === "1";
+const arrivalProbe = { last: 0n, count: 0, sum: 0, max: 0, over40: 0 };
 // 复用仓库现有的 ffmpeg-static 二进制，传给 Worker 使用。
 const ffmpegStatic: string | null = require("ffmpeg-static");
 
@@ -204,6 +209,29 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
         this.framesPlayed += 1;
         if (this.framesPlayed % 50 === 0) {
           this.spawnFailures = 0;
+        }
+        if (AUDIO_DEBUG) {
+          const now = process.hrtime.bigint();
+          if (arrivalProbe.last > 0n) {
+            const gap = Number(now - arrivalProbe.last) / 1e6;
+            arrivalProbe.count++;
+            arrivalProbe.sum += gap;
+            if (gap > arrivalProbe.max) arrivalProbe.max = gap;
+            if (gap > 40) arrivalProbe.over40++;
+            if (arrivalProbe.count % 250 === 0) {
+              this.logger.info(
+                {
+                  stage: "tcp-arrival",
+                  frames: arrivalProbe.count,
+                  meanMs: +(arrivalProbe.sum / arrivalProbe.count).toFixed(1),
+                  maxMs: +arrivalProbe.max.toFixed(1),
+                  over40: arrivalProbe.over40,
+                },
+                "[audio-debug] worker→Node 帧到达间隔",
+              );
+            }
+          }
+          arrivalProbe.last = now;
         }
       } else if (type === 0x45) {
         // 'E' 事件

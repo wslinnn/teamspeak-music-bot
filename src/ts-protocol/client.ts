@@ -481,9 +481,38 @@ export class TS3Client extends EventEmitter {
   }
 
   private voiceFramesSent = 0;
+  // 诊断插桩（TSBOT_AUDIO_DEBUG=1）：UDP 发送前最后一站的间隔统计
+  private _voiceProbeLast = 0n;
+  private _voiceProbeCount = 0;
+  private _voiceProbeSum = 0;
+  private _voiceProbeMax = 0;
+  private _voiceProbeOver40 = 0;
 
   sendVoiceData(opusFrame: Buffer): void {
     if (!this.client || this.disconnecting) return;
+    if (process.env.TSBOT_AUDIO_DEBUG === "1") {
+      const now = process.hrtime.bigint();
+      if (this._voiceProbeLast > 0n) {
+        const gap = Number(now - this._voiceProbeLast) / 1e6;
+        this._voiceProbeCount++;
+        this._voiceProbeSum += gap;
+        if (gap > this._voiceProbeMax) this._voiceProbeMax = gap;
+        if (gap > 40) this._voiceProbeOver40++;
+        if (this._voiceProbeCount % 250 === 0) {
+          this.logger.info(
+            {
+              stage: "udp-send",
+              frames: this._voiceProbeCount,
+              meanMs: +(this._voiceProbeSum / this._voiceProbeCount).toFixed(1),
+              maxMs: +this._voiceProbeMax.toFixed(1),
+              over40: this._voiceProbeOver40,
+            },
+            "[audio-debug] Node→UDP 发送间隔",
+          );
+        }
+      }
+      this._voiceProbeLast = now;
+    }
     try {
       this.client.sendVoice(opusFrame, 5);
       this.voiceFramesSent++;
