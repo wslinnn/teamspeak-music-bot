@@ -109,6 +109,16 @@ export const usePlayerStore = defineStore('player', {
       this.timings[botId] = { ...current, ...partial };
     },
 
+    /** 切歌类操作的乐观更新：按钮立即转为播放态（进度归零由调用方设置），
+     * 不再单靠 WS stateChange 广播修复——广播丢失时轮询也能自愈 */
+    _optimisticPlay() {
+      const bot = this.bots.find((b) => b.id === this.activeBotId);
+      if (bot) {
+        bot.playing = true;
+        bot.paused = false;
+      }
+    },
+
     getQueueForBot(botId: string): Song[] {
       return this.queues[botId] ?? [];
     },
@@ -287,8 +297,9 @@ export const usePlayerStore = defineStore('player', {
       if (!this.activeBotId) return;
       const toast = useToast();
       try {
-        await http.post(`/api/player/${this.activeBotId}/play-at`, { index });
-        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+      await http.post(`/api/player/${this.activeBotId}/play-at`, { index });
+      this._optimisticPlay();
+      this._setTiming(this.activeBotId, { serverElapsed: 0 });
         this._syncAfterAction();
         toast.success('开始播放');
       } catch {
@@ -300,8 +311,9 @@ export const usePlayerStore = defineStore('player', {
       if (!this.activeBotId) return;
       const toast = useToast();
       try {
-        await http.post(`/api/player/${this.activeBotId}/play`, { query, platform });
-        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+      await http.post(`/api/player/${this.activeBotId}/play`, { query, platform });
+      this._optimisticPlay();
+      this._setTiming(this.activeBotId, { serverElapsed: 0 });
         this._syncAfterAction();
         toast.success('开始播放');
       } catch {
@@ -313,8 +325,9 @@ export const usePlayerStore = defineStore('player', {
       if (!this.activeBotId) return;
       const toast = useToast();
       try {
-        await http.post(`/api/player/${this.activeBotId}/play-song`, { song });
-        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+      await http.post(`/api/player/${this.activeBotId}/play-song`, { song });
+      this._optimisticPlay();
+      this._setTiming(this.activeBotId, { serverElapsed: 0 });
         this._syncAfterAction();
         toast.success(`开始播放: ${song.name}`);
       } catch {
@@ -350,8 +363,9 @@ export const usePlayerStore = defineStore('player', {
       if (!this.activeBotId) return;
       const toast = useToast();
       try {
-        await http.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
-        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+      await http.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
+      this._optimisticPlay();
+      this._setTiming(this.activeBotId, { serverElapsed: 0 });
         this._syncAfterAction();
         toast.success('开始播放歌单');
       } catch {
@@ -393,6 +407,7 @@ export const usePlayerStore = defineStore('player', {
 
     async next() {
       if (!this.activeBotId) return;
+      this._optimisticPlay();
       await http.post(`/api/player/${this.activeBotId}/next`);
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
@@ -400,6 +415,7 @@ export const usePlayerStore = defineStore('player', {
 
     async prev() {
       if (!this.activeBotId) return;
+      this._optimisticPlay();
       await http.post(`/api/player/${this.activeBotId}/prev`);
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
       this._syncAfterAction();
