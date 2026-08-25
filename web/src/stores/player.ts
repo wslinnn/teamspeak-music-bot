@@ -274,6 +274,28 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
+    /** 播放 Jellyfin 流派：拉取流派曲目，首曲播放、其余入队 */
+    async playJellyfinGenre(genreId: string) {
+      const toast = useToast();
+      if (!this.activeBotId) return;
+      try {
+        const res = await http.get(`/api/music/jellyfin/genre/${genreId}/songs`, { params: { limit: 30 } });
+        const songs: Song[] = res.data.songs ?? [];
+        if (songs.length === 0) {
+          toast.error('该流派下没有曲目');
+          return;
+        }
+        await this.playSong(songs[0]);
+        for (const song of songs.slice(1)) {
+          await this.addSong(song);
+        }
+        toast.success(`已加入 ${songs.length} 首`);
+        this.fetchQueue();
+      } catch {
+        toast.error('播放流派失败');
+      }
+    },
+
     async startBotInstance(id: string) {
       const toast = useToast();
       try {

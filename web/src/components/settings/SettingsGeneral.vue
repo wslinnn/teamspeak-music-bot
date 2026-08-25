@@ -22,6 +22,28 @@
       </div>
     </div>
 
+    <!-- Jellyfin Audio Quality (server-side transcode tiers) -->
+    <div v-if="jellyfinEnabled">
+      <div class="flex items-center gap-2 mb-3 text-sm font-medium">
+        <Icon icon="mdi:jellyfish" class="text-lg opacity-60" />
+        Jellyfin 音质
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <button
+          v-for="q in jellyfinQualityLevels"
+          :key="q.value"
+          class="rounded-lg border-2 p-3 text-center transition-all"
+          :class="jellyfinQuality === q.value
+            ? 'border-primary bg-primary/10'
+            : 'border-transparent bg-interactive-hover hover:border-border-default'"
+          @click="setJellyfinQuality(q.value)"
+        >
+          <div class="text-sm font-semibold">{{ q.label }}</div>
+          <div class="text-xs text-foreground-subtle mt-0.5">{{ q.desc }}</div>
+        </button>
+      </div>
+    </div>
+
     <!-- Command Prefix -->
     <div>
       <div class="flex items-center gap-2 mb-3 text-sm font-medium">
@@ -99,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import BaseButton from '../common/BaseButton.vue';
 import BaseModal from '../common/BaseModal.vue';
@@ -136,6 +158,40 @@ watch(() => props.idleTimeout, (v) => { localIdle.value = v; });
 
 const auth = useAuthStore();
 const toast = useToast();
+
+// ── Jellyfin 音质档（独立于默认源六档：direct=原始直传，其余为服务器转码）──
+const jellyfinEnabled = ref(false);
+const jellyfinQuality = ref('direct');
+const jellyfinQualityLevels = [
+  { value: 'direct', label: '原始直传', desc: 'Direct（无转码）' },
+  { value: '320', label: '320kbps', desc: '服务器转码' },
+  { value: '192', label: '192kbps', desc: '服务器转码' },
+  { value: '128', label: '128kbps', desc: '服务器转码' },
+];
+
+onMounted(async () => {
+  try {
+    const [providersRes, qualityRes] = await Promise.all([
+      http.get('/api/music/providers'),
+      http.get('/api/music/quality'),
+    ]);
+    jellyfinEnabled.value = (providersRes.data.enabled ?? []).includes('jellyfin');
+    jellyfinQuality.value = qualityRes.data.jellyfin || 'direct';
+  } catch {
+    // 拉不到就不展示该区块
+  }
+});
+
+async function setJellyfinQuality(q: string) {
+  jellyfinQuality.value = q;
+  try {
+    await http.post('/api/music/quality', { quality: q, platform: 'jellyfin' });
+    toast.success('Jellyfin 音质已更新');
+  } catch {
+    // 错误信息由 http 拦截器统一 toast
+  }
+}
+
 const pwModalOpen = ref(false);
 const pwForm = ref({ old: '', new: '', confirm: '' });
 const pwError = ref('');
