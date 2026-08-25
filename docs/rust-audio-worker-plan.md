@@ -8,6 +8,8 @@
 >
 > **逐行对账结论（2026-08-24，125cb32）**：以 player.ts 全部 865 行为基准逐条映射到 Rust 路径，发现并补齐 6 项缺失语义（卡死看门狗 #89、普通模式欠载不发帧、C1 重挂 resume、外部流 error→onExternalEnd、连续失败熔断、孤儿 ffmpeg 双平台回收），编码器改跨曲复用。集成测试扩至 4 个（新增挂起源看门狗恢复用例），全量 1053/1053。**确认为有意偏差、不再对齐的项**：stop/切歌时 ffmpeg 直接 SIGKILL（node 为 SIGTERM→1.5s→SIGKILL；解码进程无落盘，立即杀更干净）；pause 时立即暂停外部生产者（node 靠 640KB 高水位被动背压；主动暂停更保守）；resume 后首帧 ≤20ms 延迟（node 重置 nextFrameTime 立即出帧）。
 >
+> **边界平滑与状态同步（2026-08-25）**：双端同步实现**500ms 起播/跳转预缓冲门**（PREBUFFER_BYTES=96KB；EOF 立即开门兜底短文件，等待期与欠载共用看门狗）与**流边界淡入淡出**（会话首帧/恢复首帧 0→目标增益，暂停 drain 末帧 目标→0；node 端 pause() 保持同步置 paused 的契约，淡出在暂停态 drain）。Rust 侧独有：会话切换时 `Encoder::reset()`（OPUS_RESET_STATE，@discordjs/opus 未暴露该 API，属改进型偏差）；`awaitingReady` 在途帧隔离（play→ready 之间丢弃旧会话已写入 TCP 管道的残留 F 帧，node 无 IPC 跳不存在此问题）。同批修复切歌后 UI 卡旧状态：rust jdymusic 路径状态提前重置 + `/elapsed` 返回完整播放状态（前端 3s 轮询可自愈）+ 前端切歌乐观更新。集成测试扩至 6 个（短文件 EOF 开门、暂停淡出 drain≤1 帧），全量 1055/1055。
+>
 > **阶段4 完成情况（2026-08-24，b02d88f）**——rust 后端与 node 后端达成功能对等：
 > - ✅ pcm-feed（Spotify 外部 PCM）：Worker external 模式 + 'P' 帧 + Node 管道（断连缓冲 8MB，连接后按序冲刷），集成测试 144 帧、Worker 零 trackEnd（对齐 externalMode 语义）；修复重排 handle_play 引入的启动竞态（普通模式先 spawn 后原子置位）
 > - ✅ jdymusic PowerShell 下载回退：复用 player.ts 的判定/清理函数，Windows 下该 CDN 不再断流

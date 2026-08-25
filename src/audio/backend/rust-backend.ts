@@ -91,6 +91,10 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
   private producerPaused = false;
   // 连续 spawn/下载失败计数（对齐 player.ts 的 MAX_CONSECUTIVE_FAILURES 熔断）
   private spawnFailures = 0;
+  // play/seek 命令发出 → worker "ready" 事件到达之间，丢弃在途 F 帧：
+  // 它们是上一会话已写入 TCP 管道的残留（TCP 有序保证 ready 之后才是新会话
+  // 帧），不隔离的话旧曲音频会混入新曲头部（node 后端无 IPC 跳，不存在此问题）
+  private awaitingReady = false;
   private static readonly MAX_SPAWN_FAILURES = 3;
   // jdymusic PowerShell 下载回退
   private downloader: ChildProcess | null = null;
@@ -203,6 +207,9 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
       const payload = this.recvBuf.subarray(5, 5 + len);
       this.recvBuf = this.recvBuf.subarray(5 + len);
       if (type === 0x46) {
+        if (this.awaitingReady) {
+          continue; // 上一会话在途残留帧，丢弃（见 awaitingReady 注释）
+        }
         // 'F' 音频帧：原始 Opus 字节。每 50 帧（≈1s）重置失败计数，
         // 对齐 player.ts 的 HEALTHY_FRAME_RESET
         this.emit("frame", Buffer.from(payload));
@@ -253,6 +260,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
       this.state = "idle";
       this.emit("trackEnd");
     } else if (e === "ready") {
+      this.awaitingReady = false; // 后续 F 帧必属新会话（TCP 有序）
       if (this.state === "idle") this.state = "playing";
     } else if (e === "error") {
       // ffmpeg spawn 失败计入熔断（对齐 player.ts 的 spawnFailed/consecutiveFailures）
@@ -297,6 +305,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     this.seekOffset = seekSeconds;
     this.framesPlayed = 0;
     this.externalActive = false;
+    this.awaitingReady = true;
     this.send({ c: "play", url, seek: seekSeconds, dur: songDuration });
   }
 
@@ -309,6 +318,12 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     const tempDir = mkdtempSync(join(tmpdir(), "tsbot-rust-jdy-"));
     const tempFile = join(tempDir, "song.audio");
     this.currentTempDir = tempDir;
+    // 对齐 node 语义（player.play 先同步重置计数器再进 PowerShell 分支）：
+    // 下载期间即呈现"playing、进度 0"，切歌广播不再携带上一曲的暂停态与
+    // 旧进度；下载失败走 error 切歌，状态会被再次刷新
+    this.state = "playing";
+    this.seekOffset = seekSeconds;
+    this.framesPlayed = 0;
 
     const psScript = [
       "$ErrorActionPreference = 'Stop'",
@@ -348,9 +363,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
         this.emit("error", new Error(`jdymusic 下载失败 (exit ${code})`));
         return;
       }
-      this.state = "playing";
-      this.seekOffset = seekSeconds;
-      this.framesPlayed = 0;
+      this.awaitingReady = true;
       this.send({ c: "play", url: tempFile, seek: seekSeconds, dur: songDuration });
     });
     ps.on("error", (err) => {
@@ -381,6 +394,7 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     this.externalActive = true;
     this.seekOffset = 0;
     this.framesPlayed = 0;
+    this.awaitingReady = true;
     this.send({ c: "play", url: "", seek: 0, dur: 0, external: true });
 
     this.externalStream = readable;
@@ -477,12 +491,14 @@ export class RustAudioBackend extends EventEmitter implements IAudioBackend {
     this.cleanupJdymusic();
     this.pcmPending = [];
     this.pcmPendingBytes = 0;
+    this.awaitingReady = true; // 丢弃旧会话在途帧；下一次 play 的 ready 会再放开
     this.send({ c: "stop" });
   }
 
   seek(seconds: number): void {
     this.seekOffset = seconds;
     this.framesPlayed = 0;
+    this.awaitingReady = true;
     this.send({ c: "seek", sec: seconds });
   }
 

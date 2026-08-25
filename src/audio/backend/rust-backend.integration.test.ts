@@ -241,4 +241,87 @@ describe("RustAudioBackend 端到端", () => {
     },
     25000,
   );
+
+  it(
+    "预缓冲门：短文件（不足 500ms 门限）在 EOF 开门后仍完整播出并 trackEnd",
+    async () => {
+      // 0.3s ≈ 57.6KB PCM < 96KB 门限：门必须靠 EOF 兜底开门，否则短文件永不出帧
+      const wav = path.resolve("smoke_short.wav");
+      makeSineWav(wav, 0.3, 660);
+
+      const backend = new RustAudioBackend(logger);
+      const frames: Buffer[] = [];
+      let trackEndCount = 0;
+      backend.on("frame", (b: Buffer) => frames.push(b));
+      backend.on("trackEnd", () => {
+        trackEndCount += 1;
+      });
+
+      backend.play(wav, 0, 0.3);
+      const deadline = Date.now() + 8000;
+      while (trackEndCount === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      try {
+        unlinkSync(wav);
+      } catch {
+        /* ignore */
+      }
+      backend.stop();
+
+      expect(trackEndCount, "EOF 开门后应正常 trackEnd").toBe(1);
+      // 0.3s ≈ 15 帧；EOF 开门不应吞帧
+      expect(frames.length, `短文件帧数异常: ${frames.length}`).toBeGreaterThanOrEqual(13);
+      expect(frames.length, `短文件帧数异常: ${frames.length}`).toBeLessThanOrEqual(17);
+      console.log(`[smoke] 短文件(0.3s) 收到 ${frames.length} 帧`);
+    },
+    15000,
+  );
+
+  it(
+    "暂停淡出：pause 后 ≤2 帧内静默，resume 后恢复出帧",
+    async () => {
+      const wav = path.resolve("smoke_pause.wav");
+      makeSineWav(wav, 4, 440); // 4s = 768KB，远超门限，1s 后已稳定出帧
+
+      const backend = new RustAudioBackend(logger);
+      let frames = 0;
+      backend.on("frame", () => {
+        frames += 1;
+      });
+
+      backend.play(wav, 0, 4);
+      // 等门开 + 稳定播放（≥1s 音频已出）
+      const warmup = Date.now() + 2500;
+      while (frames < 40 && Date.now() < warmup) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(frames, "前置：应已稳定出帧").toBeGreaterThanOrEqual(40);
+
+      // pause：drain 淡出 ≤1 帧 + 在途 ≤1 帧 → 800ms 窗口内不应再有新帧
+      backend.pause();
+      const framesAtPause = frames;
+      await new Promise((r) => setTimeout(r, 800));
+      const drained = frames - framesAtPause;
+      expect(drained, `暂停后仍收到 ${drained} 帧（应 ≤2）`).toBeLessThanOrEqual(2);
+
+      // resume：淡入恢复，500ms 内应重新出帧
+      backend.resume();
+      const framesAtResume = frames;
+      const resumeDeadline = Date.now() + 2000;
+      while (frames === framesAtResume && Date.now() < resumeDeadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(frames, "resume 后应恢复出帧").toBeGreaterThan(framesAtResume);
+
+      try {
+        unlinkSync(wav);
+      } catch {
+        /* ignore */
+      }
+      backend.stop();
+      console.log(`[smoke] pause drain=${drained} 帧，resume 后恢复出帧`);
+    },
+    15000,
+  );
 });

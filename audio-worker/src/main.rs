@@ -26,6 +26,10 @@ const BROWSER_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 const PCM_FRAME_BYTES: usize = 3840; // 20ms * 48000Hz * 2ch * 2bytes
 const HIGH_WATER: usize = 640 * 1024;
 const LOW_WATER: usize = 256 * 1024;
+/// 起播/跳转预缓冲门：攒够 500ms PCM（@192KB/s）才开始消费，消除"边下
+/// 边播"窗口内网络突发到达造成的间歇欠载爆音；源 EOF 时立即开门（短文件/
+/// 失败源不受阻）。external 模式无门（边车供流欠载补静音保时间线）。
+const PREBUFFER_BYTES: usize = 96 * 1024;
 
 /// 单次播放会话的可变状态（在多个任务间共享）。
 struct Session {
@@ -70,6 +74,12 @@ struct Session {
     /// 本次会话由看门狗终止（而非源自身失败）：终态走 trackEnd 而非
     /// ffmpeg_no_output error——与 node 端 shouldEndOnStall 恒发 trackEnd 一致
     stall_ended: bool,
+    /// 预缓冲门已开（本会话）。begin() 置 external=true（外部模式无门）。
+    started: bool,
+    /// 下一真实帧做 20ms 淡入（0→目标增益）：会话开始/恢复后置位，随首帧消费。
+    fade_in_pending: bool,
+    /// 暂停淡出：pause 命令置位，帧循环 drain 一帧（增益→0）后进入 paused。
+    draining: bool,
 }
 
 impl Session {
@@ -96,6 +106,9 @@ impl Session {
             empty_ticks: 0,
             kill_requested: false,
             stall_ended: false,
+            started: false,
+            fade_in_pending: false,
+            draining: false,
         }
     }
 
@@ -129,6 +142,10 @@ impl Session {
         self.empty_ticks = 0;
         self.kill_requested = false;
         self.stall_ended = false;
+        // 预缓冲门重新武装（external 无门）；新会话首帧淡入
+        self.started = external;
+        self.fade_in_pending = true;
+        self.draining = false;
         self.generation += 1;
     }
 }
@@ -444,6 +461,9 @@ async fn stop_session(session: &Arc<Mutex<Session>>) {
     s.empty_ticks = 0;
     s.kill_requested = false;
     s.stall_ended = false;
+    s.started = false;
+    s.fade_in_pending = false;
+    s.draining = false;
 }
 
 async fn handle_play(
@@ -505,6 +525,92 @@ async fn handle_play(
     send_event(writer, "ready").await;
 }
 
+/// 单个 20ms tick 的取帧结果。
+enum Tick {
+    /// 缓冲中的真实 PCM 帧。
+    Real(Vec<u8>),
+    /// 中途欠载的静音垫帧：保 20ms 时间线连续。
+    Silence,
+    /// 会话数据耗尽且正常：上报 trackEnd。
+    JustEnded,
+    /// 会话数据耗尽且失败（零真实产出/读错误）：上报 error，不 trackEnd。
+    /// Node 侧对 error 与 trackEnd 都会触发切歌，二者必须互斥。
+    Failed(String, String),
+    /// 无进行中的会话（尚未 play / 已结束 / 已 stop / 首个数据块未到）：静默。
+    Idle,
+}
+
+/// 欠载/预缓冲等待共用的卡死看门狗（node 的 shouldEndOnStall / #89 语义）：
+/// 近结尾（≤5s 或时长未知）250 tick ≈ 5s，远结尾 3000 tick ≈ 60s，触发后
+/// 请求杀 ffmpeg → EOF → 缓冲排空 → 帧循环转换点自然 trackEnd。
+fn watchdog_tick(s: &mut Session) {
+    s.empty_ticks += 1;
+    let elapsed = s.seek_offset + (s.frames_played as f64) * FRAME_MS as f64 / 1000.0;
+    let near_end = if s.last_dur > 0.0 {
+        (s.last_dur - elapsed) <= 5.0
+    } else {
+        true // 时长未知时保守处理（node 同款）
+    };
+    let threshold: u64 = if near_end { 250 } else { 3000 };
+    if s.empty_ticks >= threshold {
+        s.empty_ticks = 0;
+        s.kill_requested = true; // read_loop 周期唤醒时执行 start_kill
+    }
+}
+
+/// 从会话缓冲取一帧或判定终态（帧循环每 tick 调用；逻辑对齐 player.ts）。
+fn take_frame(s: &mut Session, notify: &Notify) -> Tick {
+    if s.pcm.len() >= PCM_FRAME_BYTES {
+        let fb = s.pcm[..PCM_FRAME_BYTES].to_vec();
+        s.pcm.drain(..PCM_FRAME_BYTES);
+        if s.pcm.len() < LOW_WATER {
+            notify.notify_one();
+        }
+        s.empty_ticks = 0; // 有数据即重置空转计数（node 的 emptyFrameAttempts 语义）
+        Tick::Real(fb)
+    } else if s.external {
+        // 外部 PCM：流无 EOF，欠载补静音保时间线；曲目结束由控制器
+        // 调 stop 驱动（stop 置 active=false → Idle），不发 trackEnd
+        if s.active {
+            if s.real_frames == 0 && s.pcm.is_empty() {
+                Tick::Idle // 首块 PCM 未到
+            } else {
+                Tick::Silence
+            }
+        } else {
+            Tick::Idle
+        }
+    } else if !s.ffmpeg_alive {
+        // 缓冲已排空 + 源已结束：会话终态转换点，此刻 real_frames 是终值
+        if s.active {
+            s.active = false;
+            let eof = s.eof_tail.take();
+            if let Some(e) = s.read_error.take() {
+                Tick::Failed("ffmpeg_read".to_string(), e)
+            } else if s.stall_ended {
+                // 看门狗终止：恒走 trackEnd（node 端 shouldEndOnStall 语义）
+                Tick::JustEnded
+            } else if s.real_frames == 0 && eof.is_some() {
+                let (code, tail) = eof.unwrap();
+                Tick::Failed(
+                    "ffmpeg_no_output".to_string(),
+                    format!("ffmpeg 退出码 {code} 但 0 真实帧产出。stderr: {tail}"),
+                )
+            } else {
+                Tick::JustEnded
+            }
+        } else {
+            Tick::Idle
+        }
+    } else if !s.active {
+        Tick::Idle
+    } else {
+        // 普通模式欠载：与 node 端一致——不发帧（不补静音），累计空转
+        watchdog_tick(s);
+        Tick::Idle
+    }
+}
+
 // ---- 20ms 帧循环 ----
 
 async fn frame_loop(
@@ -550,9 +656,13 @@ async fn frame_loop(
         };
 
         if gen != last_gen {
-            // 新曲目仅更新代际标记；编码器跨曲复用（node 端全程单实例，
-            // 每曲重建会带来首帧编码状态的细微差异）
+            // 新会话：复位编码器预测器状态（OPUS_RESET_STATE），上一曲末尾
+            // 的预测器不再作用于新内容首帧（node 端 @discordjs/opus 未暴露
+            // 该 API，属 Rust 侧改进；边界淡入另掩蔽切换瞬态）
             last_gen = gen;
+            if let Some(e) = encoder.as_mut() {
+                let _ = e.reset();
+            }
         }
         if paused {
             // 暂停即不发帧，但保持 20ms 心跳节拍：不重置 next_frame_at——
@@ -562,89 +672,48 @@ async fn frame_loop(
         }
 
         // 取一帧 PCM / 判定结束 / 欠载补静音
-        enum Tick {
-            /// 缓冲中的真实 PCM 帧。
-            Real(Vec<u8>),
-            /// 中途欠载的静音垫帧：保 20ms 时间线连续。
-            Silence,
-            /// 会话数据耗尽且正常：上报 trackEnd。
-            JustEnded,
-            /// 会话数据耗尽且失败（零真实产出/读错误）：上报 error，不 trackEnd。
-            /// Node 侧对 error 与 trackEnd 都触发切歌，二者必须互斥。
-            Failed(String, String),
-            /// 无进行中的会话（尚未 play / 已结束 / 已 stop / 首个数据块未到）：静默。
-            Idle,
-        }
-        let tick = {
+        let (tick, fade_in, fade_out) = {
             let mut s = session.lock().await;
-            if s.pcm.len() >= PCM_FRAME_BYTES {
-                let fb = s.pcm[..PCM_FRAME_BYTES].to_vec();
-                s.pcm.drain(..PCM_FRAME_BYTES);
-                if s.pcm.len() < LOW_WATER {
-                    notify.notify_one();
-                }
-                s.empty_ticks = 0; // 有数据即重置空转计数（node 的 emptyFrameAttempts 语义）
-                Tick::Real(fb)
-            } else if s.external {
-                // 外部 PCM：流无 EOF，欠载补静音保时间线；曲目结束由控制器
-                // 调 stop 驱动（stop 置 active=false → Idle），不发 trackEnd
-                if s.active {
-                    if s.real_frames == 0 && s.pcm.is_empty() {
-                        Tick::Idle // 首块 PCM 未到
-                    } else {
-                        Tick::Silence
-                    }
+            // 暂停淡出：drain 最后一帧（末帧增益线性→0）后进入 paused。
+            // 门未开（尚未出过声）或缓冲不足一帧（欠载中）则无帧可淡，直接暂停。
+            if s.draining {
+                s.draining = false;
+                s.paused = true;
+                if s.active && s.started && s.pcm.len() >= PCM_FRAME_BYTES {
+                    let fb = s.pcm[..PCM_FRAME_BYTES].to_vec();
+                    s.pcm.drain(..PCM_FRAME_BYTES);
+                    (Tick::Real(fb), false, true)
                 } else {
-                    Tick::Idle
+                    (Tick::Idle, false, false)
                 }
-            } else if !s.ffmpeg_alive {
-                // 缓冲已排空 + 源已结束：会话终态转换点，此刻 real_frames 是终值
-                if s.active {
-                    s.active = false;
-                    let eof = s.eof_tail.take();
-                    if let Some(e) = s.read_error.take() {
-                        Tick::Failed("ffmpeg_read".to_string(), e)
-                    } else if s.stall_ended {
-                        // 看门狗终止：恒走 trackEnd（node 端 shouldEndOnStall 语义）
-                        Tick::JustEnded
-                    } else if s.real_frames == 0 && eof.is_some() {
-                        let (code, tail) = eof.unwrap();
-                        Tick::Failed(
-                            "ffmpeg_no_output".to_string(),
-                            format!("ffmpeg 退出码 {code} 但 0 真实帧产出。stderr: {tail}"),
-                        )
-                    } else {
-                        Tick::JustEnded
-                    }
-                } else {
-                    Tick::Idle
-                }
-            } else if !s.active {
-                Tick::Idle
+            } else if s.active
+                && !s.external
+                && !s.started
+                && s.ffmpeg_alive
+                && s.pcm.len() < PREBUFFER_BYTES
+            {
+                // 预缓冲门等待：pcm 只含本会话数据（begin 清空 + generation
+                // 栅栏，杜绝旧会话残留帧混入），攒够 500ms 才开门；源 EOF 时
+                // 由 take_frame 前的开门条件放行。等待期与欠载共用看门狗。
+                watchdog_tick(&mut s);
+                (Tick::Idle, false, false)
             } else {
-                // 普通模式欠载：与 node 端一致——不发帧（不补静音），累计空转
-                // tick 做卡死看门狗（node 的 shouldEndOnStall / #89）：
-                // 近结尾（≤5s 或时长未知）250 tick ≈ 5s，远结尾 3000 tick ≈ 60s，
-                // 触发后请求杀掉 ffmpeg → EOF → 缓冲排空 → 自然 trackEnd
-                s.empty_ticks += 1;
-                let elapsed = s.seek_offset + (s.frames_played as f64) * FRAME_MS as f64 / 1000.0;
-                let near_end = if s.last_dur > 0.0 {
-                    (s.last_dur - elapsed) <= 5.0
-                } else {
-                    true // 时长未知时保守处理（node 同款）
-                };
-                let threshold: u64 = if near_end { 250 } else { 3000 };
-                if s.empty_ticks >= threshold {
-                    s.empty_ticks = 0;
-                    s.kill_requested = true; // read_loop 周期唤醒时执行 start_kill
+                // 门条件满足（攒够/源结束）或本就无需门（external/无会话）：开门取帧
+                s.started = true;
+                let t = take_frame(&mut s, &notify);
+                let fi = matches!(t, Tick::Real(_)) && s.fade_in_pending;
+                if fi {
+                    s.fade_in_pending = false;
                 }
-                Tick::Idle
+                (t, fi, false)
             }
         };
 
         let base = volume_to_factor(volume);
-        let sf = base * dstart as f32;
-        let ef = base * dend as f32;
+        // 边界淡入/淡出：首帧 20ms 内 0→目标增益、暂停末帧 目标→0，
+        // 消除流边界波形硬切产生的爆音（复用既有线性斜坡机制）
+        let sf = if fade_in { 0.0 } else { base * dstart as f32 };
+        let ef = if fade_out { 0.0 } else { base * dend as f32 };
 
         match tick {
             Tick::JustEnded => {
@@ -790,11 +859,19 @@ async fn main() -> Result<()> {
             "stop" => stop_session(&session).await,
             "pause" => {
                 let mut s = session.lock().await;
-                s.paused = true;
+                if !s.paused && !s.draining {
+                    // 不直接置 paused：置 draining，帧循环 drain 一帧淡出后
+                    // 再进入暂停（≤20ms 延迟，换取无爆音的暂停边界）
+                    s.draining = true;
+                }
             }
             "resume" => {
                 let mut s = session.lock().await;
-                s.paused = false;
+                if s.paused {
+                    s.paused = false;
+                    s.fade_in_pending = true;
+                }
+                s.draining = false; // pause 后立即 resume：取消未消费的淡出
             }
             "seek" => {
                 // MVP：用上次 URL 重新播放到目标秒（与 player.ts 行为一致）
