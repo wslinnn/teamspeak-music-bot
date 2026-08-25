@@ -25,7 +25,7 @@
           <div class="text-xs text-text-tertiary mb-4">
             {{ songs.length }} 首歌曲
           </div>
-          <button class="flex items-center gap-1.5 px-7 py-2.5 bg-primary text-white rounded-[var(--radius-lg)] text-sm font-semibold w-fit transition-transform hover:scale-[1.04] active:scale-[0.96]" @click="playAll">
+          <button v-if="canPlayAll" class="flex items-center gap-1.5 px-7 py-2.5 bg-primary text-white rounded-[var(--radius-lg)] text-sm font-semibold w-fit transition-transform hover:scale-[1.04] active:scale-[0.96]" @click="playAll">
             <Icon icon="mdi:play" />
             播放全部
           </button>
@@ -56,17 +56,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
+import { useAuthStore } from '../stores/auth';
 import CoverArt from '../components/CoverArt.vue';
 import SongCard from '../components/SongCard.vue';
 import PlaylistFavoriteButton from '../components/PlaylistFavoriteButton.vue';
 
 const store = usePlayerStore();
+const auth = useAuthStore();
 const route = useRoute();
+
+// 播放全部需 player.control 或游客 playCollection（对齐后端 play-playlist/play-album 授权）
+const canPlayAll = computed(() => auth.can('player.control') || auth.guestCan('playCollection'));
 
 import { Song } from '../stores/player';
 
