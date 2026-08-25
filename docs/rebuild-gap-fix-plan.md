@@ -1,9 +1,11 @@
-# 重建断差修复方案（bug × 3 + 休眠功能 × 11 + 死代码处置）
+# 重建断差修复方案（bug × 3 + 休眠功能 × 14 + 死代码处置）
 
 > ✅ **状态：P0+P1 已全部实施**（2026-08-25：B1 `32cf140`、B3 `20d08fc`、
 > B2+D4 `e077ff6`、D0 `e758538`、D1 `31c9b3a`、D11a/b `64517ea`；全量 1049/1049。
-> P2/P3 未动。本文是第二批；第一批 8 项见 `docs/dormant-features-ui-plans.md`，
-> 已完成并抽查核实。）
+> 同日第四轮**页面级对账**（上游前端 vs 本前端，逐页对比）新增 D12-D14 并
+> **勘误第三节**（/api/favorites 非死代码）；`a7a4551` 音频边界平滑已按反馈
+> revert（`a3e0320`）。P2/P3 未动。本文是第二批；第一批 8 项见
+> `docs/dormant-features-ui-plans.md`，已完成并抽查核实。）
 
 > **背景**：当前 main 是"上游基座 + 选择性重放 fork 提交"重建的，前端经
 > `db85626` 以内容移植（不带历史）方式接管。该模式产生三类断差：
@@ -170,43 +172,83 @@ TS 命令面板完整支持但 WebUI 无对应入口的四项（instance.ts:828-
 
 **工作量**：channelPassword 10 分钟；autoStart 0.5 天（含 PUT 透传与测试）；TS6 单独评估。
 
+### D12 歌单收藏族 + 音乐库页【P2·页面级对账新发现】
+
+**勘误前提**：本文第三节曾把 `/api/favorites` 判为"上游死代码"——**错误**。页面级对账确认它是上游前端实际使用的"歌单收藏"功能族（与 fork 的歌曲收藏 `/api/song-favorites` 并存且互不冲突：一个收藏歌单、一个收藏歌曲），fork 接管前端时入口全丢。
+
+后端契约齐备：`GET/POST /api/favorites`、`DELETE /api/favorites/:id`、`GET /api/favorites/check`（favorites.ts 全套）。上游消费点三处：
+- **Search 歌单卡红心**（收藏/取消收藏歌单）
+- **Playlist 页（kind=playlist）红心**
+- **Library 音乐库页**（上游有此整页、main 无）：「我的收藏」（歌单收藏列表）+「我的歌单」（多音源 SourceTabs：jellyfin/netease/qq/kugou/spotify）+「最近播放」（history 前 10）三合一
+
+**建议方案**：新增 `Library.vue`（路由 `/library`，Navbar 加"音乐库"入口），三区块照上游结构；Search/Playlist 歌单卡加红心（复用 FavoriteButton 改造为双类型，或新建 PlaylistFavoriteButton）。注意与歌曲收藏的 UI 区分（歌单卡片 vs 歌曲卡片，天然不混淆）。
+**工作量**：Library 页 1 天 + 红心按钮 0.5 天。
+
+### D13 专属分享链接【P2·页面级对账新发现】
+
+上游 Navbar 有"复制专属链接"：`GET /api/config/public-url` 取公网基址 → 拼 `/?bot=<id>`；配套 `?bot=` **作用域锁定模式**（路由守卫在导航丢参时自动补回、Navbar 显示锁定标签与退出按钮）。main 的 `BotRedirect`（`/bot/:id`）路由还在，但**链接生成入口与锁定守卫全部缺失**——分享出去的链接无法把接收者锁定到指定 bot。
+
+**建议方案**：Navbar bot 下拉加"复制专属链接"（navigator.clipboard + 兜底）；router 守卫读 `?bot=` 维持 store 作用域；锁定态在 Navbar 显示标签+退出。
+**工作量**：0.5 天。
+
+### D14 游客权限的按钮显隐【P2·页面级对账新发现】
+
+上游 Player/SongCard/Queue 的每个操作按钮按 capabilities/guestCan 逐个门控（play: control||playNow、playNext、add: queue||addToQueue、seek 需 transport……）；main 完全无门控——**游客会看到一排点了就 403 的按钮**。游客模式（第一批方案 6）打开后这是实际体验缺陷。
+
+**建议方案**：auth store 暴露 can/guestCan/canControlBot（对齐上游 useSession 的能力模型）；Player/SongCard/SongGridCard/Queue/搜索页操作按钮套 v-if。后端零改动。
+**工作量**：0.5 天。
+
 ### 零散休眠端点与死配置（清单备查，不单独立项）
 
 **次要休眠端点**：`GET /api/bot/:id`（单 bot 查询，被列表接口+WS 等价覆盖）、`POST /api/player/:id/add-by-id`（前端总持完整 song 对象走 add-song）、`GET /api/music/song/:id`、`GET /api/music/album/:id`（详情接口，D5 可顺带消费专辑详情）。
 
 **死配置字段**（config.ts 定义、全仓库无消费者，属上游遗留，**同样不删**以免增加上游合并冲突面，仅记档）：`autoReturnDelay`、`adminPassword`（已被 users/session 体系取代）、`locale`。`commandAliases` 有消费（instance.ts:724，命令别名）但无编辑 UI——如需可视化可并入 D0 的音源 Tab 一并做。
 
+**页面级对账追加的零散项（第四轮）**：
+- **多音源"我的歌单"**：上游 Home/Library 按 platform（netease/qq/kugou/jellyfin）拉 `/api/music/user/playlists` 并可切换；main 不带 platform 参数只拉默认源。可并入 D12 的 Library 页（SourceTabs 复用）
+- **Jellyfin 音质档**：上游音质设置可 `POST /api/music/quality {quality, platform:'jellyfin'}` 单独设 direct/320/192/128；main 只设默认源六档。10 分钟级，可并入 D5
+- **专辑详情页 `/album/:id`**：上游有详情浏览路由（`/api/music/album/:id/detail`）；main 点专辑直接整专辑播放，功能可达、无浏览页。低优先级
+- **Setup 四步引导向导**（`/setup`）：上游引导建 bot（autoStart:true）+ Jellyfin 初始化；main 只有 FirstRun 建管理员。可不接
+- **#111 音量滑块拖拽被 rAF 拽回**：上游用 useDecoupledSlider 修过（60fps 重渲染把拖动中的 `:value` 绑回旧值）；main 移动端已有 debounce，**桌面滑条待复现验证**，确认后再定是否移植
+
 ---
 
-## 三、死代码处置：`/api/favorites`
+## 三、`/api/favorites`（歌单收藏）处置【定性已勘误】
 
-上游的"歌单收藏"路由（favorites.ts 全部 4 条）已被 fork 的 `/api/song-favorites`（歌曲收藏）取代，前端零调用。
+~~上游的"歌单收藏"路由已被 fork 的歌曲收藏取代，属死代码。~~ **页面级对账（第四轮）推翻此判断**：它是上游前端实际使用的"歌单收藏"功能族（Search/Playlist 红心 + Library 页），fork 接管前端时**入口**丢失而非功能被取代——与 fork 的 `/api/song-favorites`（歌曲收藏）语义并存、互不冲突。已升级为休眠功能 **D12**（见第二节）。
 
-**建议：保留不删**。理由：本仓库收敛策略的核心是让 `src/` 尽量贴上游以降低未来 `git merge upstream/main` 的冲突面（`web/** merge=ours` 只保护前端）；删除上游文件会在下次上游合并时产生删除冲突，收益为零。仅在 `FORK.md` 记一笔"上游歌单收藏未采用，前端走 /api/song-favorites"即可。
+**路由本身仍保留不删**：收敛策略要求 `src/` 尽量贴上游以降低未来 `git merge upstream/main` 的冲突面；无论是否对接 D12，删除上游文件都会在下次合并时产生删除冲突。
 
 ---
 
 ## 四、实施顺序建议
 
-| 序 | 项 | 优先级 | 工作量 | 理由 |
-|----|----|--------|--------|------|
-| 1 | B1 effectiveDuration | P0 | 0.5 天 | 用户可见 bug，与刚修的 duration 同模式，纯前端+1 字段 |
-| 2 | B3 WS 4001 对齐 | P0 | 0.5 天 | 会话过期假死的直接病因，后端单点改动 |
-| 3 | D0 音源与连接管理 | P1 | 1 天 | 接管丢失回归；阻塞 D5/D6，且是 B2/D4 的管理闭环 |
-| 4 | B2+D4 音源标签动态化 | P1 | 0.5 天 | 消除误导性 UI；与 D0 共用 providers 数据 |
-| 5 | D1 插队播放 | P1 | 0.5 天 | 休眠项中用户价值最高，契约现成 |
-| 6 | D11a channelPassword 表单字段 | P1 | 10 分钟 | 私密频道刚需，纯前端 |
-| 7 | D11b autoStart 开关 | P1 | 0.5 天 | 运维刚需（重启自动恢复） |
-| 8 | D2 修改密码 | P2 | 0.5 天 | 多用户场景刚需 |
-| 7 | D3 FM 开启 | P2 | 10 分钟 | 顺手 |
-| 8 | D8 审计页 | P2 | 0.5 天 | admin 合规场景 |
-| 9 | D5 Jellyfin 版块 | P2 | 1 天 | 依赖 #3（D0）与 #4 的 providers 数据 |
-| 10 | D6 Spotify OAuth | P3 | 0.5-1 天 | 依赖 #3（D0）+ 部署前置条件 |
-| 11 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | 需先核对契约 |
-| 12 | D11c TS6 协议接入 | P3 | 单独评估 | 连接层已备，路由/表单全缺，待真实需求 |
-| 13 | FORK.md 死代码记笔 | P3 | 10 分钟 | 顺手 |
+> 1-7（P0+P1）已完成（2026-08-25），自 8 起为待办。
 
-P0 合计 1 天，P0+P1 合计约 4.5 天。每项独立可交付、独立提交（conventional commits）。
+| 序 | 项 | 优先级 | 工作量 | 状态/理由 |
+|----|----|--------|--------|------|
+| 1 | B1 effectiveDuration | P0 | 0.5 天 | ✅ `32cf140` |
+| 2 | B3 WS 4001 对齐 | P0 | 0.5 天 | ✅ `20d08fc` |
+| 3 | D0 音源与连接管理 | P1 | 1 天 | ✅ `e758538`；解锁 D5/D6 |
+| 4 | B2+D4 音源标签动态化 | P1 | 0.5 天 | ✅ `e077ff6` |
+| 5 | D1 插队播放 | P1 | 0.5 天 | ✅ `31c9b3a` |
+| 6 | D11a channelPassword 表单字段 | P1 | 10 分钟 | ✅ `64517ea` |
+| 7 | D11b autoStart 开关 | P1 | 0.5 天 | ✅ `64517ea` |
+| 8 | D2 修改密码 | P2 | 0.5 天 | 多用户场景刚需 |
+| 9 | D14 游客权限按钮显隐 | P2 | 0.5 天 | 游客模式实际体验缺陷（403 按钮满屏） |
+| 10 | D13 专属分享链接 | P2 | 0.5 天 | 分享场景刚需，BotRedirect 半截功能补全 |
+| 11 | D12 歌单收藏族+Library 页 | P2 | 1.5 天 | 入口聚合价值高，含多音源我的歌单 |
+| 12 | D3 FM 开启 | P2 | 10 分钟 | 顺手 |
+| 13 | D8 审计页 | P2 | 0.5 天 | admin 合规场景 |
+| 14 | D5 Jellyfin 版块（含音质档/多音源我的歌单可选并入） | P2 | 1 天 | 依赖已完成的 D0 与 providers 数据 |
+| 15 | D6 Spotify OAuth | P3 | 0.5-1 天 | 依赖 D0（已完成）+ 部署前置条件 |
+| 16 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | 需先核对契约 |
+| 17 | 专辑详情页 /album/:id | P3 | 0.5 天 | 功能已可达（点击直接播），纯体验增强 |
+| 18 | D11c TS6 协议接入 | P3 | 单独评估 | 连接层已备，路由/表单全缺，待真实需求 |
+| 19 | #111 音量滑块验证（后视结果移植 useDecoupledSlider） | P3 | 0.5 天 | 先桌面端复现验证 |
+| 20 | FORK.md 记笔（/api/favorites 定性已勘误为 D12） | P3 | 10 分钟 | 顺手 |
+
+P2 合计约 4.5 天。每项独立可交付、独立提交（conventional commits）。
 
 ---
 
