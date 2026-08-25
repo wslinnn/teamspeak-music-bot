@@ -21,10 +21,14 @@ export type StoredSong = Omit<QueuedSong, "url">;
 export interface SavedQueueMeta {
   id: number;
   ownerId: string;
+  /** 共享清单的实际创建人（私有清单等于 ownerId）；旧行可能为空串 */
+  createdBy: string;
   name: string;
   songCount: number;
   createdAt: string;
   updatedAt: string;
+  /** 列表查询时 join 出的创建人用户名（共享清单取 createdBy，私有取 ownerId） */
+  ownerName?: string | null;
 }
 
 /** Full saved queue, including its songs. */
@@ -128,9 +132,10 @@ export interface FavoritePlaylist {
   createdAt: string;
 }
 
-// Song favorites (fork): cross-client song favorites keyed by (songId, platform).
+// Song favorites (fork): per-user song favorites keyed by (userId, songId, platform).
 export interface SongFavoriteEntry {
   id?: number;
+  userId: string;
   songId: string;
   platform: string;
   title: string;
@@ -163,11 +168,11 @@ export interface BotDatabase {
   getFavorites(userId: string): FavoritePlaylist[];
   isFavorited(userId: string, playlistId: string, platform: string): boolean;
   addSongFavorite(entry: Omit<SongFavoriteEntry, "id">): void;
-  getSongFavorites(): SongFavoriteRecord[];
-  deleteSongFavorite(id: number): boolean;
-  isSongFavorite(songId: string, platform: string): boolean;
+  getSongFavorites(userId: string): SongFavoriteRecord[];
+  deleteSongFavorite(id: number, userId: string): boolean;
+  isSongFavorite(userId: string, songId: string, platform: string): boolean;
   // Saved queues (Feature 1) — upsert by (ownerId, name), capped.
-  saveQueue(ownerId: string, name: string, songs: StoredSong[]): SavedQueue;
+  saveQueue(ownerId: string, name: string, songs: StoredSong[], createdBy?: string): SavedQueue;
   listSavedQueues(ownerId: string, includeShared: boolean): SavedQueueMeta[];
   getSavedQueue(id: number): SavedQueue | null;
   deleteSavedQueue(id: number): boolean;
@@ -236,6 +241,30 @@ function migrateSchema(db: Database.Database): void {
   }
   if (!historyColNames.includes("duration")) {
     db.exec("ALTER TABLE play_history ADD COLUMN duration REAL NOT NULL DEFAULT 0");
+  }
+  // 歌曲收藏用户隔离（多用户化补课）：旧表无归属，回填给首位管理员
+  // （单用户时代只有管理员能创建）；唯一键从 (songId, platform) 重建为
+  // (userId, songId, platform)，允许不同用户各自收藏同一首。
+  const favCols = db.prepare("PRAGMA table_info(favorites)").all() as Array<{ name: string }>;
+  if (!favCols.some((c) => c.name === "userId")) {
+    const firstAdmin = (
+      db.prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY createdAt LIMIT 1").get() as
+        | { id: string }
+        | undefined
+    )?.id;
+    db.exec("ALTER TABLE favorites ADD COLUMN userId TEXT NOT NULL DEFAULT ''");
+    if (firstAdmin) {
+      db.prepare("UPDATE favorites SET userId = ? WHERE userId = ''").run(firstAdmin);
+    }
+    db.exec("DROP INDEX IF EXISTS idx_favorites_song_platform");
+    db.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_favorites_user_song_platform ON favorites(userId, songId, platform)",
+    );
+  }
+  // 已存清单记录创建人：共享清单的创建人展示与删除保护依赖它
+  const sqCols = db.prepare("PRAGMA table_info(saved_queues)").all() as Array<{ name: string }>;
+  if (!sqCols.some((c) => c.name === "createdBy")) {
+    db.exec("ALTER TABLE saved_queues ADD COLUMN createdBy TEXT NOT NULL DEFAULT ''");
   }
 }
 
@@ -492,18 +521,18 @@ export function createDatabase(dbPath: string): BotDatabase {
   `);
 
   const insertSongFavorite = db.prepare(`
-    INSERT INTO favorites (songId, platform, title, artist, coverUrl, duration)
-    VALUES (@songId, @platform, @title, @artist, @coverUrl, @duration)
+    INSERT INTO favorites (userId, songId, platform, title, artist, coverUrl, duration)
+    VALUES (@userId, @songId, @platform, @title, @artist, @coverUrl, @duration)
   `);
 
   const selectSongFavorites = db.prepare(`
-    SELECT * FROM favorites ORDER BY id DESC
+    SELECT * FROM favorites WHERE userId = ? ORDER BY id DESC
   `);
 
-  const deleteSongFavoriteStmt = db.prepare(`DELETE FROM favorites WHERE id = ?`);
+  const deleteSongFavoriteStmt = db.prepare(`DELETE FROM favorites WHERE id = ? AND userId = ?`);
 
   const checkSongFavorite = db.prepare(`
-    SELECT 1 FROM favorites WHERE songId = ? AND platform = ? LIMIT 1
+    SELECT 1 FROM favorites WHERE userId = ? AND songId = ? AND platform = ? LIMIT 1
   `);
 
   // A corrupt/hand-edited songs blob must never throw into a route or the
@@ -517,19 +546,21 @@ export function createDatabase(dbPath: string): BotDatabase {
     }
   };
   const rowToSavedMeta = (r: {
-    id: number; ownerId: string; name: string; songCount: number; createdAt: string; updatedAt: string;
+    id: number; ownerId: string; createdBy?: string; name: string; songCount: number; createdAt: string; updatedAt: string; ownerName?: string | null;
   }): SavedQueueMeta => ({
     id: r.id,
     ownerId: r.ownerId,
+    createdBy: r.createdBy ?? "",
     name: r.name,
     songCount: r.songCount,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
+    ownerName: r.ownerName ?? null,
   });
 
   const upsertSavedQueue = db.prepare(`
-    INSERT INTO saved_queues (ownerId, name, songs, songCount)
-    VALUES (@ownerId, @name, @songs, @songCount)
+    INSERT INTO saved_queues (ownerId, name, songs, songCount, createdBy)
+    VALUES (@ownerId, @name, @songs, @songCount, @createdBy)
     ON CONFLICT(ownerId, name) DO UPDATE SET
       songs = excluded.songs,
       songCount = excluded.songCount,
@@ -545,10 +576,19 @@ export function createDatabase(dbPath: string): BotDatabase {
     "SELECT COUNT(*) AS c FROM saved_queues WHERE ownerId = ?",
   );
   const listSavedQueuesOwn = db.prepare(
-    "SELECT id, ownerId, name, songCount, createdAt, updatedAt FROM saved_queues WHERE ownerId = ? ORDER BY updatedAt DESC",
+    `SELECT sq.id, sq.ownerId, sq.createdBy, sq.name, sq.songCount, sq.createdAt, sq.updatedAt,
+            u.username AS ownerName
+     FROM saved_queues sq
+     LEFT JOIN users u ON u.id = sq.ownerId
+     WHERE sq.ownerId = ? ORDER BY sq.updatedAt DESC`,
   );
   const listSavedQueuesShared = db.prepare(
-    "SELECT id, ownerId, name, songCount, createdAt, updatedAt FROM saved_queues WHERE ownerId = ? OR ownerId = ? ORDER BY updatedAt DESC",
+    `SELECT sq.id, sq.ownerId, sq.createdBy, sq.name, sq.songCount, sq.createdAt, sq.updatedAt,
+            u.username AS ownerName
+     FROM saved_queues sq
+     LEFT JOIN users u ON u.id = CASE WHEN sq.ownerId = '${SHARED_QUEUE_OWNER}'
+                                      THEN NULLIF(sq.createdBy, '') ELSE sq.ownerId END
+     WHERE sq.ownerId = ? OR sq.ownerId = ? ORDER BY sq.updatedAt DESC`,
   );
   const selectSavedQueueById = db.prepare("SELECT * FROM saved_queues WHERE id = ?");
   const deleteSavedQueueById = db.prepare("DELETE FROM saved_queues WHERE id = ?");
@@ -692,21 +732,21 @@ export function createDatabase(dbPath: string): BotDatabase {
       insertSongFavorite.run(entry);
     },
 
-    getSongFavorites() {
-      return selectSongFavorites.all() as SongFavoriteRecord[];
+    getSongFavorites(userId) {
+      return selectSongFavorites.all(userId) as SongFavoriteRecord[];
     },
 
-    deleteSongFavorite(id) {
-      const result = deleteSongFavoriteStmt.run(id);
+    deleteSongFavorite(id, userId) {
+      const result = deleteSongFavoriteStmt.run(id, userId);
       return result.changes > 0;
     },
 
-    isSongFavorite(songId, platform) {
-      const row = checkSongFavorite.get(songId, platform);
+    isSongFavorite(userId, songId, platform) {
+      const row = checkSongFavorite.get(userId, songId, platform);
       return row !== undefined;
     },
 
-    saveQueue(ownerId, name, songs) {
+    saveQueue(ownerId, name, songs, createdBy) {
       if (songs.length > MAX_QUEUE_SONGS) {
         throw new Error(`保存失败：歌曲数量超过上限 ${MAX_QUEUE_SONGS}`);
       }
@@ -731,6 +771,8 @@ export function createDatabase(dbPath: string): BotDatabase {
         name,
         songs: JSON.stringify(stripped),
         songCount: stripped.length,
+        // 覆盖保存不改 createdBy：创建人保持首次保存者（upsert 的 UPDATE 分支也不碰它）
+        createdBy: createdBy ?? ownerId,
       });
       const row = selectSavedQueueByOwnerName.get(ownerId, name) as SavedQueueMeta;
       return { ...rowToSavedMeta(row), songs: stripped };

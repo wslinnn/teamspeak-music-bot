@@ -2,9 +2,11 @@ import { Router } from "express";
 import type { BotDatabase } from "../../data/database.js";
 
 /**
- * Song favorites (fork feature): cross-client song favorites.
- * Mounted at /api/song-favorites — the upstream /api/favorites route is the
- * per-user playlist favorites and must not be shadowed.
+ * Song favorites (fork feature): PER-USER song favorites, isolated by the
+ * WebUI session user. Mounted at /api/song-favorites — the upstream
+ * /api/favorites route is the per-user playlist favorites and must not be
+ * shadowed. The WS notification carries no payload: every client refetches
+ * its own list (a broadcast with data would leak other users' favorites).
  */
 export function createSongFavoritesRouter(
   database: BotDatabase,
@@ -12,9 +14,9 @@ export function createSongFavoritesRouter(
 ): Router {
   const router = Router();
 
-  router.get("/", (_req, res) => {
+  router.get("/", (req, res) => {
     try {
-      const favorites = database.getSongFavorites();
+      const favorites = database.getSongFavorites(req.user!.id);
       res.json({ favorites });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
@@ -23,20 +25,33 @@ export function createSongFavoritesRouter(
 
   router.post("/", (req, res) => {
     try {
+      const userId = req.user!.id;
       const { songId, platform, title, artist, coverUrl, duration } = req.body;
       if (!songId || !platform || !title) {
         res.status(400).json({ success: false, error: "songId, platform, and title are required" });
         return;
       }
-      database.addSongFavorite({
-        songId, platform, title,
-        artist: artist || "",
-        coverUrl: coverUrl || "",
-        duration: duration ?? 0,
-      });
-      const favorites = database.getSongFavorites();
-      broadcast({ type: "favoritesChanged", favorites });
-      res.json({ success: true, favorites });
+      try {
+        database.addSongFavorite({
+          userId,
+          songId,
+          platform,
+          title,
+          artist: artist || "",
+          coverUrl: coverUrl || "",
+          duration: duration ?? 0,
+        });
+      } catch (insErr) {
+        const e = insErr as { code?: string };
+        if (e?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+          // 红心状态过期（WS 事件丢失等）：已收藏过，幂等成功即可
+          res.json({ success: true, favorites: database.getSongFavorites(userId) });
+          return;
+        }
+        throw insErr;
+      }
+      broadcast({ type: "favoritesChanged" });
+      res.json({ success: true, favorites: database.getSongFavorites(userId) });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
     }
@@ -49,14 +64,13 @@ export function createSongFavoritesRouter(
         res.status(400).json({ success: false, error: "Invalid id" });
         return;
       }
-      const ok = database.deleteSongFavorite(id);
+      const ok = database.deleteSongFavorite(id, req.user!.id);
       if (!ok) {
         res.status(404).json({ success: false, error: "Favorite not found" });
         return;
       }
-      const favorites = database.getSongFavorites();
-      broadcast({ type: "favoritesChanged", favorites });
-      res.json({ success: true, favorites });
+      broadcast({ type: "favoritesChanged" });
+      res.json({ success: true, favorites: database.getSongFavorites(req.user!.id) });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
     }
