@@ -1,4 +1,4 @@
-# 重建断差修复方案（bug × 3 + 休眠功能 × 10 + 死代码处置）
+# 重建断差修复方案（bug × 3 + 休眠功能 × 11 + 死代码处置）
 
 > ⏳ **状态：待实施**（2026-08-25 对账产出，同日二次复查补入 D0/零散清单。
 > 本文是第二批；第一批 8 项见 `docs/dormant-features-ui-plans.md`，已完成并
@@ -159,6 +159,16 @@ TS 命令面板完整支持但 WebUI 无对应入口的四项（instance.ts:828-
 - `!artist`（歌手电台）
 仅在确有需求时排期，暂列备忘。
 
+### D11 bot 实例字段对接（autoStart / channelPassword / TS6 协议）【P1-P3 分层】
+
+后端 `BotInstance` 与连接层支持，但产品面不可达（SettingsBots 表单只有 name/serverAddress/serverPort/nickname/defaultChannel/serverPassword 六项）：
+
+- **`channelPassword`（频道密码）【P1，纯前端】**：POST/PUT 路由均已接收（bot.ts:449/483），仅表单缺字段——私密频道场景刚需。表单加一个密码输入即可。
+- **`autoStart`（开机自启）【P1，前端 + PUT 小改】**：创建路由接收（bot.ts:452，默认 false）、manager 在重启/Docker 重连时消费（manager.ts:183/318），但 UI 无开关，且 **PUT /:id 不接收 autoStart**（bot.ts:482 解构缺失）——完整对接需 PUT 补一个字段透传（"零后端改动"原则的已知例外）。
+- **`serverProtocol` + `ts6ApiKey`（TS6 服务器）【P3，全链路休眠】**：ts-protocol 连接层支持 TS6 HTTP Query（自动检测 + API key），但**创建/更新路由都不接收这两个字段**——目前只能直改数据库。TS6 接入整体休眠，待有真实 TS6 部署需求再评估（路由 + 表单 + 检测联调）。
+
+**工作量**：channelPassword 10 分钟；autoStart 0.5 天（含 PUT 透传与测试）；TS6 单独评估。
+
 ### 零散休眠端点与死配置（清单备查，不单独立项）
 
 **次要休眠端点**：`GET /api/bot/:id`（单 bot 查询，被列表接口+WS 等价覆盖）、`POST /api/player/:id/add-by-id`（前端总持完整 song 对象走 add-song）、`GET /api/music/song/:id`、`GET /api/music/album/:id`（详情接口，D5 可顺带消费专辑详情）。
@@ -184,15 +194,18 @@ TS 命令面板完整支持但 WebUI 无对应入口的四项（instance.ts:828-
 | 3 | D0 音源与连接管理 | P1 | 1 天 | 接管丢失回归；阻塞 D5/D6，且是 B2/D4 的管理闭环 |
 | 4 | B2+D4 音源标签动态化 | P1 | 0.5 天 | 消除误导性 UI；与 D0 共用 providers 数据 |
 | 5 | D1 插队播放 | P1 | 0.5 天 | 休眠项中用户价值最高，契约现成 |
-| 6 | D2 修改密码 | P2 | 0.5 天 | 多用户场景刚需 |
+| 6 | D11a channelPassword 表单字段 | P1 | 10 分钟 | 私密频道刚需，纯前端 |
+| 7 | D11b autoStart 开关 | P1 | 0.5 天 | 运维刚需（重启自动恢复） |
+| 8 | D2 修改密码 | P2 | 0.5 天 | 多用户场景刚需 |
 | 7 | D3 FM 开启 | P2 | 10 分钟 | 顺手 |
 | 8 | D8 审计页 | P2 | 0.5 天 | admin 合规场景 |
 | 9 | D5 Jellyfin 版块 | P2 | 1 天 | 依赖 #3（D0）与 #4 的 providers 数据 |
 | 10 | D6 Spotify OAuth | P3 | 0.5-1 天 | 依赖 #3（D0）+ 部署前置条件 |
 | 11 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | 需先核对契约 |
-| 12 | FORK.md 死代码记笔 | P3 | 10 分钟 | 顺手 |
+| 12 | D11c TS6 协议接入 | P3 | 单独评估 | 连接层已备，路由/表单全缺，待真实需求 |
+| 13 | FORK.md 死代码记笔 | P3 | 10 分钟 | 顺手 |
 
-P0 合计 1 天，P0+P1 合计 3 天。每项独立可交付、独立提交（conventional commits）。
+P0 合计 1 天，P0+P1 合计约 4.5 天。每项独立可交付、独立提交（conventional commits）。
 
 ---
 
