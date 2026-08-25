@@ -34,3 +34,32 @@ export function getPlatformBadgeClass(platform: string): string {
 export function getPlatformTailwindClass(platform: string): string {
   return PLATFORM_TAILWIND_CLASSES[platform as Platform] ?? '';
 }
+
+// ─── 全量音源（搜索页动态标签与设置页音源管理共用，B2/D0）───────────────
+
+/** 后端全部可管控音源的展示名（未列出的 key 原样展示） */
+const PROVIDER_LABELS: Record<string, string> = {
+  netease: '网易云',
+  qq: 'QQ',
+  bilibili: 'B站',
+  youtube: 'YouTube',
+  kugou: '酷狗',
+  jellyfin: 'Jellyfin',
+  local: '本地',
+  spotify: 'Spotify',
+};
+
+/** 标签/设置的固定展示顺序；未列出的启用源附加在末尾 */
+const PROVIDER_ORDER = ['netease', 'qq', 'bilibili', 'youtube', 'kugou', 'jellyfin', 'local', 'spotify'];
+
+export function getProviderLabel(key: string): string {
+  return PROVIDER_LABELS[key] ?? key;
+}
+
+/** 把 /api/music/providers 的 enabled 列表排成固定展示顺序 */
+export function orderedProviders(enabled: string[]): string[] {
+  const known = PROVIDER_ORDER.filter((p) => enabled.includes(p));
+  const extra = enabled.filter((p) => !PROVIDER_ORDER.includes(p));
+  return [...known, ...extra];
+}
+

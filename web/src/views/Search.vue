@@ -171,6 +171,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
+import { getProviderLabel, orderedProviders } from '../utils/platform';
 import { usePlayerStore, type Song } from '../stores/player';
 import { useToast } from '../composables/useToast';
 import SongGridCard from '../components/SongGridCard.vue';
@@ -219,14 +220,22 @@ const categories = computed(() => [
   { key: 'albums' as const, label: '专辑', count: albums.value.length },
 ]);
 
-const platformTabs = [
+// 音源标签动态化（B2/D4）：消费 /api/music/providers 的 enabled 列表，
+// 与后端启用状态联动——禁用的源不再显示（此前硬编码含 youtube 等固定 5 项，
+// 禁用后点击只会报"音源未启用"；kugou/jellyfin 等则完全没有入口）
+const enabledProviders = ref<string[]>([]);
+const platformTabs = computed(() => [
   { key: 'all', label: '全部' },
-  { key: 'netease', label: '网易云' },
-  { key: 'qq', label: 'QQ' },
-  { key: 'bilibili', label: 'B站' },
-  { key: 'youtube', label: 'YouTube' },
-];
+  ...orderedProviders(enabledProviders.value).map((p) => ({
+    key: p,
+    label: getProviderLabel(p),
+  })),
+]);
 const activePlatform = ref('all');
+// 当前源在运行中被禁用（标签消失）时回退"全部"
+watch(platformTabs, (tabs) => {
+  if (!tabs.some((t) => t.key === activePlatform.value)) activePlatform.value = 'all';
+});
 
 const SEARCH_PAGE = 30;
 
@@ -360,8 +369,15 @@ async function uploadFile(file: File) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   searchInput.value?.focus();
   if (query.value) doSearch();
+  // 拉取启用音源驱动标签；失败（旧后端/网络）退回主流四源，不阻塞搜索
+  try {
+    const res = await http.get('/api/music/providers');
+    enabledProviders.value = res.data.enabled ?? ['netease', 'qq', 'bilibili', 'youtube'];
+  } catch {
+    enabledProviders.value = ['netease', 'qq', 'bilibili', 'youtube'];
+  }
 });
 </script>
