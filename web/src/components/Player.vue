@@ -74,8 +74,12 @@
             type="range"
             min="0"
             max="100"
-            :value="activeBot?.volume ?? 75"
+            :value="volumeDisplay"
+            @input="onVolumeInput"
             @change="onVolumeChange"
+            @pointerup="onVolumeRelease"
+            @pointercancel="onVolumeRelease"
+            @blur="onVolumeRelease"
             class="volume-slider hidden sm:block"
           />
         </template>
@@ -104,6 +108,7 @@ import { Icon } from '@iconify/vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
+import { useDecoupledSlider } from '../composables/useDecoupledSlider.js';
 import CoverArt from './CoverArt.vue';
 import Queue from './Queue.vue';
 import PlayingIndicator from './PlayingIndicator.vue';
@@ -251,10 +256,17 @@ function togglePlay() {
   }
 }
 
-function onVolumeChange(e: Event) {
-  const target = e.target as HTMLInputElement;
-  store.setVolume(parseInt(target.value));
-}
+// 音量滑块与逐帧 rAF 重渲染解耦（#111）：拖动中绑定本地值不被拽回，
+// 松手才提交 store；外部变化（切 bot/其他客户端）在不拖动时照常跟进
+const {
+  display: volumeDisplay,
+  onInput: onVolumeInput,
+  onChange: onVolumeChange,
+  onRelease: onVolumeRelease,
+} = useDecoupledSlider(
+  () => activeBot.value?.volume,
+  (v) => store.setVolume(v)
+);
 
 const modeOrder = ['seq', 'loop', 'random', 'rloop'] as const;
 const modeIcons: Record<string, string> = {
