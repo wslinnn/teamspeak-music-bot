@@ -12,7 +12,7 @@
   </div>
 
   <!-- FM -->
-  <section class="mb-9">
+  <section v-if="canStartFm" class="mb-9">
     <h2 class="mb-4 text-[22px] font-bold">私人FM</h2>
     <div
       class="group flex items-center gap-5 rounded-[var(--radius-lg)] bg-surface-card p-5 cursor-pointer transition-colors hover:bg-interactive-hover"
@@ -34,28 +34,37 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useRouter } from 'vue-router';
 import { http } from '../../utils/http';
-import { usePlayerStore, type Song } from '../../stores/player';
+import { usePlayerStore } from '../../stores/player';
+import { useAuthStore } from '../../stores/auth';
 import { useToast } from '../../composables/useToast';
 
 const router = useRouter();
 const store = usePlayerStore();
+const auth = useAuthStore();
 const toast = useToast();
 
+// /fm 需 player.control 或游客 playMode 开关（与 D14 门控口径一致）
+const canStartFm = computed(() => auth.can('player.control') || auth.guestCan('playMode'));
+
 async function playFm() {
+  if (!store.activeBotId) {
+    toast.error('暂无可用的机器人');
+    return;
+  }
+  // 唤醒后端 POST /api/player/:id/fm：由服务端接管 FM 模式（自动拉歌/续播）
   try {
-    const res = await http.get('/api/music/personal/fm');
-    const songs: Song[] = res.data.songs;
-    if (songs.length > 0) {
-      await store.play(songs[0].name, songs[0].platform);
-      for (let i = 1; i < songs.length; i++) {
-        await store.addToQueue(songs[i].name, songs[i].platform);
-      }
+    const res = await http.post(`/api/player/${store.activeBotId}/fm`, { platform: 'netease' });
+    if (res.data.ok) {
+      toast.success('私人FM已开启');
+    } else {
+      toast.error(res.data.message || '开启私人FM失败');
     }
   } catch {
-    toast.error('无法获取私人FM');
+    toast.error('开启私人FM失败');
   }
 }
 </script>
