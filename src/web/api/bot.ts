@@ -479,10 +479,11 @@ export function createBotRouter(
         res.status(404).json({ error: "Bot not found" });
         return;
       }
-      const { name, serverAddress, serverPort, nickname, defaultChannel, channelId, channelPassword, serverPassword } = req.body;
-      // Update in database
+      const { name, serverAddress, serverPort, nickname, defaultChannel, channelId, channelPassword, serverPassword, autoStart } = req.body;
+      // Update in database（autoStart 仅接受布尔，D11b：编辑弹窗开关的落库通道）
       botManager.updateBot(req.params.id, {
         name, serverAddress, serverPort, nickname, defaultChannel, channelId, channelPassword, serverPassword,
+        ...(typeof autoStart === "boolean" ? { autoStart } : {}),
       });
       res.json({ success: true });
     } catch (err) {

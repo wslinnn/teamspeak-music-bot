@@ -61,8 +61,15 @@
           <input v-model="form.defaultChannel" class="input" placeholder="音乐频道" />
         </div>
         <div class="sm:col-span-1">
+          <label class="block text-xs font-semibold opacity-70 mb-1">频道密码（可选）</label>
+          <input v-model="form.channelPassword" type="password" class="input" />
+        </div>
+        <div class="sm:col-span-1">
           <label class="block text-xs font-semibold opacity-70 mb-1">服务器密码（可选）</label>
           <input v-model="form.serverPassword" type="password" class="input" />
+        </div>
+        <div class="sm:col-span-1 flex items-center">
+          <BaseToggle v-model="form.autoStart" label="随服务自启" hint="进程/Docker 重启后自动连接" />
         </div>
       </div>
       <BaseButton class="mt-3" @click="submitCreate">创建</BaseButton>
@@ -75,13 +82,14 @@ import { reactive } from 'vue';
 import { Icon } from '@iconify/vue';
 import type { BotStatus } from '../../stores/player';
 import BaseButton from '../common/BaseButton.vue';
+import BaseToggle from '../common/BaseToggle.vue';
 
 const props = defineProps<{ bots: BotStatus[] }>();
 const emit = defineEmits<{
   (e: 'toggleBot', botId: string, connected: boolean): void;
   (e: 'editBot', bot: BotStatus): void;
   (e: 'deleteBot', botId: string, botName: string): void;
-  (e: 'createBot', form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; serverPassword: string }): void;
+  (e: 'createBot', form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; channelPassword: string; serverPassword: string; autoStart: boolean }): void;
 }>();
 
 const defaultForm = {
@@ -90,7 +98,9 @@ const defaultForm = {
   serverPort: 9987,
   nickname: 'MusicBot',
   defaultChannel: '',
+  channelPassword: '',
   serverPassword: '',
+  autoStart: false,
 };
 
 const form = reactive({ ...defaultForm });
