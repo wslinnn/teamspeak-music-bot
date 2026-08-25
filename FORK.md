@@ -22,7 +22,7 @@ git show upstream-ref:src/bot/instance.ts     # 直接查看上游版某文件
 
 - 前端：本 fork 使用 **Tailwind CSS 4 + Vite 6**（上游为 SCSS + Vite 5）。`web/` 由本 fork 完全接管，上游新增的前端页面（如已存队列、用户管理）需用 Tailwind 自行实现，只参考上游的交互逻辑与 API 契约。
 - 鉴权：使用上游的会话式多用户体系（`/api/session`），旧主线的 JWT 鉴权已废弃。
-- 路由冲突处理：上游 `/api/favorites` 是按用户的歌单收藏，本 fork 的歌曲收藏挂载在 **`/api/song-favorites`**。
+- 路由冲突处理：上游 `/api/favorites` 是按用户的歌单收藏，本 fork 的歌曲收藏挂载在 **`/api/song-favorites`**。两者语义并存、互不冲突（一个收藏歌单、一个收藏歌曲）；`/api/favorites` 族（搜索/歌单页红心 + Library 音乐库页）已于 2026-08 前端对接（见 `docs/rebuild-gap-fix-plan.md` D12），**不是死代码，不要删除**。
 
 ## 同步上游的例行流程
 
