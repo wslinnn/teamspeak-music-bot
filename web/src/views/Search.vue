@@ -95,63 +95,73 @@
           @add="store.addSong(song)"
         />
       </TransitionGroup>
-      <div v-if="songsHasMore" class="mt-6 flex justify-center">
-        <BaseButton :loading="loadingMore" :disabled="loadingMore" @click="loadMoreSongs">加载更多</BaseButton>
+      <div v-if="currentHasMore" class="mt-6 flex justify-center">
+        <BaseButton :loading="loadingMore" :disabled="loadingMore" @click="loadMore">加载更多</BaseButton>
       </div>
     </div>
 
     <!-- Playlists results -->
-    <div v-else-if="activeCategory === 'playlists' && playlists.length > 0" class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-      <button
-        v-for="pl in playlists"
-        :key="`${pl.platform}-${pl.id}`"
-        class="group text-left"
-        :title="`打开歌单：${pl.name}`"
-        @click="openPlaylist(pl)"
-      >
-        <div class="relative aspect-square overflow-hidden rounded-[10px]">
-          <CoverArt :url="pl.coverUrl" :fill="true" :radius="0" />
-          <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
-              <Icon icon="mdi:open-in-new" class="text-2xl" />
+    <div v-else-if="activeCategory === 'playlists' && playlists.length > 0">
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <RouterLink
+          v-for="pl in playlists"
+          :key="`${pl.platform}-${pl.id}`"
+          :to="`/playlist/${pl.id}?platform=${pl.platform}`"
+          class="group text-left"
+          :title="`打开歌单：${pl.name}`"
+        >
+          <div class="relative aspect-square overflow-hidden rounded-[10px]">
+            <CoverArt :url="pl.coverUrl" :fill="true" :radius="0" />
+            <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+              <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
+                <Icon icon="mdi:open-in-new" class="text-2xl" />
+              </div>
+            </div>
+            <div class="absolute right-1.5 top-1.5 z-[10]">
+              <PlaylistFavoriteButton
+                :playlist-id="pl.id"
+                :platform="pl.platform"
+                :name="pl.name"
+                :cover-url="pl.coverUrl"
+                :song-count="pl.songCount"
+                overlay
+              />
             </div>
           </div>
-          <div class="absolute right-1.5 top-1.5 z-[10]">
-            <PlaylistFavoriteButton
-              :playlist-id="pl.id"
-              :platform="pl.platform"
-              :name="pl.name"
-              :cover-url="pl.coverUrl"
-              :song-count="pl.songCount"
-              overlay
-            />
-          </div>
-        </div>
-        <div class="mt-2 text-[13px] font-medium truncate">{{ pl.name }}</div>
-        <div class="text-xs text-text-tertiary truncate">{{ pl.songCount }} 首</div>
-      </button>
+          <div class="mt-2 text-[13px] font-medium truncate">{{ pl.name }}</div>
+          <div class="text-xs text-text-tertiary truncate">{{ pl.songCount }} 首</div>
+        </RouterLink>
+      </div>
+      <div v-if="currentHasMore" class="mt-6 flex justify-center">
+        <BaseButton :loading="loadingMore" :disabled="loadingMore" @click="loadMore">加载更多</BaseButton>
+      </div>
     </div>
 
     <!-- Albums results -->
-    <div v-else-if="activeCategory === 'albums' && albums.length > 0" class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-      <RouterLink
-        v-for="ab in albums"
-        :key="`${ab.platform ?? activePlatform}-${ab.id}`"
-        :to="`/album/${ab.id}?platform=${ab.platform ?? (activePlatform === 'all' ? 'netease' : activePlatform)}`"
-        class="group text-left"
-        :title="`打开专辑：${ab.name}`"
-      >
-        <div class="relative aspect-square overflow-hidden rounded-[10px]">
-          <CoverArt :url="ab.coverUrl" :fill="true" :radius="0" />
-          <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
-              <Icon icon="mdi:open-in-new" class="text-2xl" />
+    <div v-else-if="activeCategory === 'albums' && albums.length > 0">
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <RouterLink
+          v-for="ab in albums"
+          :key="`${ab.platform}-${ab.id}`"
+          :to="`/album/${ab.id}?platform=${ab.platform}`"
+          class="group text-left"
+          :title="`打开专辑：${ab.name}`"
+        >
+          <div class="relative aspect-square overflow-hidden rounded-[10px]">
+            <CoverArt :url="ab.coverUrl" :fill="true" :radius="0" />
+            <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+              <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
+                <Icon icon="mdi:open-in-new" class="text-2xl" />
+              </div>
             </div>
           </div>
-        </div>
-        <div class="mt-2 text-[13px] font-medium truncate">{{ ab.name }}</div>
-        <div class="text-xs text-text-tertiary truncate">{{ ab.artist }}</div>
-      </RouterLink>
+          <div class="mt-2 text-[13px] font-medium truncate">{{ ab.name }}</div>
+          <div class="text-xs text-text-tertiary truncate">{{ ab.artist }}</div>
+        </RouterLink>
+      </div>
+      <div v-if="currentHasMore" class="mt-6 flex justify-center">
+        <BaseButton :loading="loadingMore" :disabled="loadingMore" @click="loadMore">加载更多</BaseButton>
+      </div>
     </div>
 
     <!-- Empty category -->
@@ -183,6 +193,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
 import { getProviderLabel, orderedProviders } from '../utils/platform';
+import { mergeDedup, hasMore, nextOffset } from '../utils/searchPagination.js';
 import { usePlayerStore, type Song } from '../stores/player';
 import { useToast } from '../composables/useToast';
 import SongGridCard from '../components/SongGridCard.vue';
@@ -211,7 +222,8 @@ interface AlbumHit {
   artist: string;
   coverUrl: string;
   songCount: number;
-  platform?: string;
+  /** applyResult/loadMore 已按当前音源归一化，恒有值 */
+  platform: string;
 }
 
 const searchInput = ref<HTMLInputElement | null>(null);
@@ -224,7 +236,18 @@ const loadingMore = ref(false);
 const searched = ref(false);
 const errorMsg = ref('');
 const activeCategory = ref<'songs' | 'playlists' | 'albums'>('songs');
-const songsHasMore = ref(false);
+
+// 分页（上游 searchPagination 模型）：hasMore 按 (类目, 音源) 记录；
+// 返回条数 === PAGE_SIZE 视为可能还有下一页
+const hasMoreMap = ref<Record<string, boolean>>({});
+
+function pageKey(type: 'songs' | 'playlists' | 'albums', source: string): string {
+  return `${type}:${source}`;
+}
+
+const currentHasMore = computed(
+  () => activePlatform.value !== 'all' && (hasMoreMap.value[pageKey(activeCategory.value, activePlatform.value)] ?? false)
+);
 
 const categories = computed(() => [
   { key: 'songs' as const, label: '歌曲', count: results.value.length },
@@ -254,9 +277,20 @@ const SEARCH_PAGE = 30;
 function applyResult(data: { songs?: Song[]; playlists?: PlaylistHit[]; albums?: AlbumHit[] }) {
   results.value = data.songs ?? [];
   playlists.value = data.playlists ?? [];
-  albums.value = data.albums ?? [];
-  // /search/all 为多源合并首屏（无 offset 分页）；单平台 /search 支持 offset
-  songsHasMore.value = activePlatform.value !== 'all' && results.value.length >= SEARCH_PAGE;
+  // 单源模式下补齐专辑缺失的 platform（分页去重键与详情页跳转都依赖它）
+  albums.value = (data.albums ?? []).map((ab) => ({
+    ...ab,
+    platform: ab.platform ?? (activePlatform.value === 'all' ? 'netease' : activePlatform.value),
+  }));
+  hasMoreMap.value = {};
+  // /search/all 为多源合并首屏（无 offset 分页）；单平台 /search 三类目逐项记录
+  if (activePlatform.value !== 'all') {
+    hasMoreMap.value = {
+      [pageKey('songs', activePlatform.value)]: hasMore(results.value.length, SEARCH_PAGE),
+      [pageKey('playlists', activePlatform.value)]: hasMore(playlists.value.length, SEARCH_PAGE),
+      [pageKey('albums', activePlatform.value)]: hasMore(albums.value.length, SEARCH_PAGE),
+    };
+  }
 }
 
 async function doSearch() {
@@ -281,37 +315,42 @@ async function doSearch() {
     results.value = [];
     playlists.value = [];
     albums.value = [];
+    hasMoreMap.value = {};
   } finally {
     loading.value = false;
   }
 }
 
-async function loadMoreSongs() {
+/** 当前类目追加一页：offset 对齐页边界，mergeDedup 防重叠/重复 */
+async function loadMore() {
   if (loadingMore.value || activePlatform.value === 'all') return;
+  const type = activeCategory.value;
+  const source = activePlatform.value;
+  const current = type === 'albums' ? albums.value : type === 'playlists' ? playlists.value : results.value;
   loadingMore.value = true;
   try {
     const res = await http.get('/api/music/search', {
-      params: {
-        q: query.value,
-        platform: activePlatform.value,
-        limit: SEARCH_PAGE,
-        offset: results.value.length,
-      },
+      params: { q: query.value, platform: source, limit: SEARCH_PAGE, offset: nextOffset(current.length, SEARCH_PAGE) },
     });
-    const incoming = (res.data.songs ?? []) as Song[];
-    const seen = new Set(results.value.map((s) => `${s.platform}-${s.id}`));
-    const fresh = incoming.filter((s) => !seen.has(`${s.platform}-${s.id}`));
-    results.value = [...results.value, ...fresh];
-    songsHasMore.value = incoming.length >= SEARCH_PAGE && fresh.length > 0;
+    const incoming = res.data ?? {};
+    if (type === 'albums') {
+      albums.value = mergeDedup(
+        albums.value,
+        ((incoming.albums ?? []) as AlbumHit[]).map((ab) => ({ ...ab, platform: ab.platform ?? source })),
+      );
+      hasMoreMap.value = { ...hasMoreMap.value, [pageKey(type, source)]: hasMore((incoming.albums ?? []).length, SEARCH_PAGE) };
+    } else if (type === 'playlists') {
+      playlists.value = mergeDedup(playlists.value, (incoming.playlists ?? []) as PlaylistHit[]);
+      hasMoreMap.value = { ...hasMoreMap.value, [pageKey(type, source)]: hasMore((incoming.playlists ?? []).length, SEARCH_PAGE) };
+    } else {
+      results.value = mergeDedup(results.value, (incoming.songs ?? []) as Song[]);
+      hasMoreMap.value = { ...hasMoreMap.value, [pageKey(type, source)]: hasMore((incoming.songs ?? []).length, SEARCH_PAGE) };
+    }
   } catch {
     toast.error('加载更多失败');
   } finally {
     loadingMore.value = false;
   }
-}
-
-function openPlaylist(pl: PlaylistHit) {
-  router.push({ path: `/playlist/${pl.id}`, query: { platform: pl.platform } });
 }
 
 // Re-search when platform filter changes and we already have a query
