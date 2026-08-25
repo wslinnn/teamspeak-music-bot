@@ -83,6 +83,11 @@ export const usePlayerStore = defineStore('player', {
 
     // 已存清单功能开关（GET /api/bot/settings；控制 Queue 抽屉的清单按钮显隐）
     savedQueuesEnabled: false,
+
+    // 音源启用状态（GET /api/music/providers）与平台登录态（GET /api/auth/status），
+    // 供首页推荐/FM 多源切换与各处显隐使用
+    enabledProviders: [] as string[],
+    authStatus: {} as Record<string, { loggedIn: boolean; nickname: string }>,
   }),
 
   getters: {
@@ -254,6 +259,33 @@ export const usePlayerStore = defineStore('player', {
       } catch {
         // 拉不到保持默认（隐藏），后端禁用时清单接口本就 403
       }
+    },
+
+    async fetchEnabledProviders() {
+      try {
+        const res = await http.get('/api/music/providers');
+        this.enabledProviders = res.data.enabled ?? [];
+      } catch {
+        // 保持空：相关区块不展示多源切换
+      }
+    },
+
+    /** 平台登录态（netease/qq/kugou）；游客无权访问，保持空 */
+    async fetchAuthStatus() {
+      const platforms = ['netease', 'qq', 'kugou'];
+      const results = await Promise.allSettled(
+        platforms.map((p) => http.get('/api/auth/status', { params: { platform: p } })),
+      );
+      const next: Record<string, { loggedIn: boolean; nickname: string }> = {};
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          next[platforms[i]] = {
+            loggedIn: r.value.data?.loggedIn === true,
+            nickname: r.value.data?.nickname ?? '',
+          };
+        }
+      });
+      this.authStatus = next;
     },
 
     isPlaylistFavorited(playlistId: string, platform: string): boolean {

@@ -70,7 +70,10 @@ onMounted(async () => {
   if (!authStore.isGuest) {
     playerStore.fetchFavoritedPlaylists();
     playerStore.fetchBotSettings();
+    playerStore.fetchAuthStatus();
   }
+  // 音源启用状态（首页 FM/推荐多源显隐等）
+  playerStore.fetchEnabledProviders();
   // Spotify OAuth 回跳结果（/?spotify=success|error）：提示并清掉查询参数
   const spotifyResult = route.query.spotify;
   if (spotifyResult === 'success' || spotifyResult === 'error') {
