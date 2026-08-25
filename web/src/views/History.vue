@@ -34,7 +34,7 @@
         :key="`${song.id}-${i}`"
         :song="song"
         :index="i + 1"
-        :active="store.currentSong?.id === song.id && store.currentSong?.platform === song.platform"
+        :active="i === currentHistoryIndex"
         @play="store.playSong(song)"
         @playnext="store.playNextSong(song)"
         @add="store.addSong(song)"
@@ -69,6 +69,16 @@ const loading = ref(true);
 const loadingMore = ref(false);
 const hasMore = ref(false);
 const query = ref('');
+
+// 当前播放对应"该歌最新的一次播放事件"＝列表中第一条 id+platform 匹配的行
+//（播放开始即写入历史、倒序排列）；同曲的更早记录不亮
+const currentHistoryIndex = computed(() => {
+  const cur = store.currentSong;
+  if (!cur) return -1;
+  return filteredHistory.value.findIndex(
+    (song) => song.id === cur.id && song.platform === cur.platform,
+  );
+});
 
 const filteredHistory = computed(() => {
   if (!query.value.trim()) return history.value;

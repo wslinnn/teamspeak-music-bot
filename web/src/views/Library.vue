@@ -68,11 +68,11 @@
       <EmptyState v-else-if="history.length === 0" message="暂无播放记录" icon="mdi:history" />
       <div v-else class="flex flex-col gap-0.5">
         <SongCard
-          v-for="(song, i) in history.slice(0, 10)"
+          v-for="(song, i) in recentHistory"
           :key="`hist-${song.id}-${i}`"
           :song="song"
           :index="i + 1"
-          :active="store.currentSong?.id === song.id && store.currentSong?.platform === song.platform"
+          :active="i === currentRecentIndex"
           @play="store.playSong(song)"
           @playnext="store.playNextSong(song)"
           @add="store.addSong(song)"
@@ -127,6 +127,15 @@ async function loadPlaylists() {
 
 // ── 最近播放 ──
 const history = ref<Song[]>([]);
+const recentHistory = computed(() => history.value.slice(0, 10));
+// 只亮"当前这轮播放"对应的事件行＝首条匹配（同曲更早记录不亮），与 History 页同口径
+const currentRecentIndex = computed(() => {
+  const cur = store.currentSong;
+  if (!cur) return -1;
+  return recentHistory.value.findIndex(
+    (song) => song.id === cur.id && song.platform === cur.platform,
+  );
+});
 const historyLoading = ref(true);
 
 onMounted(async () => {
