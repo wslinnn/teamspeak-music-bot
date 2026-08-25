@@ -1,20 +1,24 @@
-# 重建断差修复方案（bug × 3 + 休眠功能 × 8 + 死代码处置）
+# 重建断差修复方案（bug × 3 + 休眠功能 × 10 + 死代码处置）
 
-> ⏳ **状态：待实施**（2026-08-25 对账产出。本文是第二批；第一批 8 项见
-> `docs/dormant-features-ui-plans.md`，已完成并抽查核实。）
+> ⏳ **状态：待实施**（2026-08-25 对账产出，同日二次复查补入 D0/零散清单。
+> 本文是第二批；第一批 8 项见 `docs/dormant-features-ui-plans.md`，已完成并
+> 抽查核实。）
 
 > **背景**：当前 main 是"上游基座 + 选择性重放 fork 提交"重建的，前端经
 > `db85626` 以内容移植（不带历史）方式接管。该模式产生三类断差：
 > ① 字段瘦身型回归（接口 200 OK 但响应字段丢失，如已修复的
 > `/elapsed` 4 字段、`play_history.duration`，见 `40e0863`/`8de32d5`）；
 > ② 后端能力齐备但前端无入口（休眠功能）；
-> ③ 前后端约定从未对齐（如 WS 关闭码）。
+> ③ 前后端约定从未对齐（如 WS 关闭码）；
+> ④ **接管丢失**：上游前端有、fork 接管版前端没有的 UI（如上游
+> Settings 的"Jellyfin 音乐库"卡片——config.ts:156 注释仍引用它）。
 > 本文档整理剩余全部已知断差并给出修复方案。
 
 ## 契约速查（已逐条核实，2026-08-25 main）
 
 | 端点 | 契约 | 证据 |
 |------|------|------|
+| `GET/POST /api/bot/settings` | GET 返回 commandPrefix/idleTimeout/autoPause/voiceDucking/localAudio/savedQueues/playKeepsQueue/adminGroups/guestMode/**enabledProviders**/**defaultPlatform**/**spotify(masked)**/**jellyfin(masked)**；POST 全部支持写入（spotify/jellyfin 部分合并校验、enabledProviders 全量替换、defaultPlatform 带失效联动清洗） | bot.ts:68-88、104-260 |
 | `GET /api/music/providers` | `{ enabled: string[] }`，按 config 过滤（local 看 localAudioEnabled、spotify 看 spotify.enabled，其余看 enabledProviders） | music.ts:388-404、config.ts:79-83 |
 | `getStatus()`（WS stateChange / status 类响应的来源） | 含 `effectiveDuration`（试听曲为 trialDuration，否则完整 duration） | instance.ts:2019、instance.ts:1097 |
 | `GET /api/player/:id/elapsed` | `{ elapsed, playing, paused, volume, playMode }`（`40e0863` 补全） | player.ts:192-203 |
@@ -83,6 +87,20 @@
 
 > 原则沿用第一批：只把已有后端契约映射成控件、挂到既有注意力路径；不新建路由页；全部复用 BaseToggle/BaseModal/BaseButton/Toast 体系；零后端改动（B1-B3 除外）。
 
+### D0 音源与连接管理【P1·接管丢失，阻塞 D5/D6】
+
+**现状**：`enabledProviders`/`defaultPlatform`/`spotify`/`jellyfin` 四个配置块，后端 GET/POST 完整支持（含校验与联动清洗），**前端零消费**（`web/src` grep 无命中）。上游 Settings.vue 有"Jellyfin 音乐库"卡片且注释明言它是唯一的 enabledProviders 翻转入口（upstream-ref Settings.vue:168-178）——fork 接管前端时丢失。后果：**启用 Jellyfin/调整默认音源只能手改 config.json**；D5 的 Jellyfin 版块、D6 的 Spotify OAuth 实际都被此缺口阻塞。
+
+**挂载点**：Settings 新增"音源"Tab（照抄 tab 挂载模式）：
+- 启用开关列表：GATEABLE_PROVIDERS 逐项 BaseToggle（jellyfin/netease/qq/bilibili/youtube/kugou；local、spotify 由各自专属开关控制，只读展示）
+- 默认音源下拉：enabled ∪ "自动（按优先级）"（`defaultPlatform` null 语义）
+- Jellyfin 连接卡片：baseUrl/apiKey 输入 + `POST /api/auth/jellyfin/test` 连通测试
+- Spotify 连接卡片：clientId/clientSecret 输入（masked GET 回显）
+
+**交互**：一次 `POST /api/bot/settings` 差量保存；enabledProviders 变更后提示"网易云/QQ 内嵌 API 服务需重启生效"（bot.ts 注释语义）。
+**非破坏**：纯新增 Tab；后端不动。
+**工作量**：1 天。
+
 ### D1 插队播放（下一首播放 / 立即播放）【价值最高】
 
 **挂载点**：`SongCard.vue` 与搜索页 `SongGridCard` 的操作区——现有"播放/添加到队列"两个图标按钮旁各加一个"下一首播放"（`mdi:playlist-play`）；"立即播放"收敛进 History 页 SongCard 的双击行为以外再加一个图标位（或悬浮菜单，二选一，以不破坏现有两按钮布局为准）。
@@ -104,16 +122,18 @@
 
 ### D4 音源标签动态化
 
-即 B2，两者合并为一次实施（providers 接口同时服务标签可见性）。
+即 B2，与 D0 配套实施：D0 提供管理侧（启用/禁用），B2/D4 提供消费侧（标签随动）。
 
 ### D5 Jellyfin 首页版块
 
+**前置依赖**：D0（Jellyfin 目前是 opt-in，没有启用入口就没有版块可显示）。
 **挂载点**：`Home.vue`——jellyfin 在 enabled 中时（复用 B2 的 providers 数据，建议放进 store 避免重复请求）新增版块：最新专辑（横向卡片行）、最常播放、收藏；点专辑卡片进"流派/专辑歌曲"列表（`genre/:id/songs` 或复用 play-album 端点直接播）。
 **交互**：专辑卡 → 播放走现有 `POST /api/player/:id/play-album`（契约 `{albumId, platform}`）。
 **工作量**：1 天。
 
 ### D6 Spotify OAuth 网页流程
 
+**前置依赖**：D0 的 Spotify 连接卡片（clientId 等此前无任何配置入口，只能手改 config.json）。
 **挂载点**：`SettingsPlatforms.vue` 新增 Spotify 区块：`GET /api/spotify/status` 显示登录态；"去授权"跳 `GET /api/spotify/login` 返回的授权 URL（回调地址依赖 `GET /api/config/public-url`，部署侧需外网可达——文档里注明该前置条件）。
 **工作量**：0.5-1 天（含回调联调；不可达时给出明确提示而非死链）。
 
@@ -131,6 +151,20 @@
 
 第一批方案 7 明确标记的二期：`GET/PUT /api/users/:id/permissions` 的能力矩阵 + bot 白名单编辑。使用频率低、交互成本高，维持二期不动。
 
+### D10 TS 聊天命令 Web 化（vote / follow / move / artist）【低优先级】
+
+TS 命令面板完整支持但 WebUI 无对应入口的四项（instance.ts:828-887 命令表）：
+- `!vote`（投票跳过，多用户 TS 场景）／`!follow`·`!unfollow`（跟随某人点歌）——群聊场景天然属聊天侧，Web 化价值中等
+- `!move`（移动 bot 到频道）——可与 server-tree 抽屉联动（`join-channel` 端点已有）
+- `!artist`（歌手电台）
+仅在确有需求时排期，暂列备忘。
+
+### 零散休眠端点与死配置（清单备查，不单独立项）
+
+**次要休眠端点**：`GET /api/bot/:id`（单 bot 查询，被列表接口+WS 等价覆盖）、`POST /api/player/:id/add-by-id`（前端总持完整 song 对象走 add-song）、`GET /api/music/song/:id`、`GET /api/music/album/:id`（详情接口，D5 可顺带消费专辑详情）。
+
+**死配置字段**（config.ts 定义、全仓库无消费者，属上游遗留，**同样不删**以免增加上游合并冲突面，仅记档）：`autoReturnDelay`、`adminPassword`（已被 users/session 体系取代）、`locale`。`commandAliases` 有消费（instance.ts:724，命令别名）但无编辑 UI——如需可视化可并入 D0 的音源 Tab 一并做。
+
 ---
 
 ## 三、死代码处置：`/api/favorites`
@@ -147,17 +181,18 @@
 |----|----|--------|--------|------|
 | 1 | B1 effectiveDuration | P0 | 0.5 天 | 用户可见 bug，与刚修的 duration 同模式，纯前端+1 字段 |
 | 2 | B3 WS 4001 对齐 | P0 | 0.5 天 | 会话过期假死的直接病因，后端单点改动 |
-| 3 | B2+D4 音源标签动态化 | P1 | 0.5 天 | 消除误导性 UI，同时为 D5 提供 enabled 数据源 |
-| 4 | D1 插队播放 | P1 | 0.5 天 | 休眠项中用户价值最高，契约现成 |
-| 5 | D2 修改密码 | P2 | 0.5 天 | 多用户场景刚需 |
-| 6 | D3 FM 开启 | P2 | 10 分钟 | 顺手 |
-| 7 | D8 审计页 | P2 | 0.5 天 | admin 合规场景 |
-| 8 | D5 Jellyfin 版块 | P2 | 1 天 | 依赖 #3 的 providers 数据 |
-| 9 | D6 Spotify OAuth | P3 | 0.5-1 天 | 有部署前置条件 |
-| 10 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | 需先核对契约 |
-| 11 | FORK.md 死代码记笔 | P3 | 10 分钟 | 顺手 |
+| 3 | D0 音源与连接管理 | P1 | 1 天 | 接管丢失回归；阻塞 D5/D6，且是 B2/D4 的管理闭环 |
+| 4 | B2+D4 音源标签动态化 | P1 | 0.5 天 | 消除误导性 UI；与 D0 共用 providers 数据 |
+| 5 | D1 插队播放 | P1 | 0.5 天 | 休眠项中用户价值最高，契约现成 |
+| 6 | D2 修改密码 | P2 | 0.5 天 | 多用户场景刚需 |
+| 7 | D3 FM 开启 | P2 | 10 分钟 | 顺手 |
+| 8 | D8 审计页 | P2 | 0.5 天 | admin 合规场景 |
+| 9 | D5 Jellyfin 版块 | P2 | 1 天 | 依赖 #3（D0）与 #4 的 providers 数据 |
+| 10 | D6 Spotify OAuth | P3 | 0.5-1 天 | 依赖 #3（D0）+ 部署前置条件 |
+| 11 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | 需先核对契约 |
+| 12 | FORK.md 死代码记笔 | P3 | 10 分钟 | 顺手 |
 
-P0 合计 1 天，P0+P1 合计 2 天。每项独立可交付、独立提交（conventional commits）。
+P0 合计 1 天，P0+P1 合计 3 天。每项独立可交付、独立提交（conventional commits）。
 
 ---
 
