@@ -191,7 +191,17 @@ export function createPlayerRouter(
   // Get current elapsed time (ground truth from server)
   router.get("/:botId/elapsed", (req, res) => {
     const bot = (req as any).bot;
-    res.json({ elapsed: bot.getPlayer().getElapsed() });
+    // 返回完整播放状态而非仅 elapsed：前端每 3s 轮询本接口，缺 playing/
+    // paused 会导致按钮状态无法自愈（一旦错过 WS stateChange 广播就永久
+    // 卡在旧状态，如切歌后仍显示"暂停 + 上一曲进度"）
+    const st = bot.getStatus();
+    res.json({
+      elapsed: st.elapsed,
+      playing: st.playing,
+      paused: st.paused,
+      volume: st.volume,
+      playMode: st.playMode,
+    });
   });
 
   // Seek to position
