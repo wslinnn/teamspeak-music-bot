@@ -192,12 +192,20 @@ const toast = useToast();
 const authStore = useAuthStore();
 
 const tabs = computed(() => {
+  // 页签按能力显隐（对齐后端权限）：机器人管理/行为设置写 bot 设置需 bot.manage，
+  // 音乐账号登录需 platform.auth；通用页签人人可见（主题/改密码），内部区块再细分
   const list = [
     { key: 'general', label: '通用设置', icon: 'mdi:cog' },
-    { key: 'bots', label: '机器人管理', icon: 'mdi:robot' },
-    { key: 'platforms', label: '音乐账号', icon: 'mdi:music-box' },
-    { key: 'behavior', label: '行为设置', icon: 'mdi:tune' },
   ];
+  if (authStore.can('bot.manage')) {
+    list.push({ key: 'bots', label: '机器人管理', icon: 'mdi:robot' });
+  }
+  if (authStore.can('platform.auth')) {
+    list.push({ key: 'platforms', label: '音乐账号', icon: 'mdi:music-box' });
+  }
+  if (authStore.can('bot.manage')) {
+    list.push({ key: 'behavior', label: '行为设置', icon: 'mdi:tune' });
+  }
   if (authStore.isAdmin) {
     list.push({ key: 'sources', label: '音源', icon: 'mdi:music-box-multiple' });
     list.push({ key: 'permissions', label: '权限', icon: 'mdi:shield-key' });
@@ -245,7 +253,8 @@ function setAvatarPreview(src: string | null, isObjectUrl = false) {
 
 async function loadCustomAvatar(botId: string) {
   try {
-    const res = await http.get(`/api/bot/${botId}/avatar`, { responseType: 'blob' });
+    // 404 = 未设置自定义头像，属正常态：跳过全局错误 toast，本地静默处理
+    const res = await http.get(`/api/bot/${botId}/avatar`, { responseType: 'blob', skipErrorToast: true });
     if (res.data?.size) {
       setAvatarPreview(URL.createObjectURL(res.data), true);
       return;

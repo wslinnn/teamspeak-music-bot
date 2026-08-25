@@ -8,7 +8,7 @@
       <RouterLink to="/search" class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80" active-class="opacity-100 !text-primary">搜索</RouterLink>
       <RouterLink v-if="!authStore.isGuest" to="/library" class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80" active-class="opacity-100 !text-primary">音乐库</RouterLink>
       <RouterLink to="/history" class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80" active-class="opacity-100 !text-primary">播放历史</RouterLink>
-      <RouterLink to="/favorites" class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80" active-class="opacity-100 !text-primary">收藏</RouterLink>
+      <RouterLink v-if="!authStore.isGuest" to="/favorites" class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80" active-class="opacity-100 !text-primary">收藏</RouterLink>
       <button
         class="text-sm font-semibold opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-80 flex items-center gap-1"
         @click="serverTreeOpen = true"
@@ -155,7 +155,7 @@
         <RouterLink to="/history" class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg" active-class="opacity-100 !text-primary bg-[rgba(51,94,234,0.1)]" @click="mobileMenuOpen = false">
           <Icon icon="mdi:history" class="mr-3" /> 播放历史
         </RouterLink>
-        <RouterLink to="/favorites" class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg" active-class="opacity-100 !text-primary bg-[rgba(51,94,234,0.1)]" @click="mobileMenuOpen = false">
+        <RouterLink v-if="!authStore.isGuest" to="/favorites" class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg" active-class="opacity-100 !text-primary bg-[rgba(51,94,234,0.1)]" @click="mobileMenuOpen = false">
           <Icon icon="mdi:heart" class="mr-3" /> 收藏
         </RouterLink>
         <button

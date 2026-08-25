@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- Audio Quality -->
-    <div>
+    <div v-if="canQuality">
       <div class="flex items-center gap-2 mb-3 text-sm font-medium">
         <Icon icon="mdi:music-note-eighth" class="text-lg opacity-60" />
         音源质量
@@ -23,7 +23,7 @@
     </div>
 
     <!-- Jellyfin Audio Quality (server-side transcode tiers) -->
-    <div v-if="jellyfinEnabled">
+    <div v-if="canQuality && jellyfinEnabled">
       <div class="flex items-center gap-2 mb-3 text-sm font-medium">
         <Icon icon="mdi:jellyfish" class="text-lg opacity-60" />
         Jellyfin 音质
@@ -45,7 +45,7 @@
     </div>
 
     <!-- Command Prefix -->
-    <div>
+    <div v-if="canManageBots">
       <div class="flex items-center gap-2 mb-3 text-sm font-medium">
         <Icon icon="mdi:console" class="text-lg opacity-60" />
         命令前缀
@@ -62,7 +62,7 @@
     </div>
 
     <!-- Idle Timeout -->
-    <div>
+    <div v-if="canManageBots">
       <div class="flex items-center gap-2 mb-1 text-sm font-medium">
         <Icon icon="mdi:timer-off-outline" class="text-lg opacity-60" />
         闲置自动退出
@@ -121,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import BaseButton from '../common/BaseButton.vue';
 import BaseModal from '../common/BaseModal.vue';
@@ -158,6 +158,9 @@ watch(() => props.idleTimeout, (v) => { localIdle.value = v; });
 
 const auth = useAuthStore();
 const toast = useToast();
+// 区块级能力门控：音质=quality；命令前缀/闲置超时写全局 bot 设置=bot.manage
+const canQuality = computed(() => auth.can('quality'));
+const canManageBots = computed(() => auth.can('bot.manage'));
 
 // ── Jellyfin 音质档（独立于默认源六档：direct=原始直传，其余为服务器转码）──
 const jellyfinEnabled = ref(false);

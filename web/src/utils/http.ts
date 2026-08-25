@@ -1,6 +1,13 @@
-import axios, { type AxiosInstance } from 'axios';
+import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios';
 import { useToastStore } from '../stores/toast';
 import { useAuthStore } from '../stores/auth';
+
+// 允许单个请求声明"错误自行处理，不要全局 toast"（如 avatar 404 = 未设置，是正常态）
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    skipErrorToast?: boolean;
+  }
+}
 
 export const http: AxiosInstance = axios.create({
   timeout: 30000,
@@ -35,7 +42,9 @@ http.interceptors.response.use(
 
     const toastStore = useToastStore();
     const message = error.response?.data?.error ?? error.message ?? '请求失败';
-    toastStore.add(message, 'error', 4000);
+    if (!error.config?.skipErrorToast) {
+      toastStore.add(message, 'error', 4000);
+    }
 
     return Promise.reject(error);
   }
