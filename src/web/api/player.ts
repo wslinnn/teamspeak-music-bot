@@ -228,7 +228,13 @@ export function createPlayerRouter(
 
   router.get("/:botId/queue", (req, res) => {
     const bot = (req as any).bot;
-    res.json({ queue: bot.getQueue(), status: bot.getStatus() });
+    // currentIndex = 正在播放的歌在队列中的下标：前端按行号精确高亮，
+    // 不再按歌曲 id 匹配（同曲重复入队时 id 匹配会把重复行全部点亮）
+    res.json({
+      queue: bot.getQueue(),
+      status: bot.getStatus(),
+      currentIndex: bot.getQueueManager().getCurrentIndex(),
+    });
   });
 
   router.delete("/:botId/queue/:index", authorize({ capability: "player.queue", guestFlag: "removeClear" }), async (req, res) => {

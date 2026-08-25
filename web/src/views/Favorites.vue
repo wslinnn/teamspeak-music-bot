@@ -30,7 +30,7 @@
         :key="item.id"
         :song="toSong(item)"
         :index="i + 1"
-        :active="playerStore.currentSong?.id === item.songId"
+        :active="playerStore.currentSong?.id === item.songId && playerStore.currentSong?.platform === item.platform"
         @play="play(item)"
         @playnext="playerStore.playNextSong(toSong(item))"
         @add="add(item)"

@@ -10,7 +10,7 @@ export interface Song {
   duration: number;
   coverUrl: string;
   platform: 'netease' | 'qq' | 'bilibili' | 'youtube';
-  /** 播放历史里由谁点歌（仅历史接口返回） */
+  /** 由谁点歌（TS 聊天取发言者昵称，WebUI 取用户名；历史与队列接口均返回） */
   requestedBy?: string;
 }
 
@@ -67,6 +67,8 @@ export const usePlayerStore = defineStore('player', {
     scopedBotId: null as string | null,
     /** Per-bot queues keyed by botId */
     queues: {} as Record<string, Song[]>,
+    /** 每个 bot 正在播放的歌在队列中的下标（-1 = 未开播；与 queues 同次快照） */
+    queueCurrentIndex: {} as Record<string, number>,
     /** Per-bot timing state keyed by botId */
     timings: {} as Record<string, TimingState>,
     theme: 'dark' as 'dark' | 'light',
@@ -420,6 +422,8 @@ export const usePlayerStore = defineStore('player', {
       try {
         const res = await http.get(`/api/player/${this.activeBotId}/queue`);
         this.queues[this.activeBotId] = res.data.queue ?? [];
+        this.queueCurrentIndex[this.activeBotId] =
+          typeof res.data.currentIndex === 'number' ? res.data.currentIndex : -1;
       } catch (err) {
         console.debug('fetchQueue failed:', err);
       }
@@ -429,6 +433,8 @@ export const usePlayerStore = defineStore('player', {
       try {
         const res = await http.get(`/api/player/${botId}/queue`);
         this.queues[botId] = res.data.queue ?? [];
+        this.queueCurrentIndex[botId] =
+          typeof res.data.currentIndex === 'number' ? res.data.currentIndex : -1;
       } catch (err) {
         console.debug('fetchQueueForBot failed:', err);
       }

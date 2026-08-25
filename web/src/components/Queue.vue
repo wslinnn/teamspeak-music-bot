@@ -64,7 +64,7 @@
           <template #item="{ element: song, index: i }">
             <div
               class="flex items-center gap-2 p-2 rounded-[var(--radius-sm)] transition-colors cursor-pointer select-none hover:bg-hover-bg group"
-              :class="{ 'bg-[rgba(51,94,234,0.1)]': store.currentSong?.id === song.id }"
+              :class="{ 'bg-[rgba(51,94,234,0.1)]': isCurrentRow(song, i) }"
               @click="playAtIndex(i)"
             >
               <span class="drag-handle cursor-grab text-foreground-subtle opacity-50 md:opacity-0 md:group-hover:opacity-50 transition-opacity shrink-0 text-base p-0.5 active:opacity-100">
@@ -73,7 +73,9 @@
               <CoverArt :url="song.coverUrl" :size="32" :radius="4" />
               <div class="flex-1 min-w-0">
                 <div class="text-[13px] font-medium truncate">{{ song.name }}</div>
-                <div class="text-[11px] text-text-secondary">{{ song.artist }}</div>
+                <div class="text-[11px] text-text-secondary truncate">
+                  {{ song.artist }}<span v-if="song.requestedBy" class="text-text-tertiary"> · 点歌 {{ song.requestedBy }}</span>
+                </div>
               </div>
               <FavoriteButton
                 :song-id="song.id"
@@ -160,7 +162,7 @@ import { watch, computed, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import draggable from 'vuedraggable';
 import { http } from '../utils/http';
-import { usePlayerStore } from '../stores/player.js';
+import { usePlayerStore, type Song } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
 import { useToast } from '../composables/useToast';
 import CoverArt from './CoverArt.vue';
@@ -197,6 +199,21 @@ const canClear = computed(() => auth.can('player.control') || auth.guestCan('rem
 const canRemove = computed(() => auth.can('player.queue') || auth.guestCan('removeClear'));
 // 已存清单：需管理员在 设置→行为 开启（savedQueuesEnabled），且游客无此功能
 const canUseSavedQueues = computed(() => store.savedQueuesEnabled && !auth.isGuest);
+
+/**
+ * 当前行判定：优先按 /queue 快照自带的 currentIndex 精确到行
+ * （同曲重复入队时只有真正在播的那一行亮）；快照缺下标时回退
+ * id+platform 匹配（platform 参与比较，避免跨源 id 撞号误亮）
+ */
+const currentQueueIndex = computed(() =>
+  store.activeBotId ? (store.queueCurrentIndex[store.activeBotId] ?? -1) : -1
+);
+
+function isCurrentRow(song: Song, index: number): boolean {
+  if (currentQueueIndex.value >= 0) return index === currentQueueIndex.value;
+  const cur = store.currentSong;
+  return !!cur && cur.id === song.id && cur.platform === song.platform;
+}
 
 // Fetch queue when panel opens
 watch(() => props.open, (isOpen) => {

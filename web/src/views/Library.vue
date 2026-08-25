@@ -72,7 +72,7 @@
           :key="`hist-${song.id}-${i}`"
           :song="song"
           :index="i + 1"
-          :active="store.currentSong?.id === song.id"
+          :active="store.currentSong?.id === song.id && store.currentSong?.platform === song.platform"
           @play="store.playSong(song)"
           @playnext="store.playNextSong(song)"
           @add="store.addSong(song)"
