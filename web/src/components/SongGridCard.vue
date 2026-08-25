@@ -38,6 +38,13 @@
           />
           <button
             class="flex h-7 w-7 items-center justify-center rounded-full text-foreground-muted transition-all duration-200 hover:bg-interactive-hover hover:text-primary"
+            @click.stop="$emit('playnext')"
+            title="下一首播放"
+          >
+            <Icon icon="mdi:playlist-play" class="text-lg" />
+          </button>
+          <button
+            class="flex h-7 w-7 items-center justify-center rounded-full text-foreground-muted transition-all duration-200 hover:bg-interactive-hover hover:text-primary"
             @click.stop="$emit('add')"
             title="添加到队列"
           >
@@ -59,7 +66,7 @@ import { formatDuration } from '../utils/format';
 import { getPlatformLabel, getPlatformTailwindClass } from '../utils/platform';
 
 const props = defineProps<{ song: Song }>();
-defineEmits<{ play: []; add: [] }>();
+defineEmits<{ play: []; playnext: []; add: [] }>();
 
 const platformLabel = computed(() => getPlatformLabel(props.song.platform));
 const platformBadgeClass = computed(() => getPlatformTailwindClass(props.song.platform));

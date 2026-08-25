@@ -91,6 +91,7 @@
           :key="`${song.platform}-${song.id}`"
           :song="song"
           @play="store.playSong(song)"
+          @playnext="store.playNextSong(song)"
           @add="store.addSong(song)"
         />
       </TransitionGroup>

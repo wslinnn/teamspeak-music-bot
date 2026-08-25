@@ -32,6 +32,7 @@
         :index="i + 1"
         :active="playerStore.currentSong?.id === item.songId"
         @play="play(item)"
+        @playnext="playerStore.playNextSong(toSong(item))"
         @add="add(item)"
       />
     </div>

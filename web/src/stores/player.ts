@@ -364,6 +364,19 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
+    /** 下一首播放：插入到当前曲目之后，不打断当前播放、不清空队列 */
+    async playNextSong(song: Song) {
+      if (!this.activeBotId) return;
+      const toast = useToast();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/play-next-song`, { song });
+        await this.fetchQueue();
+        toast.success(`下一首播放: ${song.name}`);
+      } catch {
+        toast.error('下一首播放失败');
+      }
+    },
+
     async playPlaylist(playlistId: string, platform = 'netease') {
       if (!this.activeBotId) return;
       const toast = useToast();

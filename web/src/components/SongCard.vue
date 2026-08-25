@@ -32,6 +32,9 @@
       <button class="text-lg p-1 rounded-[var(--radius-sm)] opacity-70 transition-opacity hover:opacity-100" @click.stop="$emit('play')" title="播放">
         <Icon icon="mdi:play" />
       </button>
+      <button class="text-lg p-1 rounded-[var(--radius-sm)] opacity-70 transition-opacity hover:opacity-100" @click.stop="$emit('playnext')" title="下一首播放">
+        <Icon icon="mdi:playlist-play" />
+      </button>
       <button class="text-lg p-1 rounded-[var(--radius-sm)] opacity-70 transition-opacity hover:opacity-100" @click.stop="$emit('add')" title="添加到队列">
         <Icon icon="mdi:playlist-plus" />
       </button>
@@ -55,6 +58,7 @@ defineProps<{
 
 defineEmits<{
   play: [];
+  playnext: [];
   add: [];
 }>();
 
