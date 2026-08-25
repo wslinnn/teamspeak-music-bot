@@ -265,7 +265,7 @@ webm = ["transmux"]
 
 - `volumeToFactor` 曲线（`0.2x + 0.8x^8`）逐行移植，保证音量手感一致。
 - ducking 增益叠加逻辑与 `applyVolume` 的线性/斜坡处理一致。
-- Opus 编码参数须与 `@discordjs/opus` 输出**字节级兼容**：采样率 48000、声道 2、帧长 20ms、PCM 3840 字节；建议显式设 `bitrate`/`application=VoIP` 与现有编码器对齐（具体数值在阶段2用 A/B 比对确认）。
+- Opus 编码参数须与 `@discordjs/opus` 输出**字节级兼容**：采样率 48000、声道 2、帧长 20ms、PCM 3840 字节；显式设 `bitrate=Auto`、`application=Audio` 对齐（勘误：@discordjs/opus 的 node-opus.cc 硬编码 `OPUS_APPLICATION_AUDIO`，早期误写为 VoIP 并在 worker 里沿用，已于 2026-08-25 修正）。
 
 ---
 
@@ -274,7 +274,7 @@ webm = ["transmux"]
 在 `feat/rust-audio-worker` 分支实测，结论是**首要拦路点已清除、Rust 路线在本机可行**：
 
 - **opus-codec 编译**：`cargo build`（仅依赖 `opus-codec = "0.2"`）在 Windows + **MSVC BuildTools 18** 下成功编译其捆绑的 libopus 源码，并生成 `audio-worker.exe`。
-- **真实编码**：用与 `@discordjs/opus` 对齐的参数（48k / 立体声 / 20ms / `Application::Voip`）编码一帧 3840 字节静音 PCM → 输出 3 字节 Opus 帧，API 可用、字节流可产出。
+- **真实编码**：用与 `@discordjs/opus` 对齐的参数（48k / 立体声 / 20ms / `Application::Audio`）编码一帧 3840 字节静音 PCM → 输出 3 字节 Opus 帧，API 可用、字节流可产出。
 - **关键环境坑（必读）**：本机 `cmake` **不在默认 PATH**。opus-codec 的 build.rs 走 `cmake` crate 并自动识别到 "Visual Studio 18 2026" 生成器（说明 MSVC 可被找到），但缺 `cmake` 二进制本身会直接报 `is cmake not installed?`。**解决：无需单独安装 cmake**——VS18 BuildTools 已自带，路径为：
   `C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`
   构建前把它加入 PATH 即可（见下方 `setup.bat` 集成建议）。

@@ -167,10 +167,13 @@ fn raise_timer_resolution() {
 }
 
 fn new_encoder() -> Encoder {
-    let mut enc = Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Voip)
+    // Application::Audio 对齐 node 端 @discordjs/opus（node-opus.cc 硬编码
+    // OPUS_APPLICATION_AUDIO）：音乐播放必须用 AUDIO，VoIP 会偏向人声优化的
+    // 编码决策，复杂编曲上产生金属感人工瑕疵
+    let mut enc = Encoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)
         .expect("创建 Opus 编码器失败（opus-codec）");
-    // Bitrate::Auto 与 node 端 @discordjs/opus 默认一致（libopus AUTO，
-    // 实测同素材 ~101kbps），保证 A/B 听感与带宽对齐。
+    // Bitrate::Auto 与 node 端一致（libopus AUTO，实测同素材 ~101kbps），
+    // 保证 A/B 听感与带宽对齐。
     let _ = enc.set_bitrate(Bitrate::Auto);
     enc
 }
@@ -226,19 +229,11 @@ fn ffmpeg_args(url: &str, seek: f64) -> Vec<String> {
     if is_http && (url.contains("bilivideo") || url.contains("bilibili")) {
         a.push("-headers".into());
         a.push(format!(
-            "Referer: https://www.bilibili.com
-User-Agent: {}
-",
-            BROWSER_UA
+            "Referer: https://www.bilibili.com\r\nUser-Agent: {BROWSER_UA}\r\n"
         ));
     } else if is_http && (url.contains("music.126.net") || url.contains("music.163.com")) {
         a.push("-headers".into());
-        a.push(format!(
-            "Referer: https://music.163.com/
-User-Agent: {}
-",
-            BROWSER_UA
-        ));
+        a.push(format!("Referer: https://music.163.com/\r\nUser-Agent: {BROWSER_UA}\r\n"));
     }
 
     if is_http {
@@ -560,8 +555,9 @@ async fn frame_loop(
             last_gen = gen;
         }
         if paused {
-            // 暂停即不发帧；重置时间线（对齐 player.ts 暂停时 nextFrameTime=now）
-            next_frame_at = Instant::now();
+            // 暂停即不发帧，但保持 20ms 心跳节拍：不重置 next_frame_at——
+            // 时间线锚定真实时间，暂停期间循环顶照常 sleep 20ms（无 CPU 空转），
+            // 恢复后首帧 ≤20ms 内发出且无补发簇（对齐 player.ts 暂停语义）
             continue;
         }
 
