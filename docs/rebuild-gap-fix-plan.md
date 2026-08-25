@@ -248,7 +248,7 @@ TS 命令面板完整支持但 WebUI 无对应入口的四项（instance.ts:828-
 | 13 | D8 审计页 | P2 | 0.5 天 | ✅ `8c38f27` |
 | 14 | D5 Jellyfin 版块（含音质档） | P2 | 1 天 | ✅ `bc3ab24` |
 | 15 | D6 Spotify OAuth | P3 | 0.5-1 天 | ✅ `bb287c5`（部署侧公网可达为前置） |
-| 16 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | ✅ `17b0943`（酷狗卡 + 网易云短信；Jellyfin 测试在 D0） |
+| 16 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | ✅ `17b0943`（酷狗卡；Jellyfin 测试在 D0）。**勘误**：短信登录曾一并误加、后按反馈移除——`loginWithSms` 走 `/captcha/verify`，该端点不返回登录 cookie（应为 `/login/cellphone`），链路走不通且场景被扫码覆盖，属上游遗留死代码，不应对接 |
 | 17 | 专辑详情页 /album/:id | P3 | 0.5 天 | ✅ `1b5186e`（Playlist.vue 双形态复用） |
 | 18 | D11c TS6 协议接入 | P3 | 单独评估 | ⏸ 搁置：待真实 TS6 部署需求 |
 | 19 | #111 音量滑块验证（后视结果移植 useDecoupledSlider） | P3 | 0.5 天 | ⏸ 搁置：需先桌面端复现，未复现不盲移植 |

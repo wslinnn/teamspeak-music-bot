@@ -15,7 +15,7 @@
 | 维度 | 结论 |
 |------|------|
 | 功能覆盖 | 上游功能面 main 已覆盖 **约 95%**；真正仍缺的只有 4 处：按用户权限编辑器（D9，二期）、音量滑块拖拽实时预览（#111）、搜索 albums/playlists 分页、Home 每日推荐/推荐歌单多源切换 |
-| fork 领先项 | 存量优势：歌曲收藏（含独立页）、服务器频道树、队列拖拽重排、已存清单收纳进抽屉、播放历史搜索+分页、WS 4001 断线语义+指数退避、PWA **离线缓存（SW 层）**、移动端控制抽屉、D14 门控口径统一；本轮追赶中反超：音源六项管理开关、网易云短信登录 |
+| fork 领先项 | 存量优势：歌曲收藏（含独立页）、服务器频道树、队列拖拽重排、已存清单收纳进抽屉、播放历史搜索+分页、WS 4001 断线语义+指数退避、PWA **离线缓存（SW 层）**、移动端控制抽屉、D14 门控口径统一；本轮追赶中反超：音源六项管理开关 |
 | 框架版本 | **两边等价**：Vue 3.5 + TypeScript 5.8 + Vite 6.3。FORK.md 旧表述"上游 Vite 5"已过时（本次勘误） |
 | 样式体系 | 设计性分歧：上游 SCSS（global/mobile/variables 三文件）；main Tailwind 4 + CSS 变量 + 自研 Base* 组件族（10 个） |
 | 前端测试 | 上游领先：web/src 内 6 个单测文件（searchPagination/scope/elapsed/savedQueues/useDecoupledSlider/useSpotifySettings，root vitest 跑）；main 前端零单测 |
@@ -98,7 +98,7 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 | 用户管理（角色/重置密码/删除）+ 审计 + 修改密码 | ✅ | ✅（D2/D8） | 等价 |
 | 游客模式（总开关+逐项权限） | ✅ | ✅ | 等价 |
 | 平台账号（扫码/Cookie，netease/qq/bilibili/kugou） | ✅ | ✅（D7） | 等价 |
-| 网易云**短信登录** | ❌ 无 UI | ✅（D7，sms/send+verify 两步） | fork 领先 |
+| 网易云**短信登录** | ❌ 无 UI | ❌ 同样不做（曾于 `17b0943` 误加、已移除）：`loginWithSms` 调的 `/captcha/verify` 只校验验证码**不返回登录 cookie**（正确端点应为 `/login/cellphone`），链路天然走不通；且能收验证码的手机=账号本人=可扫码，场景被扫码登录完全覆盖。`sms/send`/`sms/verify` 属上游遗留死代码，按收敛策略保留后端不删 | 双方一致（不做） |
 | Spotify 配置+OAuth | ✅（useSpotifySettings 含单测） | ✅（D0 配置卡 + D6 授权卡） | 等价 |
 | **音源启用管理** | 仅 Jellyfin 卡可翻转 enabledProviders（其注释自述"唯一入口"） | 六项开关 + 默认音源下拉（D0） | **fork 领先** |
 | **按用户细粒度权限编辑器**（capabilities 矩阵 + bot 白名单，`GET/PUT /api/users/:id/permissions`） | ✅ | ❌（D9，二期搁置） | **上游领先（最大残留）** |
@@ -170,10 +170,9 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 **main 消费、上游未消费（fork 特性面）**
 - `/api/song-favorites` 全族（歌曲收藏）
 - `/api/bot/:id/server-tree` + `join-channel`（频道树抽屉）
-- `/api/auth/sms/send` + `sms/verify`（网易云短信登录）
 - `/api/player/:id/queue/reorder`（拖拽重排）
 
-（`/api/audit`、`/api/config/public-url`、`/api/session/change-password`、users 管理族上游走裸 fetch 消费，与 main 等价，非差异。）
+（`/api/audit`、`/api/config/public-url`、`/api/session/change-password`、users 管理族上游走裸 fetch 消费，与 main 等价，非差异。`/api/auth/sms/send`+`verify` 两侧前端均不消费——上游遗留死代码，见第四节勘误。）
 
 ---
 
@@ -192,7 +191,6 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 | 移动端播放控制抽屉 | MobilePlayerControls | 存量 | 上游为 App 级 mini player |
 | 修改密码防误登出（selfHandled401） | utils/http.ts | 反超（实现细节） | D2 配套：main 统一 axios 拦截器才需要；上游用裸 fetch 无此问题 |
 | 音源六项管理开关 + 默认音源 | 设置→音源（D0） | 反超 | 底层配置/端点为上游的；上游只有 Jellyfin 卡一个翻转入口（其注释自述） |
-| 网易云短信登录 | 设置→音乐账号（D7） | 反超 | 上游后端有 sms 端点但前端从未消费 |
 | 浅色主题一键切换（Navbar） | Navbar/SettingsTheme | 存量（细节） | 两边都有主题；差的是入口位置 |
 
 ---

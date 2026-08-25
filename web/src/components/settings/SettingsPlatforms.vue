@@ -30,14 +30,6 @@
         >
           <Icon icon="mdi:cookie" class="mr-1" /> Cookie登录
         </BaseButton>
-        <BaseButton
-          v-if="platform.key === 'netease'"
-          size="sm"
-          :variant="loginModes[platform.key] === 'sms' ? 'primary' : 'secondary'"
-          @click="loginModes[platform.key] = 'sms'"
-        >
-          <Icon icon="mdi:message-text-outline" class="mr-1" /> 短信登录
-        </BaseButton>
       </div>
 
       <!-- QR -->
@@ -65,23 +57,6 @@
         <BaseButton size="sm" class="self-end" @click="$emit('saveCookie', platform.key, cookieInputs[platform.key])">
           保存Cookie
         </BaseButton>
-      </div>
-
-      <!-- SMS（仅网易云） -->
-      <div v-if="loginModes[platform.key] === 'sms'" class="flex flex-col gap-2">
-        <div class="flex gap-2">
-          <input v-model="sms.phone" class="input flex-1" inputmode="numeric" placeholder="手机号" />
-          <BaseButton size="sm" :disabled="smsCountdown > 0 || !sms.phone.trim()" :loading="sendingSms" @click="sendSmsCode">
-            {{ smsCountdown > 0 ? `${smsCountdown}s` : '获取验证码' }}
-          </BaseButton>
-        </div>
-        <div class="flex gap-2">
-          <input v-model="sms.code" class="input flex-1" inputmode="numeric" placeholder="验证码" @keyup.enter="verifySmsCode" />
-          <BaseButton size="sm" variant="primary" :disabled="!sms.phone.trim() || !sms.code.trim()" :loading="verifyingSms" @click="verifySmsCode">
-            验证登录
-          </BaseButton>
-        </div>
-        <p class="text-xs text-text-tertiary">验证成功后 Cookie 自动保存，登录态即时生效</p>
       </div>
     </div>
 
@@ -136,7 +111,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'startQr', platform: string): void;
   (e: 'saveCookie', platform: string, cookie: string): void;
-  (e: 'refreshAuth'): void;
 }>();
 
 const platforms = [
@@ -146,56 +120,8 @@ const platforms = [
   { key: 'kugou', name: '酷狗音乐', icon: 'mdi:music-note-outline', iconClass: 'text-[#00A9FF]' },
 ];
 
-const loginModes = reactive<Record<string, 'qr' | 'cookie' | 'sms'>>({});
+const loginModes = reactive<Record<string, 'qr' | 'cookie'>>({});
 const cookieInputs = reactive<Record<string, string>>({ netease: '', qq: '', bilibili: '', kugou: '' });
-
-// ── 网易云短信登录（POST /api/auth/sms/send → sms/verify）──
-const sms = reactive({ phone: '', code: '' });
-const sendingSms = ref(false);
-const verifyingSms = ref(false);
-const smsCountdown = ref(0);
-let smsTimer: ReturnType<typeof setInterval> | null = null;
-
-async function sendSmsCode() {
-  if (!sms.phone.trim()) return;
-  sendingSms.value = true;
-  try {
-    await http.post('/api/auth/sms/send', { phone: sms.phone.trim() });
-    toast.success('验证码已发送');
-    smsCountdown.value = 60;
-    if (smsTimer) clearInterval(smsTimer);
-    smsTimer = setInterval(() => {
-      smsCountdown.value -= 1;
-      if (smsCountdown.value <= 0 && smsTimer) {
-        clearInterval(smsTimer);
-        smsTimer = null;
-      }
-    }, 1000);
-  } catch {
-    // 错误信息由 http 拦截器统一 toast
-  } finally {
-    sendingSms.value = false;
-  }
-}
-
-async function verifySmsCode() {
-  verifyingSms.value = true;
-  try {
-    const res = await http.post('/api/auth/sms/verify', { phone: sms.phone.trim(), code: sms.code.trim() });
-    if (res.data.success) {
-      toast.success('短信登录成功');
-      sms.phone = '';
-      sms.code = '';
-      emit('refreshAuth');
-    } else {
-      toast.error('验证码错误或已过期');
-    }
-  } catch {
-    // 错误信息由 http 拦截器统一 toast
-  } finally {
-    verifyingSms.value = false;
-  }
-}
 
 function qrStatusClass(status: QrState['status']) {
   switch (status) {

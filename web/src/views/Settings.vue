@@ -36,7 +36,6 @@
           :qr-states="{ netease: neteaseQr, qq: qqQr, bilibili: bilibiliQr, kugou: kugouQr }"
           @start-qr="startQrLogin"
           @save-cookie="saveCookie"
-          @refresh-auth="checkAuthStatus"
         />
 
         <SettingsBehavior v-if="activeTab === 'behavior'" />
