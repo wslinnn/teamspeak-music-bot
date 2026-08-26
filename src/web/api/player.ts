@@ -326,14 +326,26 @@ export function createPlayerRouter(
     }
   });
 
+  /** Collection/song ids must be non-empty bounded strings — an undefined id
+   *  would otherwise flow in as the literal string "undefined" and get searched
+   *  as a song name (review F4). */
+  function isValidId(v: unknown): v is string {
+    return typeof v === "string" && v.trim().length > 0 && v.length <= 512;
+  }
+
   router.post("/:botId/playlist", authorize({ capability: "player.queue" }), async (req, res) => {
     try {
       const bot = (req as any).bot;
       const { playlistId, platform } = req.body;
-      const cmd = parseCommand(
-        `!playlist ${platformFlag(platform)} ${playlistId}`.trim(),
-        "!"
-      )!;
+      if (!isValidId(playlistId)) {
+        res.status(400).json({ error: "playlistId is required" });
+        return;
+      }
+      const cmd = parseCommand(`!playlist ${platformFlag(platform)} ${playlistId}`.trim(), "!");
+      if (!cmd) {
+        res.status(400).json({ error: "Invalid command" });
+        return;
+      }
       const response = await bot.executeCommand(cmd, undefined, requesterName(req));
       res.json({ message: response });
     } catch (err) {
@@ -347,6 +359,10 @@ export function createPlayerRouter(
     try {
       const bot = (req as any).bot;
       const { playlistId, platform } = req.body;
+      if (!isValidId(playlistId)) {
+        res.status(400).json({ error: "playlistId is required" });
+        return;
+      }
       if (isLocalAudioDisabled(bot, platform)) {
         rejectDisabledLocalAudio(res);
         return;
@@ -445,6 +461,10 @@ export function createPlayerRouter(
     try {
       const bot = (req as any).bot;
       const { albumId, platform } = req.body;
+      if (!isValidId(albumId)) {
+        res.status(400).json({ error: "albumId is required" });
+        return;
+      }
       if (isLocalAudioDisabled(bot, platform)) {
         rejectDisabledLocalAudio(res);
         return;
@@ -674,6 +694,10 @@ export function createPlayerRouter(
     try {
       const bot = (req as any).bot;
       const { songId, platform } = req.body;
+      if (!isValidId(songId)) {
+        res.status(400).json({ error: "songId is required" });
+        return;
+      }
       if (isLocalAudioDisabled(bot, platform)) {
         rejectDisabledLocalAudio(res);
         return;
