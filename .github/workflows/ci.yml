@@ -3,7 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    # 纯文档提交不触发安装+测试+构建（规则仅在提交的全部文件都命中时生效）
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
+
+# 测试与构建只需只读令牌
+permissions:
+  contents: read
 
 jobs:
   test-and-build:
