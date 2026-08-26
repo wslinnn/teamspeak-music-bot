@@ -364,10 +364,22 @@ export function createBotRouter(
       res.status(404).json({ error: "Bot config not found" });
       return;
     }
-    // Never expose the TS identity / API key to the client; the edit form only
-    // consumes channel/server passwords.
-    const { ts6ApiKey: _ts6ApiKey, identity: _identity, ...safe } = saved as unknown as Record<string, unknown>;
-    res.json(safe);
+    // Never expose the TS identity / API key / server+channel passwords to the
+    // client; passwords are write-only with presence flags (mirrors the
+    // spotify secret / jellyfin password masking in /settings). A blank
+    // password on PUT keeps the stored one.
+    const {
+      ts6ApiKey: _ts6ApiKey,
+      identity: _identity,
+      channelPassword: _channelPassword,
+      serverPassword: _serverPassword,
+      ...safe
+    } = saved as unknown as Record<string, unknown>;
+    res.json({
+      ...safe,
+      hasChannelPassword: typeof _channelPassword === "string" && _channelPassword.length > 0,
+      hasServerPassword: typeof _serverPassword === "string" && _serverPassword.length > 0,
+    });
   });
 
   router.get("/:id/avatar", requirePermission("bot.manage"), requireBotAccess("id"), (req, res) => {
@@ -480,9 +492,14 @@ export function createBotRouter(
         return;
       }
       const { name, serverAddress, serverPort, nickname, defaultChannel, channelId, channelPassword, serverPassword, autoStart } = req.body;
+      // Blank password = keep the stored one (write-only masking contract).
+      const keepIfBlank = (v: unknown): string | undefined =>
+        typeof v === "string" && v.length > 0 ? v : undefined;
       // Update in database（autoStart 仅接受布尔，D11b：编辑弹窗开关的落库通道）
       botManager.updateBot(req.params.id, {
-        name, serverAddress, serverPort, nickname, defaultChannel, channelId, channelPassword, serverPassword,
+        name, serverAddress, serverPort, nickname, defaultChannel, channelId,
+        channelPassword: keepIfBlank(channelPassword),
+        serverPassword: keepIfBlank(serverPassword),
         ...(typeof autoStart === "boolean" ? { autoStart } : {}),
       });
       res.json({ success: true });

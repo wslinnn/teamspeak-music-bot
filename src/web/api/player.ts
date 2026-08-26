@@ -738,7 +738,7 @@ export function createPlayerRouter(
     // `LIMIT -1` (no bound → whole table) and a huge limit is a read amplifier.
     const parsed = parseInt(req.query.limit as string, 10);
     const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 50;
-    const records = database.getPlayHistory(req.params.botId, limit);
+    const records = database.getPlayHistory(req.params.botId as string, limit);
     const history = records.map((r) => ({
       id: r.songId,
       name: r.songName,

@@ -210,9 +210,7 @@ describe("BotProfileManager.updateConfig — field whitelist (review S2)", () =>
     pm.updateConfig({
       avatarEnabled: false,
       descriptionEnabled: true,
-      // @ts-expect-error deliberate junk beyond ProfileConfig
       __proto__: { injected: true },
-      // @ts-expect-error deliberate junk beyond ProfileConfig
       bogusField: "x",
     } as any);
     const cfg = pm.getConfig();

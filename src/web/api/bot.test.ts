@@ -793,3 +793,95 @@ describe("bot router /settings jellyfin block + enabledProviders", () => {
     expect(config.defaultPlatform).toBeNull();
   });
 });
+
+describe("bot router /:id/config — password masking (review S3)", () => {
+  let botDb: BotDatabase;
+  let app: express.Express;
+  let cookie: string;
+
+  const seedBot = () =>
+    botDb.saveBotInstance({
+      id: "b1",
+      name: "Bot1",
+      serverAddress: "ts.example.com",
+      serverPort: 9987,
+      nickname: "Bot1",
+      defaultChannel: "",
+      channelId: "",
+      channelPassword: "secret-channel",
+      serverPassword: "secret-server",
+      autoStart: false,
+      serverProtocol: "",
+      ts6ApiKey: "ts6-key",
+      serverPassword_placeholder: undefined,
+      identity: undefined,
+    } as any);
+
+  beforeEach(async () => {
+    botDb = createDatabase(":memory:");
+    const users = createUserStore(botDb.db);
+    const sessions = createSessionStore(botDb.db);
+    const alice = await users.createUser("alice", "pw-alice", "admin");
+    cookie = `${SESSION_COOKIE_NAME}=${sessions.createSession(alice.id).token}`;
+
+    const stored = () => botDb.getBotInstances().find((b) => b.id === "b1")!;
+    // Mirrors BotManager.updateBot's `params.x ?? existing.x` merge.
+    const fakeManager = {
+      getAllBots: () => [],
+      getBot: () => ({}),
+      getBotConfig: (id: string) => botDb.getBotInstances().find((b) => b.id === id),
+      updateBot: (_id: string, p: Record<string, unknown>) => {
+        const e = stored();
+        botDb.saveBotInstance({
+          ...e,
+          name: (p.name as string) ?? e.name,
+          channelPassword: (p.channelPassword as string) ?? e.channelPassword,
+          serverPassword: (p.serverPassword as string) ?? e.serverPassword,
+        });
+      },
+    } as unknown as BotManager;
+
+    app = express();
+    app.use(express.json());
+    app.use(cookieParser());
+    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api/bot", createBotRouter(fakeManager, getDefaultConfig(), "/tmp/none.json", pino({ level: "silent" }), botDb, createAvatarStore(tmpdir())));
+    seedBot();
+  });
+
+  afterEach(() => botDb.close());
+
+  it("GET masks passwords/identity/api key, exposing only presence flags", async () => {
+    const res = await request(app).get("/api/bot/b1/config").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.channelPassword).toBeUndefined();
+    expect(res.body.serverPassword).toBeUndefined();
+    expect(res.body.identity).toBeUndefined();
+    expect(res.body.ts6ApiKey).toBeUndefined();
+    expect(res.body.hasChannelPassword).toBe(true);
+    expect(res.body.hasServerPassword).toBe(true);
+  });
+
+  it("PUT with blank passwords keeps the stored ones", async () => {
+    const res = await request(app)
+      .put("/api/bot/b1")
+      .set("Cookie", cookie)
+      .send({ name: "Renamed", channelPassword: "", serverPassword: "" });
+    expect(res.status).toBe(200);
+    const stored = botDb.getBotInstances().find((b) => b.id === "b1")!;
+    expect(stored.name).toBe("Renamed");
+    expect(stored.channelPassword).toBe("secret-channel");
+    expect(stored.serverPassword).toBe("secret-server");
+  });
+
+  it("PUT with a non-empty password replaces it", async () => {
+    const res = await request(app)
+      .put("/api/bot/b1")
+      .set("Cookie", cookie)
+      .send({ channelPassword: "brand-new" });
+    expect(res.status).toBe(200);
+    const stored = botDb.getBotInstances().find((b) => b.id === "b1")!;
+    expect(stored.channelPassword).toBe("brand-new");
+    expect(stored.serverPassword).toBe("secret-server");
+  });
+});

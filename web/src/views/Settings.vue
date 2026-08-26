@@ -77,11 +77,23 @@
         </div>
         <div>
           <label class="block text-xs font-semibold opacity-70 mb-1">频道密码（可选）</label>
-          <input v-model="editForm.channelPassword" type="password" class="input" />
+          <input
+            v-model="editForm.channelPassword"
+            type="password"
+            class="input"
+            :placeholder="editPw.channel ? '已设置——留空保持不变' : '未设置'"
+            autocomplete="new-password"
+          />
         </div>
         <div>
           <label class="block text-xs font-semibold opacity-70 mb-1">服务器密码（可选）</label>
-          <input v-model="editForm.serverPassword" type="password" class="input" />
+          <input
+            v-model="editForm.serverPassword"
+            type="password"
+            class="input"
+            :placeholder="editPw.server ? '已设置——留空保持不变' : '未设置'"
+            autocomplete="new-password"
+          />
         </div>
         <BaseToggle
           v-model="editForm.autoStart"
@@ -227,6 +239,8 @@ const editForm = reactive({
   defaultChannel: '', channelPassword: '', serverPassword: '',
   autoStart: false,
 });
+// 密码只写不读：这里只记录“是否已设置”，用于输入框占位提示
+const editPw = reactive({ channel: false, server: false });
 const profileForm = reactive({
   avatarEnabled: true,
   descriptionEnabled: true,
@@ -395,8 +409,11 @@ async function openEditBot(bot: BotStatus) {
     editForm.serverPort = res.data.serverPort ?? 9987;
     editForm.nickname = res.data.nickname ?? '';
     editForm.defaultChannel = res.data.defaultChannel ?? '';
-    editForm.channelPassword = res.data.channelPassword ?? '';
-    editForm.serverPassword = res.data.serverPassword ?? '';
+    // 密码只写不读：留空 = 保持已存值（后端将空串归一为“不变”）
+    editForm.channelPassword = '';
+    editForm.serverPassword = '';
+    editPw.channel = res.data.hasChannelPassword === true;
+    editPw.server = res.data.hasServerPassword === true;
     editForm.autoStart = res.data.autoStart === true;
   } catch {
     editForm.serverAddress = '';
@@ -405,6 +422,8 @@ async function openEditBot(bot: BotStatus) {
     editForm.defaultChannel = '';
     editForm.channelPassword = '';
     editForm.serverPassword = '';
+    editPw.channel = false;
+    editPw.server = false;
   }
   try {
     const res = await http.get(`/api/player/${bot.id}/profile`);
