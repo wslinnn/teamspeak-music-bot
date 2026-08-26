@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
+import bcrypt from "bcryptjs";
 import type { Logger } from "../../logger.js";
 import type { UserStore } from "../../data/users.js";
 import type { SessionStore } from "../../data/sessions.js";
@@ -11,6 +12,28 @@ import type { GuestModeConfig } from "../../data/config.js";
 import { SESSION_COOKIE_NAME, validateSessionFromHeaders, extractSessionToken } from "../auth/validateSession.js";
 
 const FAILED_LOGIN_DELAY_MS = 250;
+
+// Timing equalizer (review S4): a fixed bcrypt hash so the missing-user login
+// branch costs the same bcrypt compare as the existing-user branch — without
+// it, response latency reveals whether a username exists.
+const DUMMY_HASH = bcrypt.hashSync("tsmb-timing-equalizer", 12);
+
+/**
+ * Soft CSRF gate for the session routes, which mount BEFORE the global
+ * csrfOriginCheck (review S7). Cross-site browser POSTs always carry an
+ * Origin/Referer — reject when it names a different host. Headerless clients
+ * (curl, tests) are allowed through: they are not a browser CSRF vector and
+ * the JSON-only body parser already blocks classic form posts.
+ */
+function isCrossSiteOrigin(req: Request): boolean {
+  const header = (req.headers.origin ?? req.headers.referer) as string | undefined;
+  if (!header) return false;
+  try {
+    return new URL(header).host !== req.headers.host;
+  } catch {
+    return true;
+  }
+}
 
 function setSessionCookie(res: Response, token: string): void {
   res.cookie(SESSION_COOKIE_NAME, token, {
@@ -124,7 +147,7 @@ export function createSessionRouter(
       return;
     }
     const user = users.findByUsername(username);
-    const ok = user ? await users.verifyPassword(password, user.passwordHash) : false;
+    const ok = await users.verifyPassword(password, user ? user.passwordHash : DUMMY_HASH);
     if (!user || !ok) {
       await delay(FAILED_LOGIN_DELAY_MS);
       res.status(401).json({ error: "invalid credentials" });
@@ -184,6 +207,10 @@ export function createSessionRouter(
   });
 
   router.post("/change-password", requireAuthInline, async (req, res) => {
+    if (isCrossSiteOrigin(req)) {
+      res.status(403).json({ error: "bad origin" });
+      return;
+    }
     const { oldPassword, newPassword } = req.body ?? {};
     if (typeof oldPassword !== "string") {
       res.status(400).json({ error: "invalid request" });

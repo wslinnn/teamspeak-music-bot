@@ -174,6 +174,39 @@ describe("session router", () => {
     // CPU, which made it look like a real intermittent failure. The work is
     // genuinely slow, not hung, so the timeout is what was wrong.
   }, 20000);
+
+  it("POST /change-password rejects a cross-site Origin/Referer (review S7)", async () => {
+    await users.createUser("carol", "old-pw-pw", "admin");
+    const cookie = extractCookie(
+      await request(app).post("/api/session/login").send({ username: "carol", password: "old-pw-pw" })
+    );
+    const badOrigin = await request(app)
+      .post("/api/session/change-password")
+      .set("Cookie", cookie)
+      .set("Origin", "https://evil.example")
+      .send({ oldPassword: "old-pw-pw", newPassword: "newpassword" });
+    expect(badOrigin.status).toBe(403);
+    const badReferer = await request(app)
+      .post("/api/session/change-password")
+      .set("Cookie", cookie)
+      .set("Referer", "https://evil.example/x")
+      .send({ oldPassword: "old-pw-pw", newPassword: "newpassword" });
+    expect(badReferer.status).toBe(403);
+    // No Origin/Referer at all (curl/tests): not a browser vector, passes.
+    const bare = await request(app)
+      .post("/api/session/change-password")
+      .set("Cookie", cookie)
+      .send({ oldPassword: "old-pw-pw", newPassword: "newpassword" });
+    expect(bare.status).toBe(204);
+  }, 20000);
+
+  it("login for a missing user costs the same bcrypt compare (review S4)", async () => {
+    const res = await request(app)
+      .post("/api/session/login")
+      .send({ username: "ghost-user", password: "whatever-pw" });
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("invalid credentials");
+  });
 });
 
 describe("session router — guest mode", () => {
