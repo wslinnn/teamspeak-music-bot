@@ -5,12 +5,16 @@
 # 无需本地编译，无需 Node.js / 构建工具链。
 # 镜像内置：Node.js, FFmpeg, Opus 编码器，原生模块均已交叉编译。
 #
-# 如需指定版本，把 :latest 换成具体 tag（例如 :1.4.0）。
-# 如需本地构建（开发或 fork），见底部注释。
+# 镜像由 .github/workflows/docker-publish.yml 在推送 v*.*.* tag 时发布到
+# 本仓库的 GHCR 命名空间；首次发布后需在 GitHub → Packages 把包可见性
+# 设为 public，匿名 docker-compose pull 才能拉取。
+# 换版本：TSMUSICBOT_IMAGE=ghcr.io/wslinnn/teamspeak-music-bot:v2.0.0
+# 离线场景（tar.gz + docker load）见 docker-compose.prod.yml。
+# 如需本地构建（开发），见底部注释。
 
 services:
   tsmusicbot:
-    image: ghcr.io/zhangtianyao1/teamspeak-music-bot:latest
+    image: ${TSMUSICBOT_IMAGE:-ghcr.io/wslinnn/teamspeak-music-bot:latest}
     container_name: tsmusicbot
     # Use host network so the bot can reach TS3 server on LAN
     # If your TS3 server is on the same machine, this is required

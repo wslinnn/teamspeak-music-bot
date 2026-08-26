@@ -13,7 +13,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: zhangtianyao1/teamspeak-music-bot
+  # github.repository 在上游仓库解析为 zhangtianyao1/teamspeak-music-bot，
+  # 在 fork 中解析为 fork 自己的命名空间——GITHUB_TOKEN 只能写本仓库的包。
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
