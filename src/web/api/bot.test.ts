@@ -885,3 +885,56 @@ describe("bot router /:id/config — password masking (review S3)", () => {
     expect(stored.serverPassword).toBe("secret-server");
   });
 });
+
+describe("bot router GET /settings — platform block visibility (review S8)", () => {
+  let botDb: BotDatabase;
+  let app: express.Express;
+
+  function sessionFor(user: { id: string }) {
+    const sessions = createSessionStore(botDb.db);
+    return `${SESSION_COOKIE_NAME}=${sessions.createSession(user.id).token}`;
+  }
+
+  beforeEach(async () => {
+    botDb = createDatabase(":memory:");
+    const users = createUserStore(botDb.db);
+    const perms = createPermissionStore(botDb.db);
+    const admin = await users.createUser("root", "pw-root-123", "admin");
+    const plain = await users.createUser("plain", "pw-plain-123", "member");
+    const plat = await users.createUser("plat", "pw-plat-123", "member");
+    perms.setPermissions(plat.id, { capabilities: ["platform.auth"], bots: "all" });
+
+    const sessions = createSessionStore(botDb.db);
+    const mk = (u: { id: string }) => `${SESSION_COOKIE_NAME}=${sessions.createSession(u.id).token}`;
+    app = express();
+    app.use(express.json());
+    app.use(cookieParser());
+    app.use("/api", createRequireAuth(sessions, perms, () => getDefaultConfig().guestMode));
+    app.use("/api/bot", createBotRouter({ getAllBots: () => [] } as unknown as BotManager, getDefaultConfig(), "/tmp/none.json", pino({ level: "silent" }), botDb, createAvatarStore(tmpdir())));
+    (app as any).__cookies = { admin: mk(admin), plain: mk(plain), plat: mk(plat) };
+    void sessionFor;
+  });
+
+  afterEach(() => botDb.close());
+
+  it("admin and platform.auth members see the spotify/jellyfin blocks; plain members do not", async () => {
+    const cookies: Record<string, string> = (app as any).__cookies;
+    const adminRes = await request(app).get("/api/bot/settings").set("Cookie", cookies.admin);
+    expect(adminRes.status).toBe(200);
+    expect(adminRes.body.spotify).toBeDefined();
+    expect(adminRes.body.jellyfin).toBeDefined();
+
+    const platRes = await request(app).get("/api/bot/settings").set("Cookie", cookies.plat);
+    expect(platRes.status).toBe(200);
+    expect(platRes.body.spotify).toBeDefined();
+    expect(platRes.body.jellyfin).toBeDefined();
+
+    const plainRes = await request(app).get("/api/bot/settings").set("Cookie", cookies.plain);
+    expect(plainRes.status).toBe(200);
+    expect(plainRes.body.spotify).toBeUndefined();
+    expect(plainRes.body.jellyfin).toBeUndefined();
+    // Behavior flags plain members consume stay readable.
+    expect(plainRes.body.commandPrefix).toBeDefined();
+    expect(typeof plainRes.body.savedQueuesEnabled).toBe("boolean");
+  });
+});

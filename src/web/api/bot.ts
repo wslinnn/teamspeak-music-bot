@@ -67,8 +67,8 @@ export function createBotRouter(
 
   // GET /api/bot/settings — 读取全局 bot 行为设置
   // NOTE: must be registered before "/:id" so it isn't shadowed by the param route.
-  router.get("/settings", requireNotGuest, (_req, res) => {
-    res.json({
+  router.get("/settings", requireNotGuest, (req, res) => {
+    const payload = {
       commandPrefix: config.commandPrefix ?? "!",
       idleTimeoutMinutes: config.idleTimeoutMinutes ?? 0,
       autoPauseOnEmpty: config.autoPauseOnEmpty,
@@ -78,11 +78,20 @@ export function createBotRouter(
       playKeepsQueue: config.playKeepsQueue,
       adminGroups: config.adminGroups ?? [],
       guestMode: config.guestMode,
-      spotify: maskedSpotify(),
-      jellyfin: maskedJellyfin(),
       enabledProviders: config.enabledProviders,
       defaultPlatform: config.defaultPlatform,
-    });
+    };
+    // Platform connection blocks (jellyfin serverUrl/username, spotify clientId)
+    // reveal internal infrastructure — only platform-credential managers see
+    // them; plain members get the behavior flags they legitimately consume
+    // (commandPrefix, savedQueuesEnabled, ...). Secrets are masked either way.
+    const u = req.user!;
+    const canPlatformAuth = u.role === "admin" || u.capabilities?.has("platform.auth");
+    res.json(
+      canPlatformAuth
+        ? { ...payload, spotify: maskedSpotify(), jellyfin: maskedJellyfin() }
+        : payload,
+    );
   });
 
   // POST /api/bot/settings — 保存全局 bot 行为设置 (gated: changing global bot
