@@ -520,3 +520,24 @@ describe("POST /local/upload — concurrency gate (review P2)", () => {
     expect(c.status).toBe(200);
   });
 });
+
+describe("GET /search/all — rate limit (review P4)", () => {
+  it("serves normal traffic and 429s a flood", async () => {
+    const router = createMusicRouter(
+      fakeProvider("netease"),
+      fakeProvider("qq"),
+      fakeProvider("bilibili"),
+      pino({ level: "silent" }),
+    );
+    const app = express();
+    app.use("/api/music", router);
+    const first = await request(app).get("/api/music/search/all?q=hi");
+    expect(first.status).toBe(200);
+    let saw429 = false;
+    for (let i = 0; i < 40 && !saw429; i++) {
+      const res = await request(app).get("/api/music/search/all?q=hi");
+      if (res.status === 429) saw429 = true;
+    }
+    expect(saw429).toBe(true);
+  });
+});

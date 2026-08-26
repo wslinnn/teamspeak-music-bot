@@ -6,6 +6,7 @@ import { isProviderEnabled, defaultPlatform, saveConfig, type BotConfig } from "
 import { requirePermission } from "../middleware/requirePermission.js";
 import { requireNotGuest } from "../middleware/requireNotGuest.js";
 import { authorize } from "../middleware/authorize.js";
+import { createRateLimit } from "../middleware/rateLimit.js";
 
 /**
  * Body cap for a local upload. express.raw buffers the whole body in memory,
@@ -200,7 +201,11 @@ export function createMusicRouter(
     }
   });
 
-  router.get("/search/all", async (req, res) => {
+  // Rate-limited per IP (review P4): one /search/all fans out to up to six
+  // upstream platform APIs — abuse risks the server IP getting banned upstream.
+  // Generous 30-burst / 1-per-second sustained; limiter created once at
+  // router construction (module-load time), shared by all requests.
+  router.get("/search/all", createRateLimit({ capacity: 30, refillPerSec: 1 }), async (req, res) => {
     try {
       const { q, limit } = req.query;
       if (!q) {
