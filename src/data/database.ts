@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { chmodSync } from "node:fs";
 import { CAPABILITIES, BOTS_ALL } from "./permissions.js";
 import { GUEST_USER_ID, GUEST_USERNAME } from "./users.js";
 import type { QueuedSong } from "../audio/queue.js";
@@ -465,6 +466,16 @@ export function createDatabase(dbPath: string): BotDatabase {
   const db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // The SQLite file holds bot server/channel passwords and identities
+  // (review S6) — tighten to owner-only on POSIX. best-effort: ":memory:" and
+  // locked files just skip it; Windows has no chmod anyway.
+  if (process.platform !== "win32") {
+    try {
+      chmodSync(dbPath, 0o600);
+    } catch {
+      /* best-effort */
+    }
+  }
   initTables(db);
   migrateSchema(db);
   prunePlayHistory(db);
