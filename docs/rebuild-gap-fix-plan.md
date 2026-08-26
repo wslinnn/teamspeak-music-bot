@@ -1,22 +1,22 @@
 # 重建断差修复方案（bug × 3 + 休眠功能 × 14 + 死代码处置）
 
-> ✅ **状态：全部实施完毕**（2026-08-25 P0+P1：B1 `32cf140`、B3 `20d08fc`、
-> B2+D4 `e077ff6`、D0 `e758538`、D1 `31c9b3a`、D11a/b `64517ea`；
-> 2026-08-26 P2：D2 `f2c8f6a`、D14 `80ced99`、D13 `2240a52`、D12 `09b18be`、
-> D3 `a57eea6`、D8 `8c38f27`、D5 `bc3ab24`；
-> P3：D6 `bb287c5`、D7 `17b0943`、专辑详情页 `1b5186e`、FORK.md 记笔随收尾提交。
+> ✅ **状态：全部实施完毕**（2026-08-25 P0+P1：B1 `6888a56`、B3 `0ea2e5a`、
+> B2+D4 `89949ea`、D0 `451fd58`、D1 `b43695f`、D11a/b `6e6603c`；
+> 2026-08-26 P2：D2 `95e6469`、D14 `d70f897`、D13 `f81e092`、D12 `d82e472`、
+> D3 `0d695d9`、D8 `fe6c50f`、D5 `1f12789`；
+> P3：D6 `c63f50c`、D7 `1604623`、专辑详情页 `615776a`、FORK.md 记笔随收尾提交。
 > 全量 1049/1049、前端 build 通过。
-> **维持搁置**：D11c TS6（待真实 TS6 部署需求）、#111 音量滑块已移植（`5471071`）、
-> D9 权限编辑器已实施（`3872ff7`，见下）。
+> **维持搁置**：D11c TS6（待真实 TS6 部署需求）、#111 音量滑块已移植（`c553f90`）、
+> D9 权限编辑器已实施（`7a7bd33`，见下）。
 > 历史勘误：第四轮页面级对账新增 D12-D14 并勘误第三节（/api/favorites
-> 非死代码）；`a7a4551` 音频边界平滑已按反馈 revert（`a3e0320`）。
+> 非死代码）；`0abb7f2` 音频边界平滑已按反馈 revert（`7a33362`）。
 > 本文是第二批；第一批 8 项见 `docs/dormant-features-ui-plans.md`，已完成并
 > 抽查核实。）
 
 > **背景**：当前 main 是"上游基座 + 选择性重放 fork 提交"重建的，前端经
-> `db85626` 以内容移植（不带历史）方式接管。该模式产生三类断差：
+> `b9c6286` 以内容移植（不带历史）方式接管。该模式产生三类断差：
 > ① 字段瘦身型回归（接口 200 OK 但响应字段丢失，如已修复的
-> `/elapsed` 4 字段、`play_history.duration`，见 `40e0863`/`8de32d5`）；
+> `/elapsed` 4 字段、`play_history.duration`，见 `cd3259e`/`137a830`）；
 > ② 后端能力齐备但前端无入口（休眠功能）；
 > ③ 前后端约定从未对齐（如 WS 关闭码）；
 > ④ **接管丢失**：上游前端有、fork 接管版前端没有的 UI（如上游
@@ -30,7 +30,7 @@
 | `GET/POST /api/bot/settings` | GET 返回 commandPrefix/idleTimeout/autoPause/voiceDucking/localAudio/savedQueues/playKeepsQueue/adminGroups/guestMode/**enabledProviders**/**defaultPlatform**/**spotify(masked)**/**jellyfin(masked)**；POST 全部支持写入（spotify/jellyfin 部分合并校验、enabledProviders 全量替换、defaultPlatform 带失效联动清洗） | bot.ts:68-88、104-260 |
 | `GET /api/music/providers` | `{ enabled: string[] }`，按 config 过滤（local 看 localAudioEnabled、spotify 看 spotify.enabled，其余看 enabledProviders） | music.ts:388-404、config.ts:79-83 |
 | `getStatus()`（WS stateChange / status 类响应的来源） | 含 `effectiveDuration`（试听曲为 trialDuration，否则完整 duration） | instance.ts:2019、instance.ts:1097 |
-| `GET /api/player/:id/elapsed` | `{ elapsed, playing, paused, volume, playMode }`（`40e0863` 补全） | player.ts:192-203 |
+| `GET /api/player/:id/elapsed` | `{ elapsed, playing, paused, volume, playMode }`（`cd3259e` 补全） | player.ts:192-203 |
 | `POST /api/player/:id/play-next-song` | `{ song }`（需 id+platform）；插到当前曲后，空闲则直接播；guestFlag `playNext` | player.ts:540-585 |
 | `POST /api/player/:id/play-now-song` | `{ song }`；插入后立即切播；guestFlag `playNow` | player.ts:588-620 |
 | `POST /api/player/:id/fm` | `{ platform }` → `{ ok, message }`；guestFlag `playMode` | player.ts:119-143 |
@@ -158,7 +158,7 @@
 
 ### D9 按用户细粒度权限编辑器【已实施】
 
-第一批方案 7 曾标记二期。2026-08-26 随前端对账缺口清零批次落地（`3872ff7`）：
+第一批方案 7 曾标记二期。2026-08-26 随前端对账缺口清零批次落地（`7a7bd33`）：
 设置→用户 的成员行"权限"按钮 → BaseModal 能力矩阵 + bot 白名单，
 读写 `GET/PUT /api/users/:id/permissions`，审计留痕走后端。
 
@@ -235,23 +235,23 @@ TS 命令面板完整支持但 WebUI 无对应入口的四项（instance.ts:828-
 
 | 序 | 项 | 优先级 | 工作量 | 状态/理由 |
 |----|----|--------|--------|------|
-| 1 | B1 effectiveDuration | P0 | 0.5 天 | ✅ `32cf140` |
-| 2 | B3 WS 4001 对齐 | P0 | 0.5 天 | ✅ `20d08fc` |
-| 3 | D0 音源与连接管理 | P1 | 1 天 | ✅ `e758538`；解锁 D5/D6 |
-| 4 | B2+D4 音源标签动态化 | P1 | 0.5 天 | ✅ `e077ff6` |
-| 5 | D1 插队播放 | P1 | 0.5 天 | ✅ `31c9b3a` |
-| 6 | D11a channelPassword 表单字段 | P1 | 10 分钟 | ✅ `64517ea` |
-| 7 | D11b autoStart 开关 | P1 | 0.5 天 | ✅ `64517ea` |
-| 8 | D2 修改密码 | P2 | 0.5 天 | ✅ `f2c8f6a` |
-| 9 | D14 游客权限按钮显隐 | P2 | 0.5 天 | ✅ `80ced99` |
-| 10 | D13 专属分享链接 | P2 | 0.5 天 | ✅ `2240a52` |
-| 11 | D12 歌单收藏族+Library 页 | P2 | 1.5 天 | ✅ `09b18be`（含多音源我的歌单） |
-| 12 | D3 FM 开启 | P2 | 10 分钟 | ✅ `a57eea6`（改走服务端 /fm） |
-| 13 | D8 审计页 | P2 | 0.5 天 | ✅ `8c38f27` |
-| 14 | D5 Jellyfin 版块（含音质档） | P2 | 1 天 | ✅ `bc3ab24` |
-| 15 | D6 Spotify OAuth | P3 | 0.5-1 天 | ✅ `bb287c5`（部署侧公网可达为前置） |
-| 16 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | ✅ `17b0943`（酷狗卡；Jellyfin 测试在 D0）。**勘误**：短信登录曾一并误加、后按反馈移除——`loginWithSms` 走 `/captcha/verify`，该端点不返回登录 cookie（应为 `/login/cellphone`），链路走不通且场景被扫码覆盖，属上游遗留死代码，不应对接 |
-| 17 | 专辑详情页 /album/:id | P3 | 0.5 天 | ✅ `1b5186e`（Playlist.vue 双形态复用） |
+| 1 | B1 effectiveDuration | P0 | 0.5 天 | ✅ `6888a56` |
+| 2 | B3 WS 4001 对齐 | P0 | 0.5 天 | ✅ `0ea2e5a` |
+| 3 | D0 音源与连接管理 | P1 | 1 天 | ✅ `451fd58`；解锁 D5/D6 |
+| 4 | B2+D4 音源标签动态化 | P1 | 0.5 天 | ✅ `89949ea` |
+| 5 | D1 插队播放 | P1 | 0.5 天 | ✅ `b43695f` |
+| 6 | D11a channelPassword 表单字段 | P1 | 10 分钟 | ✅ `6e6603c` |
+| 7 | D11b autoStart 开关 | P1 | 0.5 天 | ✅ `6e6603c` |
+| 8 | D2 修改密码 | P2 | 0.5 天 | ✅ `95e6469` |
+| 9 | D14 游客权限按钮显隐 | P2 | 0.5 天 | ✅ `d70f897` |
+| 10 | D13 专属分享链接 | P2 | 0.5 天 | ✅ `f81e092` |
+| 11 | D12 歌单收藏族+Library 页 | P2 | 1.5 天 | ✅ `d82e472`（含多音源我的歌单） |
+| 12 | D3 FM 开启 | P2 | 10 分钟 | ✅ `0d695d9`（改走服务端 /fm） |
+| 13 | D8 审计页 | P2 | 0.5 天 | ✅ `fe6c50f` |
+| 14 | D5 Jellyfin 版块（含音质档） | P2 | 1 天 | ✅ `1f12789` |
+| 15 | D6 Spotify OAuth | P3 | 0.5-1 天 | ✅ `c63f50c`（部署侧公网可达为前置） |
+| 16 | D7 短信/酷狗/Jellyfin 登录 | P3 | 1 天 | ✅ `1604623`（酷狗卡；Jellyfin 测试在 D0）。**勘误**：短信登录曾一并误加、后按反馈移除——`loginWithSms` 走 `/captcha/verify`，该端点不返回登录 cookie（应为 `/login/cellphone`），链路走不通且场景被扫码覆盖，属上游遗留死代码，不应对接 |
+| 17 | 专辑详情页 /album/:id | P3 | 0.5 天 | ✅ `615776a`（Playlist.vue 双形态复用） |
 | 18 | D11c TS6 协议接入 | P3 | 单独评估 | ⏸ 搁置：待真实 TS6 部署需求 |
 | 19 | #111 音量滑块验证（后视结果移植 useDecoupledSlider） | P3 | 0.5 天 | ⏸ 搁置：需先桌面端复现，未复现不盲移植 |
 | 20 | FORK.md 记笔（/api/favorites 定性已勘误为 D12） | P3 | 10 分钟 | ✅ 随收尾提交 |
@@ -264,8 +264,8 @@ TS 命令面板完整支持但 WebUI 无对应入口的四项（instance.ts:828-
 
 | 项 | 提交 | 类型 |
 |----|------|------|
-| 第一批 8 项休眠功能对接 | fb0b8b4 起共 9 个提交（16866bc 标记完成） | 休眠功能 |
-| `/elapsed` 补全 4 字段 | 40e0863 | 字段瘦身回归（backup 09b035e 有、重建丢失） |
-| `play_history.duration` 补回 | 8de32d5 | 字段瘦身回归（backup 建表有、重建丢失） |
-| 站点图标/PWA 接管误伤修复 | a995c33 / b64e825 | 移植二次误伤 |
-| JWT 单密码鉴权 → 上游 session/users | 032d472（有意替换，非遗漏） | 设计替换 |
+| 第一批 8 项休眠功能对接 | d159090 起共 9 个提交（2bbcd54 标记完成） | 休眠功能 |
+| `/elapsed` 补全 4 字段 | cd3259e | 字段瘦身回归（backup 09b035e 有、重建丢失） |
+| `play_history.duration` 补回 | 137a830 | 字段瘦身回归（backup 建表有、重建丢失） |
+| 站点图标/PWA 接管误伤修复 | e6872d6 / 31e8c0c | 移植二次误伤 |
+| JWT 单密码鉴权 → 上游 session/users | 304a023（有意替换，非遗漏） | 设计替换 |

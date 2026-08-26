@@ -1,6 +1,6 @@
 # 前端差异对比：main vs 上游（frontend-diff-vs-upstream）
 
-> **基准**：main = `9499bcc`（2026-08-26）；upstream = `upstream/main` = `1407cad`
+> **基准**：main = `1eb14fe`（2026-08-26）；upstream = `upstream/main` = `1407cad`
 > （2026-08-24 11:19 +0800，PR #154 合并后）。
 > 拉取核对：`upstream/main` 无新增提交（`upstream-ref` 已同步等于 `1407cad`）；
 > 新出现的远端分支 `fix/152-setup-console-eio` 内容已全部并入 main，无增量。
@@ -39,7 +39,7 @@
 
 | 路由 | 上游 | main | 定性 |
 |------|------|------|------|
-| `/` `/search` `/library` `/playlist/:id` `/album/:id` `/lyrics` `/history` `/settings` `/login` `/first-run` `/bot/:id` | ✅ | ✅（`/album/:id` 于 `1b5186e` 补齐） | 等价 |
+| `/` `/search` `/library` `/playlist/:id` `/album/:id` `/lyrics` `/history` `/settings` `/login` `/first-run` `/bot/:id` | ✅ | ✅（`/album/:id` 于 `615776a` 补齐） | 等价 |
 | `/saved-queues` | ✅ 独立页（Navbar 入口，`savedQueuesEnabled && !guest` 门控） | ❌ 无页面；功能并入 Queue 抽屉（保存/加载/追加/删除/共享） | 设计性分歧（功能等价，入口位置不同） |
 | `/setup` | ✅ 四步引导向导（建 bot autoStart:true + Jellyfin 初始化） | 重定向 `/first-run`（有意不接，见方案文档 D 组备注） | 设计性分歧 |
 | `/favorites` | ❌ 无此概念 | ✅ fork 歌曲收藏独立页 | fork 领先 |
@@ -56,7 +56,7 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 |------|------|------|------|
 | 搜索栏 / 正在播放 | ✅ | ✅ | 等价 |
 | 私人FM | **多卡多源**：Jellyfin 电台（Instant Mix）/网易云/QQ 雷达/酷狗电台，按 enabledProviders+登录态显隐 | 单卡（netease），走服务端 `POST /fm`；有 D14 权限门控 | 上游领先（多源 FM 卡） |
-| Jellyfin 四区块 | 最近添加/播放最多/收藏/流派 | ✅（`bc3ab24`） | 等价 |
+| Jellyfin 四区块 | 最近添加/播放最多/收藏/流派 | ✅（`1f12789`） | 等价 |
 | 每日推荐 / 推荐歌单 | **SourceTabs 可切源**（netease/qq/kugou/jellyfin，localStorage 记忆） | 固定默认源，无切换 | 上游领先（多源切换） |
 | 我的歌单 | SourceTabs 多源 + 展开收起 | 默认源单列 + 展开收起；**多源版在 Library 页**（D12） | 等价（取舍不同：上游集中 Home，main 集中 Library） |
 | B站热门 | ✅ | ✅ | 等价 |
@@ -71,7 +71,7 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 | 歌单卡红心 | ✅（歌单收藏） | ✅（D12，游客隐藏） | 等价 |
 
 ### Playlist / Album
-等价（`1b5186e` 对齐）：双形态复用、`allSettled` 详情失败走歌曲兜底（专辑标题取首曲 `album` 字段）、收藏红心仅歌单形态、播放全部分走 play-playlist/play-album。
+等价（`615776a` 对齐）：双形态复用、`allSettled` 详情失败走歌曲兜底（专辑标题取首曲 `album` 字段）、收藏红心仅歌单形态、播放全部分走 play-playlist/play-album。
 备注：`/api/music/album/:id/detail` **两端后端都没有该路由**——上游前端调用它靠 404 兜底（其注释明言 intentional），main 直接不发该请求，运行时行为一致。
 
 ### Library（音乐库）
@@ -98,10 +98,10 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 | 用户管理（角色/重置密码/删除）+ 审计 + 修改密码 | ✅ | ✅（D2/D8） | 等价 |
 | 游客模式（总开关+逐项权限） | ✅ | ✅ | 等价 |
 | 平台账号（扫码/Cookie，netease/qq/bilibili/kugou） | ✅ | ✅（D7） | 等价 |
-| 网易云**短信登录** | ❌ 无 UI | ❌ 同样不做（曾于 `17b0943` 误加、已移除）：`loginWithSms` 调的 `/captcha/verify` 只校验验证码**不返回登录 cookie**（正确端点应为 `/login/cellphone`），链路天然走不通；且能收验证码的手机=账号本人=可扫码，场景被扫码登录完全覆盖。`sms/send`/`sms/verify` 属上游遗留死代码，按收敛策略保留后端不删 | 双方一致（不做） |
+| 网易云**短信登录** | ❌ 无 UI | ❌ 同样不做（曾于 `1604623` 误加、已移除）：`loginWithSms` 调的 `/captcha/verify` 只校验验证码**不返回登录 cookie**（正确端点应为 `/login/cellphone`），链路天然走不通；且能收验证码的手机=账号本人=可扫码，场景被扫码登录完全覆盖。`sms/send`/`sms/verify` 属上游遗留死代码，按收敛策略保留后端不删 | 双方一致（不做） |
 | Spotify 配置+OAuth | ✅（useSpotifySettings 含单测） | ✅（D0 配置卡 + D6 授权卡） | 等价 |
 | **音源启用管理** | 仅 Jellyfin 卡可翻转 enabledProviders（其注释自述"唯一入口"） | 六项开关 + 默认音源下拉（D0） | **fork 领先** |
-| **按用户细粒度权限编辑器**（capabilities 矩阵 + bot 白名单，`GET/PUT /api/users/:id/permissions`） | ✅ | ✅（`3872ff7`，BaseModal 形态） | 等价 |
+| **按用户细粒度权限编辑器**（capabilities 矩阵 + bot 白名单，`GET/PUT /api/users/:id/permissions`） | ✅ | ✅（`7a7bd33`，BaseModal 形态） | 等价 |
 | 主题 | Settings 内切换按钮 | Navbar 按钮 + 独立主题 Tab | 等价 |
 
 ---
@@ -201,17 +201,17 @@ Navbar 导航项：上游 = 发现/搜索/音乐库/播放历史/**已存队列*
 
 | # | 缺口 | 状态 |
 |---|------|------|
-| 1 | Queue 已存清单按钮按 `savedQueuesEnabled` 运行时门控 | ✅ `0c04ba2`（store 加 fetchBotSettings，App 挂载拉取） |
-| 2 | #111 音量滑块拖拽实时预览 | ✅ `5471071`（useDecoupledSlider 原样移植 + 6 条单测） |
-| 3 | 搜索三类目完整分页 | ✅ `44be8ff`（searchPagination 移植 + 15 条单测；"全部"聚合维持不分页，后端无 offset） |
-| 4 | auth 权限 60s 轮询自愈 | ✅ `8098463` |
-| 5 | Home 每日推荐/推荐歌单多源切换 | ✅ `25e812d`（含页签 localStorage 记忆与失效回退） |
+| 1 | Queue 已存清单按钮按 `savedQueuesEnabled` 运行时门控 | ✅ `d6da3bd`（store 加 fetchBotSettings，App 挂载拉取） |
+| 2 | #111 音量滑块拖拽实时预览 | ✅ `c553f90`（useDecoupledSlider 原样移植 + 6 条单测） |
+| 3 | 搜索三类目完整分页 | ✅ `df5fe9f`（searchPagination 移植 + 15 条单测；"全部"聚合维持不分页，后端无 offset） |
+| 4 | auth 权限 60s 轮询自愈 | ✅ `7ba86f6` |
+| 5 | Home 每日推荐/推荐歌单多源切换 | ✅ `69bf4c8`（含页签 localStorage 记忆与失效回退） |
 | 6 | Library 我的歌单加 spotify 源 + 页签记忆 | ⏸ 不做：spotify provider 未实现 getUserPlaylists（上游同 501），页签记忆已随 #5 落地同款机制 |
-| 7 | Navbar bot 卡快捷操作（停止播放/播放/下一首） | ✅ `5ce5a8a` |
-| 8 | D9 按用户权限编辑器 | ✅ `3872ff7`（能力矩阵 + bot 白名单，BaseModal 形态） |
-| 9 | 多源 FM 卡（Jellyfin 电台/QQ 雷达/酷狗电台） | ✅ `25e812d` |
+| 7 | Navbar bot 卡快捷操作（停止播放/播放/下一首） | ✅ `20944b1` |
+| 8 | D9 按用户权限编辑器 | ✅ `7a7bd33`（能力矩阵 + bot 白名单，BaseModal 形态） |
+| 9 | 多源 FM 卡（Jellyfin 电台/QQ 雷达/酷狗电台） | ✅ `69bf4c8` |
 
-另：Playlist"播放全部"权限门控（D14 漏网点）一并修复 `340e858`。
+另：Playlist"播放全部"权限门控（D14 漏网点）一并修复 `4df2e64`。
 
 ---
 

@@ -8,23 +8,23 @@
 
 | 项 | 状态 | Commit |
 |----|------|--------|
-| S1 Jellyfin 封面代理化 + 存量 URL 清洗 | ✅ 已修复 | 58b2c72 |
-| S2 profile 更新白名单 | ✅ 已修复 | a9124a9 |
-| S3 bot config 密码掩码（留空=不改） | ✅ 已修复 | cdb50cd |
-| S4 登录哑哈希时序等化 | ✅ 已修复 | 79441bb |
-| S5 播放/yt-dlp/jellyfin URL scheme 白名单 | ✅ 已修复 | b660ad9 |
-| S6 config.json/SQLite 0600 | ✅ 已修复 | a79700a |
-| S7 change-password 软 Origin 校验 | ✅ 已修复 | 79441bb |
-| S8 /settings 平台块按 platform.auth 过滤 | ✅ 已修复 | 61ffe9e |
-| F1 playGate 锁下沉覆盖全部入口 | ✅ 已修复 | 7e948fc |
-| F2 history limit 钳制 + guest 门 | ✅ 已修复 | f495ff7 |
-| F3 暂停态 seek 保持暂停 | ✅ 已修复 | c6f75ef |
-| F4 集合/单曲 id 入参校验 | ✅ 已修复 | c3a7717 |
-| P1 play_history 索引 + 10 万行保留 | ✅ 已修复 | f9e19db |
-| P2 上传进程内串行化 | ✅ 已修复 | a711a1e |
-| P3 前端（轮询门控/取色复用/防抖/上限/content-visibility） | ✅ 已修复 | f84a8e4 |
-| P4 /search/all 按 IP 限流 | ✅ 已修复 | c1d5f7b |
-| P5 SIGKILL 前置 exitCode 检查 | ✅ 已修复 | 93ae3cd |
+| S1 Jellyfin 封面代理化 + 存量 URL 清洗 | ✅ 已修复 | 6da3906 |
+| S2 profile 更新白名单 | ✅ 已修复 | d399f21 |
+| S3 bot config 密码掩码（留空=不改） | ✅ 已修复 | d5959ec |
+| S4 登录哑哈希时序等化 | ✅ 已修复 | bf3dc51 |
+| S5 播放/yt-dlp/jellyfin URL scheme 白名单 | ✅ 已修复 | 343235e |
+| S6 config.json/SQLite 0600 | ✅ 已修复 | 7851fbf |
+| S7 change-password 软 Origin 校验 | ✅ 已修复 | bf3dc51 |
+| S8 /settings 平台块按 platform.auth 过滤 | ✅ 已修复 | cb08fc2 |
+| F1 playGate 锁下沉覆盖全部入口 | ✅ 已修复 | 089cc85 |
+| F2 history limit 钳制 + guest 门 | ✅ 已修复 | 1742ad9 |
+| F3 暂停态 seek 保持暂停 | ✅ 已修复 | 73b1ce1 |
+| F4 集合/单曲 id 入参校验 | ✅ 已修复 | a8aa982 |
+| P1 play_history 索引 + 10 万行保留 | ✅ 已修复 | 6ce0619 |
+| P2 上传进程内串行化 | ✅ 已修复 | f4d829f |
+| P3 前端（轮询门控/取色复用/防抖/上限/content-visibility） | ✅ 已修复 | 85bcea4 |
+| P4 /search/all 按 IP 限流 | ✅ 已修复 | 56a1a9c |
+| P5 SIGKILL 前置 exitCode 检查 | ✅ 已修复 | e4ad383 |
 
 S5 中 TS6 查询的 `rejectUnauthorized:false`（管理员配置的受信主机）与 S6 中
 rust-librespot token 走 argv（代码内已自注，需 sidecar 协议改造）维持原状，属

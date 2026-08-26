@@ -1,6 +1,6 @@
 # 性能分析与 PWA / WASM 适用性报告
 
-> 基于 main（f796c7e，上游 v1.13.1 + fork 资产）源码审查 + 微基准实测
+> 基于 main（ec31ae8，上游 v1.13.1 + fork 资产）源码审查 + 微基准实测
 > 日期：2026-08-24
 
 ## 结论速览
@@ -126,10 +126,10 @@
 
 | 优先级 | 事项 | 成本 | 预期收益 |
 |--------|------|------|---------|
-| **P0** | ✅ 已完成（a995c33）：恢复 web/public 图标 + manifest + index.html 引用 | 0.5h | favicon/主屏图标恢复 |
-| P1 | ✅ 已完成（ac3586b）：History 加载更多（+100/次，上限 1000） | 1h | 可查看完整历史且移动端不卡 |
-| P1 | ✅ 已完成（de2bf56）：applyVolume 改 Int16Array（含 Buffer 回退） | 1h | 热循环 ~4x |
-| P2 | ✅ 已完成（b64e825）：vite-plugin-pwa precache + 封面/字体缓存 | 0.5 天 | 冷启动提速、二次浏览封面零请求 |
+| **P0** | ✅ 已完成（e6872d6）：恢复 web/public 图标 + manifest + index.html 引用 | 0.5h | favicon/主屏图标恢复 |
+| P1 | ✅ 已完成（e044e22）：History 加载更多（+100/次，上限 1000） | 1h | 可查看完整历史且移动端不卡 |
+| P1 | ✅ 已完成（da26b1f）：applyVolume 改 Int16Array（含 Buffer 回退） | 1h | 热循环 ~4x |
+| P2 | ✅ 已完成（31e8c0c）：vite-plugin-pwa precache + 封面/字体缓存 | 0.5 天 | 冷启动提速、二次浏览封面零请求 |
 | P2 | ✅ 已完成：Vite manualChunks 拆 vue/http vendor | 0.5h | index 444→257KB（gzip 161→88KB），vendor 跨发版缓存 |
 | Watch | stateChange 队列载荷瘦身 | — | 千首队列/多客户端场景出现时再做 |
 | 不做 | WASM | — | 无正当场景 |
