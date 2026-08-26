@@ -37,6 +37,8 @@ const router = createRouter({
       path: '/history',
       name: 'history',
       component: () => import('../views/History.vue'),
+      // 播放历史含点歌人用户名，与 Library/Favorites 一致不对 guest 开放
+      meta: { blockGuest: true },
     },
     {
       path: '/library',

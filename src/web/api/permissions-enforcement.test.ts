@@ -57,7 +57,7 @@ function makeProvider() {
 
 // Build one app mounting all four real routers, with req.user injected by a
 // middleware placed BEFORE the routers (mimicking what requireAuth does).
-function makeApp(user: any) {
+function makeApp(user: any, database?: any) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => { (req as any).user = user; next(); });
@@ -65,7 +65,7 @@ function makeApp(user: any) {
   const botManager = makeBotManager();
   const provider = makeProvider();
 
-  app.use("/api/player", createPlayerRouter(botManager, logger));
+  app.use("/api/player", createPlayerRouter(botManager, logger, database));
   app.use(
     "/api/bot",
     createBotRouter(
@@ -454,5 +454,41 @@ describe("favorites are denied to guests", () => {
   it("NOT 403 for a member on GET /api/favorites", async () => {
     const app = makeFavoritesApp(member([], "all"));
     expect((await request(app).get("/api/favorites")).status).not.toBe(403);
+  });
+});
+
+describe("GET /api/player/:botId/history — limit clamp + guest gate (review F2)", () => {
+  function historyDb() {
+    const limits: number[] = [];
+    return {
+      limits,
+      getPlayHistory: (_botId: string, limit: number) => {
+        limits.push(limit);
+        return [];
+      },
+    };
+  }
+  const guest = {
+    id: "g",
+    username: "guest",
+    role: "guest" as const,
+    capabilities: new Set<string>(),
+    bots: "all" as const,
+  };
+
+  it("clamps limit into [1, 500] (no LIMIT -1 whole-table reads)", async () => {
+    const db = historyDb();
+    const app = makeApp(member([], [ALLOWED_BOT]), db);
+    await request(app).get(`/api/player/${ALLOWED_BOT}/history?limit=-1`);
+    await request(app).get(`/api/player/${ALLOWED_BOT}/history?limit=999999`);
+    await request(app).get(`/api/player/${ALLOWED_BOT}/history`);
+    await request(app).get(`/api/player/${ALLOWED_BOT}/history?limit=abc`);
+    expect(db.limits).toEqual([1, 500, 50, 50]);
+  });
+
+  it("403 for guests (history carries requester usernames)", async () => {
+    const app = makeApp(guest, historyDb());
+    const res = await request(app).get(`/api/player/${ALLOWED_BOT}/history`);
+    expect(res.status).toBe(403);
   });
 });

@@ -6,6 +6,7 @@ import type { Logger } from "../../logger.js";
 import { parseCommand } from "../../bot/commands.js";
 import { sanitizeJellyfinCoverUrl } from "../../music/jellyfin.js";
 import { requireBotAccess } from "../middleware/requirePermission.js";
+import { requireNotGuest } from "../middleware/requireNotGuest.js";
 import { authorize } from "../middleware/authorize.js";
 
 export function createPlayerRouter(
@@ -728,12 +729,15 @@ export function createPlayerRouter(
     }
   });
 
-  router.get("/:botId/history", (req, res) => {
+  router.get("/:botId/history", requireNotGuest, (req, res) => {
     if (!database) {
       res.json({ history: [] });
       return;
     }
-    const limit = parseInt(req.query.limit as string) || 50;
+    // Clamp like the audit router does: a raw `?limit=-1` would become SQL
+    // `LIMIT -1` (no bound → whole table) and a huge limit is a read amplifier.
+    const parsed = parseInt(req.query.limit as string, 10);
+    const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 50;
     const records = database.getPlayHistory(req.params.botId, limit);
     const history = records.map((r) => ({
       id: r.songId,
