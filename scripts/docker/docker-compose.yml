@@ -5,10 +5,9 @@
 # 无需本地编译，无需 Node.js / 构建工具链。
 # 镜像内置：Node.js, FFmpeg, Opus 编码器，原生模块均已交叉编译。
 #
-# 镜像由 .github/workflows/docker-publish.yml 在推送 v*.*.* tag 时发布到
-# 本仓库的 GHCR 命名空间；首次发布后需在 GitHub → Packages 把包可见性
-# 设为 public，匿名 docker-compose pull 才能拉取。
-# 换版本：TSMUSICBOT_IMAGE=ghcr.io/wslinnn/teamspeak-music-bot:v2.0.0
+# 镜像由 .github/workflows/release-docker.yml 在推送 v*.*.* tag 时发布到
+# 本仓库的 GHCR 命名空间（<x.y.z> + latest 两个标签，amd64/arm64 多架构）。
+# 换版本：TSMUSICBOT_IMAGE=ghcr.io/wslinnn/teamspeak-music-bot:2.0.0
 # 离线场景（tar.gz + docker load）见 docker-compose.prod.yml。
 # 如需本地构建（开发），见底部注释。
 

@@ -1,6 +1,9 @@
 name: Release Docker Image
 
 on:
+  push:
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       tag:
@@ -13,70 +16,133 @@ on:
         type: boolean
         default: false
 
-# 发版步骤会建 tag / 推 tag / 上传产物——并发 dispatch 会在这些步骤上竞争。
+# 发版会推 tag / 推镜像 / 建 Release——防并发 dispatch 竞争。
 concurrency:
   group: release-docker
   cancel-in-progress: false
 
+env:
+  REGISTRY: ghcr.io
+  # github.repository 在本仓库与上游各自解析为自己的命名空间
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
-  build-and-release:
+  release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write   # 建 tag / 建 Release / 上传产物
+      packages: write   # 推镜像到 GHCR
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           # 全历史 + tags：脚本用 `git rev-parse <tag>` 判断 tag 是否已存在，
-          # 默认的浅克隆（fetch-depth: 1，不带 tags）里该判断永远为否，
-          # 远端已有 tag 时 `git push` 会被拒绝、发版中断（重发场景）。
+          # 默认浅克隆（fetch-depth: 1，不带 tags）里该判断永远为否，
+          # 远端已有 tag 时 `git push` 会被拒、发版中断（重发场景）。
           fetch-depth: 0
           fetch-tags: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix web ci
+
+      # 发版门槛：测试不绿的提交不允许产出镜像 / Release。
+      # dispatch 模式可能在未经 CI 的 HEAD 上打 tag，这道门槛尤其必要。
+      - name: Test
+        run: npm test
+
+      - name: Compute release variables
+        id: vars
+        run: |
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
+          VER="${TAG#v}"
+          # beta/rc 只推精确标签，latest 不动——避免测试版覆盖 latest
+          STABLE=true
+          case "$VER" in
+            *beta*|*rc*) STABLE=false ;;
+          esac
+          IMAGE="$REGISTRY/$IMAGE_NAME"
+          {
+            echo "tag=$TAG"
+            echo "ver=$VER"
+            echo "stable=$STABLE"
+            echo "image=$IMAGE"
+            echo "tags<<EOF"
+            echo "$IMAGE:$VER"
+            if [ "$STABLE" = true ]; then echo "$IMAGE:latest"; fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Image tags: $(echo "$IMAGE:$VER $([ "$STABLE" = true ] && echo "$IMAGE:latest")")"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image to GHCR
         uses: docker/build-push-action@v6
         with:
           context: .
           file: scripts/docker/Dockerfile
-          tags: tsmusicbot:${{ github.event.inputs.tag }}
-          load: true
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.vars.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Tag image as latest
-        run: docker tag tsmusicbot:${{ github.event.inputs.tag }} tsmusicbot:latest
-
-      - name: Export image to tar.gz
+      # tar.gz 直接从刚推送的注册表镜像回拉导出：零额外构建时间，
+      # 且保证 Release 附件与 GHCR 镜像逐字节同源。每架构一份，
+      # load 后本地标签为 tsmusicbot:<tag> + tsmusicbot:latest。
+      - name: Export per-arch tar.gz from the pushed image
         run: |
-          docker save tsmusicbot:${{ github.event.inputs.tag }} tsmusicbot:latest | gzip > tsmusicbot-${{ github.event.inputs.tag }}.tar.gz
+          TAG="${{ steps.vars.outputs.tag }}"
+          for ARCH in amd64 arm64; do
+            docker pull --platform "linux/$ARCH" "${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.ver }}"
+            docker tag  "${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.ver }}" "tsmusicbot:$TAG"
+            docker tag  "${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.ver }}" "tsmusicbot:latest"
+            docker save "tsmusicbot:$TAG" tsmusicbot:latest | gzip > "tsmusicbot-$TAG-linux-$ARCH.tar.gz"
+          done
           ls -lh tsmusicbot-*.tar.gz
 
-      - name: Create or use existing GitHub Release
+      - name: Create tag if missing (dispatch path)
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Create or reuse GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ github.event.inputs.tag }}"
-          DRAFT_FLAG="${{ github.event.inputs.draft == 'true' && '--draft' || '' }}"
-
-          # Check if release already exists
+          TAG="${{ steps.vars.outputs.tag }}"
+          DRAFT_FLAG="${{ inputs.draft && '--draft' || '' }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists, skipping creation."
           else
-            # Create tag if it doesn't exist
-            if ! git rev-parse "$TAG" >/dev/null 2>&1; then
-              git tag "$TAG"
-              git push origin "$TAG"
-            fi
-
-            # beta/rc tags are marked as prerelease
             PRERELEASE_FLAG=""
             case "$TAG" in
               *beta*|*rc*) PRERELEASE_FLAG="--prerelease" ;;
             esac
-
             gh release create "$TAG" \
               --title "TSMusicBot $TAG" \
               --generate-notes \
@@ -84,10 +150,10 @@ jobs:
               $PRERELEASE_FLAG
           fi
 
-      - name: Upload tar.gz to Release
+      - name: Upload tar.gz assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.event.inputs.tag }} \
-            tsmusicbot-${{ github.event.inputs.tag }}.tar.gz \
+          gh release upload "${{ steps.vars.outputs.tag }}" \
+            tsmusicbot-${{ steps.vars.outputs.tag }}-linux-*.tar.gz \
             --clobber

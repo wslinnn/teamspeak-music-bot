@@ -50,7 +50,7 @@
 >
 > **运维**
 >
-> - **Docker 预构建镜像发布流** — GitHub Actions 构建并导出镜像，配合 `scripts/docker/docker-compose.prod.yml` 离线秒级启动
+> - **Docker 发版流水线** — 一条流水线完成完整发版：测试门槛 → 推送多架构镜像到 GHCR（`x.y.z` / `latest`）→ Release 挂载 amd64/arm64 双架构离线 tar.gz（`docker load` 后配合 `docker-compose.prod.yml` 秒级启动）
 
 ## 功能特性
 
