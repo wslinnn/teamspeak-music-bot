@@ -832,7 +832,11 @@ export class AudioPlayer extends EventEmitter {
     // transport is delegated to the SpotifyController by the caller (Task 7).
     if (this.externalMode) return;
     if (this.currentUrl && Number.isFinite(seconds) && seconds >= 0) {
+      // Preserve the paused intent (review F3): play() resets state to
+      // "playing", so a seek while paused would silently resume playback.
+      const wasPaused = this.state === "paused";
       this.play(this.currentUrl, seconds, this.currentSongDuration);
+      if (wasPaused) this.pause();
     }
   }
   pause(): void { if (this.state === "playing") this.state = "paused"; }

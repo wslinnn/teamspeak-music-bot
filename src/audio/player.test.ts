@@ -658,3 +658,22 @@ describe("AudioPlayer stall/EOF end-detection is gated on playing state (R3-4)",
     }
   });
 });
+
+describe("AudioPlayer.seek — paused intent (review F3)", () => {
+  it("keeps the player paused after seeking a paused track", async () => {
+    const player = new AudioPlayer(silentLogger);
+    // Stub the real ffmpeg spawn: point play() at a fake local file source by
+    // pre-setting state manually is not enough — drive the real seek() path.
+    const stateSpy = vi.spyOn(player, "play").mockImplementation(function (this: AudioPlayer) {
+      // Emulate play()'s state transition without spawning ffmpeg.
+      (player as unknown as { state: string }).state = "playing";
+    });
+    player.pause(); // no-op from idle
+    (player as unknown as { state: string }).state = "paused";
+    (player as unknown as { currentUrl: string }).currentUrl = "https://x/y.mp3";
+    player.seek(42);
+    expect(stateSpy).toHaveBeenCalledWith("https://x/y.mp3", 42, 0);
+    expect(player.getState()).toBe("paused");
+    stateSpy.mockRestore();
+  });
+});
