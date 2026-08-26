@@ -580,8 +580,16 @@ export class AudioPlayer extends EventEmitter {
     } catch (e) { /* ignore */ }
 
     const killTimeout = setTimeout(() => {
+      // Guard against PID reuse (review P5): if the child already exited the
+      // exitCode is set — escalating would SIGKILL whatever unrelated process
+      // the OS handed the recycled PID. (The exit handler normally clears
+      // this timer; this covers the not-yet-delivered window.)
+      if (proc.exitCode !== null) {
+        globalActivePids.delete(pid);
+        return;
+      }
       try {
-        process.kill(pid, 0); 
+        process.kill(pid, 0);
         process.kill(pid, "SIGKILL");
       } catch (e) {
       } finally {
