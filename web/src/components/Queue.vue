@@ -333,6 +333,12 @@ async function deleteQueue(sq: SavedQueue) {
 </script>
 
 <style scoped>
+/* 跳出视口的队列行不参与渲染/布局（review P3；拖拽交互不受影响，
+   content-visibility 仅跳过屏幕外的绘制与布局） */
+.overflow-y-auto > * > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+}
 .queue-backdrop-enter-active,
 .queue-backdrop-leave-active {
   transition: opacity 0.25s ease;

@@ -6,6 +6,7 @@
   >
     <img
       v-if="url && !errored"
+      ref="imgEl"
       :src="url"
       alt=""
       class="cover-img"
@@ -57,64 +58,62 @@ const props = withDefaults(defineProps<{
 const loaded = ref(false);
 const errored = ref(false);
 const dominantColor = ref<string | null>(null);
+const imgEl = ref<HTMLImageElement | null>(null);
 
-function extractDominantColor(url: string): void {
+// Reuse the ALREADY-DISPLAYED <img> for extraction instead of a second
+// `new Image()` download (review P3). Extraction still requires the image to
+// be CORS-clean — a cross-origin <img> without CORS headers taints the canvas
+// and getImageData throws into the same no-dominant-color fallback as before,
+// so the visual failure set is identical while requests are halved.
+function scheduleExtract(): void {
   dominantColor.value = null;
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    const doExtract = () => {
-      try {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        // Sample a small version for performance
-        const w = 32;
-        const h = 32;
-        canvas.width = w;
-        canvas.height = h;
-        ctx.drawImage(img, 0, 0, w, h);
-        const data = ctx.getImageData(0, 0, w, h).data;
-        let r = 0, g = 0, b = 0, count = 0;
-        // Sample every 4th pixel for speed
-        for (let i = 0; i < data.length; i += 16) {
-          r += data[i];
-          g += data[i + 1];
-          b += data[i + 2];
-          count++;
-        }
-        if (count > 0) {
-          dominantColor.value = `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`;
-        }
-      } catch {
-        // ignore — fall back to default placeholder
+  const img = imgEl.value;
+  if (!img || !img.complete || img.naturalWidth === 0) return;
+  const doExtract = () => {
+    try {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      // Sample a small version for performance
+      const w = 32;
+      const h = 32;
+      canvas.width = w;
+      canvas.height = h;
+      ctx.drawImage(img, 0, 0, w, h);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      let r = 0, g = 0, b = 0, count = 0;
+      // Sample every 4th pixel for speed
+      for (let i = 0; i < data.length; i += 16) {
+        r += data[i];
+        g += data[i + 1];
+        b += data[i + 2];
+        count++;
       }
-    };
-    if ('requestIdleCallback' in window) {
-      requestIdleCallback(doExtract, { timeout: 2000 });
-    } else {
-      doExtract();
+      if (count > 0) {
+        dominantColor.value = `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`;
+      }
+    } catch {
+      // ignore — fall back to default placeholder
     }
   };
-  img.onerror = () => {
-    // ignore
-  };
-  img.src = url;
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(doExtract, { timeout: 2000 });
+  } else {
+    doExtract();
+  }
 }
 
 // Reset state when URL changes
 watch(() => props.url, (url) => {
   errored.value = false;
   loaded.value = false;
-  if (url) {
-    extractDominantColor(url);
-  } else {
-    dominantColor.value = null;
-  }
+  dominantColor.value = null;
+  void url;
 }, { immediate: true });
 
 function onImageLoad() {
   loaded.value = true;
+  scheduleExtract();
 }
 
 function onImageError() {

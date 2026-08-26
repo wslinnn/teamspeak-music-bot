@@ -245,8 +245,18 @@ function pageKey(type: 'songs' | 'playlists' | 'albums', source: string): string
   return `${type}:${source}`;
 }
 
+// DOM 无虚拟化，累积结果封顶（review P3）：达到上限后不再渲染“加载更多”
+const MAX_RENDER_RESULTS = 300;
+const currentCount = computed(() =>
+  activeCategory.value === 'albums' ? albums.value.length
+    : activeCategory.value === 'playlists' ? playlists.value.length
+    : results.value.length
+);
 const currentHasMore = computed(
-  () => activePlatform.value !== 'all' && (hasMoreMap.value[pageKey(activeCategory.value, activePlatform.value)] ?? false)
+  () =>
+    activePlatform.value !== 'all' &&
+    currentCount.value < MAX_RENDER_RESULTS &&
+    (hasMoreMap.value[pageKey(activeCategory.value, activePlatform.value)] ?? false)
 );
 
 const categories = computed(() => [
@@ -327,6 +337,8 @@ async function loadMore() {
   const type = activeCategory.value;
   const source = activePlatform.value;
   const current = type === 'albums' ? albums.value : type === 'playlists' ? playlists.value : results.value;
+  // DOM 无虚拟化，累积结果封顶（review P3）：超出后隐藏“加载更多”
+  if (current.length >= MAX_RENDER_RESULTS) return;
   loadingMore.value = true;
   try {
     const res = await http.get('/api/music/search', {
@@ -418,3 +430,11 @@ onMounted(async () => {
   }
 });
 </script>
+
+<style scoped>
+/* 跳出视口的网格卡片不参与渲染/布局（review P3） */
+.grid > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 260px;
+}
+</style>

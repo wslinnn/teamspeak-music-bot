@@ -50,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
 import { usePlayerStore, type Song } from '../stores/player.js';
@@ -69,6 +69,14 @@ const loading = ref(true);
 const loadingMore = ref(false);
 const hasMore = ref(false);
 const query = ref('');
+// 1000 行全量扫描的过滤不宜每键触发：200ms 防抖后再进 computed
+const debouncedQuery = ref('');
+let queryTimer: ReturnType<typeof setTimeout> | null = null;
+watch(query, (v) => {
+  if (queryTimer) clearTimeout(queryTimer);
+  queryTimer = setTimeout(() => { debouncedQuery.value = v; }, 200);
+});
+onUnmounted(() => { if (queryTimer) clearTimeout(queryTimer); });
 
 // 当前播放对应"该歌最新的一次播放事件"＝列表中第一条 id+platform 匹配的行
 //（播放开始即写入历史、倒序排列）；同曲的更早记录不亮
@@ -81,8 +89,8 @@ const currentHistoryIndex = computed(() => {
 });
 
 const filteredHistory = computed(() => {
-  if (!query.value.trim()) return history.value;
-  const q = query.value.toLowerCase();
+  if (!debouncedQuery.value.trim()) return history.value;
+  const q = debouncedQuery.value.toLowerCase();
   return history.value.filter(
     (s) => s.name.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q)
   );
@@ -137,3 +145,11 @@ onMounted(async () => {
   await loadHistory();
 });
 </script>
+
+<style scoped>
+/* 跳出视口的行不参与渲染/布局（无虚拟化列表的低成本替代，review P3） */
+.flex.flex-col > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+</style>

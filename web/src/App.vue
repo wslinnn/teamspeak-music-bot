@@ -39,10 +39,23 @@ watch(theme, (t) => {
 }, { immediate: true });
 
 let syncTimer: ReturnType<typeof setInterval> | null = null;
+let pausedTicks = 0;
 
 function startSyncTimer() {
   if (syncTimer) return;
-  syncTimer = setInterval(() => playerStore.syncElapsed(), 3000);
+  syncTimer = setInterval(() => {
+    const bot = playerStore.activeBot;
+    // 没有选中 bot 或空闲（无当前曲目）→ 无可同步的进度，跳过本次请求
+    if (!bot || !bot.currentSong) return;
+    if (!bot.playing) {
+      // 暂停态进度静止，轮询只为自愈错过的 WS 状态事件——降到 ~15s 一次
+      pausedTicks = (pausedTicks + 1) % 5;
+      if (pausedTicks !== 0) return;
+    } else {
+      pausedTicks = 0;
+    }
+    playerStore.syncElapsed();
+  }, 3000);
 }
 
 function stopSyncTimer() {

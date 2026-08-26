@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useFavoritesStore, type Favorite } from '../stores/favorites';
 import { usePlayerStore, type Song } from '../stores/player';
@@ -52,10 +52,18 @@ import SkeletonLoader from '../components/common/SkeletonLoader.vue';
 const store = useFavoritesStore();
 const playerStore = usePlayerStore();
 const query = ref('');
+// 收藏无上限，全量过滤按 200ms 防抖后再进 computed
+const debouncedQuery = ref('');
+let queryTimer: ReturnType<typeof setTimeout> | null = null;
+watch(query, (v) => {
+  if (queryTimer) clearTimeout(queryTimer);
+  queryTimer = setTimeout(() => { debouncedQuery.value = v; }, 200);
+});
+onUnmounted(() => { if (queryTimer) clearTimeout(queryTimer); });
 
 const filteredFavorites = computed(() => {
-  if (!query.value.trim()) return store.favorites;
-  const q = query.value.toLowerCase();
+  if (!debouncedQuery.value.trim()) return store.favorites;
+  const q = debouncedQuery.value.toLowerCase();
   return store.favorites.filter(
     (f) => f.title.toLowerCase().includes(q) || f.artist.toLowerCase().includes(q)
   );
@@ -85,3 +93,11 @@ onMounted(() => {
   store.fetchFavorites();
 });
 </script>
+
+<style scoped>
+/* 跳出视口的行不参与渲染/布局（无虚拟化列表的低成本替代，review P3） */
+.flex.flex-col > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+</style>

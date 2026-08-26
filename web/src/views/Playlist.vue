@@ -142,3 +142,11 @@ onMounted(() => {
   loadPlaylist();
 });
 </script>
+
+<style scoped>
+/* 跳出视口的行不参与渲染/布局（无虚拟化列表的低成本替代，review P3） */
+.flex.flex-col > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+</style>
