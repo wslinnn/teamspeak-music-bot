@@ -124,6 +124,51 @@ describe("BotInstance.runExclusive — serialization", () => {
   });
 });
 
+describe("BotInstance.executeCommand — mutating commands run under the play gate", () => {
+  const executeCommandFn = BotInstance.prototype.executeCommand as (
+    this: unknown,
+    cmd: ReturnType<typeof parseCommand>,
+    msg?: unknown,
+    requesterName?: string,
+  ) => Promise<string | null>;
+
+  it("blocks !clear behind an in-flight exclusive section, runs !now immediately", async () => {
+    const ctx: any = {
+      connected: true,
+      playGate: Promise.resolve(),
+      runExclusive: BotInstance.prototype.runExclusive,
+      config: { commandPrefix: "!", playKeepsQueue: false },
+      queue: { clear: vi.fn(), current: vi.fn(() => null) },
+      player: { stop: vi.fn(), resetFailures: vi.fn() },
+      spotifyController: { stop: vi.fn() },
+      sweepLocalAudio: vi.fn(),
+      disableFmMode: vi.fn(),
+      profileManager: { onSongChange: vi.fn(async () => {}) },
+      cmdNow: (BotInstance.prototype as any).cmdNow,
+      cmdClear: (BotInstance.prototype as any).cmdClear,
+      emit: vi.fn(),
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    };
+    const gateA = deferred();
+    const holder = runExclusive.call(ctx, () => gateA.promise);
+
+    const cleared = executeCommandFn.call(ctx, parseCommand("!clear", "!"), undefined, "tester");
+    const now = executeCommandFn.call(ctx, parseCommand("!now", "!"), undefined, "tester");
+
+    // Read-only commands bypass the gate: completes even while the holder runs.
+    await expect(now).resolves.toContain("Nothing is playing");
+    // The mutating command must NOT have touched the queue yet.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(ctx.queue.clear).not.toHaveBeenCalled();
+
+    gateA.resolve();
+    await holder;
+    await expect(cleared).resolves.toBe("Queue cleared");
+    expect(ctx.queue.clear).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("BotInstance voice-ducking lifecycle integration", () => {
   const connect = BotInstance.prototype.connect as unknown as (
     this: Record<string, any>,
@@ -1460,6 +1505,9 @@ describe("BotInstance live-queue persistence (#119)", () => {
       player: makePlayer119(),
       resolveAndPlay: vi.fn(async () => true),
       getProviderFor: vi.fn(() => ({ platform: "netease" })),
+      // restoreQueueFromSnapshot serializes on the play gate
+      playGate: Promise.resolve(),
+      runExclusive: BotInstance.prototype.runExclusive,
     } as any;
   }
 

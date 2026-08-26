@@ -851,7 +851,30 @@ export class BotInstance extends EventEmitter {
     if (!this.connected && AUDIO_COMMANDS.has(cmd.name)) {
       throw new Error("Bot is not connected to TeamSpeak");
     }
-    switch (cmd.name) {
+    // Commands that mutate the queue or playback run under the same playGate
+    // the WebUI's runExclusive routes use — otherwise a chat !play can
+    // interleave with (say) an in-flight /play-song between its queue
+    // mutation and resolveAndPlay, breaking "audible track ==
+    // queue.currentIndex". Read-only commands (search/now/queue/lyrics/help)
+    // stay lock-free so a slow search never delays playback. Handlers
+    // themselves must NOT re-acquire runExclusive (the gate is not
+    // reentrant) — their other callers wrap externally instead.
+    const GATED_COMMANDS = new Set([
+      ...AUDIO_COMMANDS,
+      "pause",
+      "resume",
+      "stop",
+      "clear",
+      "remove",
+      "reorder",
+      "vol",
+      "mode",
+      "load",
+      "save",
+      "vote",
+    ]);
+    const dispatch = async (): Promise<string | null> => {
+      switch (cmd.name) {
       case "search":
       case "find":
         return this.cmdSearch(cmd);
@@ -914,7 +937,9 @@ export class BotInstance extends EventEmitter {
         return this.cmdHelp();
       default:
         return `Unknown command: ${cmd.name}. Type ${this.config.commandPrefix}help for help.`;
-    }
+      }
+    };
+    return GATED_COMMANDS.has(cmd.name) ? this.runExclusive(dispatch) : dispatch();
   }
 
   getProviderFor(platform: Platform): MusicProvider {
@@ -1878,36 +1903,40 @@ export class BotInstance extends EventEmitter {
    *  elapsed). Spotify resume depends on the sidecar being available. */
   private async restoreQueueFromSnapshot(): Promise<void> {
     if (!this.config.savedQueuesEnabled) return;
-    let st;
-    try {
-      st = this.database.getQueueState(this.id);
-    } catch (err) {
-      this.logger.warn({ err }, "queue snapshot restore failed to read state");
-      return;
-    }
-    if (!st || st.songs.length === 0) return;
-    this.queue.restore({
-      // 旧快照的 Jellyfin 封面可能内嵌 api_key（代理化之前写入），恢复时改写
-      songs: st.songs.map((s) => ({ ...s, coverUrl: sanitizeJellyfinCoverUrl(s.coverUrl ?? "") })),
-      currentIndex: st.currentIndex,
-      mode: st.mode as PlayMode,
+    // Under the play gate: a chat command racing the restore's URL-resolve
+    // await would otherwise interleave with the queue rebuild.
+    await this.runExclusive(async () => {
+      let st;
+      try {
+        st = this.database.getQueueState(this.id);
+      } catch (err) {
+        this.logger.warn({ err }, "queue snapshot restore failed to read state");
+        return;
+      }
+      if (!st || st.songs.length === 0) return;
+      this.queue.restore({
+        // 旧快照的 Jellyfin 封面可能内嵌 api_key（代理化之前写入），恢复时改写
+        songs: st.songs.map((s) => ({ ...s, coverUrl: sanitizeJellyfinCoverUrl(s.coverUrl ?? "") })),
+        currentIndex: st.currentIndex,
+        mode: st.mode as PlayMode,
+      });
+      if (st.isFmMode && st.fmPlatform) {
+        this.isFmMode = true;
+        this.fmProvider = this.getProviderFor(st.fmPlatform as Platform);
+      }
+      // 忠实恢复：关机前在播 → 从当前曲重新起播（URL 重解析，进度归零）；
+      // 关机前是暂停/空闲 → 只恢复队列不出声（播放器保持 idle，用户点播放经
+      // cmdResume 的 idle 起播语义从当前曲开始）。频道无人时由自动暂停兜底。
+      const current = this.queue.current();
+      if (current && st.wasPlaying) {
+        this.player.resetFailures();
+        await this.resolveAndPlay(current);
+      }
+      this.logger.info(
+        { count: st.songs.length, index: st.currentIndex, wasPlaying: st.wasPlaying },
+        "Restored live queue from snapshot",
+      );
     });
-    if (st.isFmMode && st.fmPlatform) {
-      this.isFmMode = true;
-      this.fmProvider = this.getProviderFor(st.fmPlatform as Platform);
-    }
-    // 忠实恢复：关机前在播 → 从当前曲重新起播（URL 重解析，进度归零）；
-    // 关机前是暂停/空闲 → 只恢复队列不出声（播放器保持 idle，用户点播放经
-    // cmdResume 的 idle 起播语义从当前曲开始）。频道无人时由自动暂停兜底。
-    const current = this.queue.current();
-    if (current && st.wasPlaying) {
-      this.player.resetFailures();
-      await this.resolveAndPlay(current);
-    }
-    this.logger.info(
-      { count: st.songs.length, index: st.currentIndex, wasPlaying: st.wasPlaying },
-      "Restored live queue from snapshot",
-    );
   }
 
   private cmdHelp(): string {

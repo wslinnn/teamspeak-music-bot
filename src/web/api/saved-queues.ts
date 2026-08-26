@@ -112,7 +112,9 @@ export function createSavedQueuesRouter(
       return;
     }
     const loadMode = mode === "append" ? "append" : "replace";
-    await bot.loadSavedQueue(sq.songs, loadMode, username || "游客");
+    // Under the bot's play gate: loadSavedQueue mutates the queue across an
+    // await (resolveAndPlay) and must not interleave with a concurrent play.
+    await bot.runExclusive(() => bot.loadSavedQueue(sq.songs, loadMode, username || "游客"));
     res.json({ ok: true, loaded: sq.songs.length, mode: loadMode });
   });
 

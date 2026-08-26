@@ -24,6 +24,8 @@ function mount(enabled: boolean, opts: { queue?: unknown[] } = {}) {
     loadSavedQueue: async (songs: unknown[], mode: string, by?: string) => {
       loads.push({ songs, mode, by });
     },
+    // The load route serializes on the bot's play gate (real bots carry it).
+    runExclusive: (fn: () => Promise<unknown>) => fn(),
   };
   const botManager = { getBot: (_id: string) => bot } as unknown as BotManager;
   const app = express();
