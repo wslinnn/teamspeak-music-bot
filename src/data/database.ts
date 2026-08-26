@@ -275,6 +275,22 @@ function migrateSchema(db: Database.Database): void {
   }
 }
 
+/** 播放历史保留上限（全局行数）。每首歌一行且无清理时 24/7 FM 一年约 17.5 万行/bot，
+ * 历史查询（botId 过滤 + id 倒序）会随行数变慢并阻塞事件循环；启动时裁掉最旧的溢出行。 */
+const PLAY_HISTORY_RETENTION_ROWS = 100_000;
+
+function prunePlayHistory(db: Database.Database): void {
+  // `id <=` 含边界：OFFSET N 取到第 N+1 新的行并连同更旧的一起删除 → 恰好保留最新 N 行。
+  // 行数不足上限时子查询为 NULL，`id <= NULL` 不命中任何行 → no-op。
+  db
+    .prepare(
+      `DELETE FROM play_history WHERE id <= (
+         SELECT id FROM play_history ORDER BY id DESC LIMIT 1 OFFSET ?
+       )`,
+    )
+    .run(PLAY_HISTORY_RETENTION_ROWS);
+}
+
 function initTables(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS play_history (
@@ -290,6 +306,8 @@ function initTables(db: Database.Database): void {
       duration REAL NOT NULL DEFAULT 0,
       playedAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE INDEX IF NOT EXISTS idx_play_history_botId_id
+      ON play_history(botId, id DESC);
 
     CREATE TABLE IF NOT EXISTS bot_instances (
       id TEXT PRIMARY KEY,
@@ -449,6 +467,7 @@ export function createDatabase(dbPath: string): BotDatabase {
   db.pragma("foreign_keys = ON");
   initTables(db);
   migrateSchema(db);
+  prunePlayHistory(db);
   backfillMemberPermissions(db);
   ensureGuestUser(db);
 

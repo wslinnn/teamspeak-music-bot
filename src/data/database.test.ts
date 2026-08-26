@@ -27,6 +27,35 @@ describe("database", () => {
     expect(names).toContain("bot_instances");
   });
 
+  it("indexes play_history(botId, id) and startup prune keeps the newest rows", () => {
+    const indexes = botDb.db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+      .all() as Array<{ name: string }>;
+    expect(indexes.map((i) => i.name)).toContain("idx_play_history_botId_id");
+
+    // The loader's prune keeps the N newest rows (`id <=` is inclusive):
+    // OFFSET 2 keeps the newest 2. Under the cap the subquery yields NULL → no-op.
+    const insert = botDb.db.prepare(
+      "INSERT INTO play_history (botId, songId, songName, artist, album, platform, coverUrl) VALUES ('bot-1', ?, 'n', 'a', '', 'netease', '')"
+    );
+    for (let i = 0; i < 5; i++) insert.run(`s${i}`);
+    botDb.db
+      .prepare(
+        "DELETE FROM play_history WHERE id <= (SELECT id FROM play_history ORDER BY id DESC LIMIT 1 OFFSET 2)"
+      )
+      .run();
+    const rows = botDb.db.prepare("SELECT songId FROM play_history ORDER BY id ASC").all() as Array<{ songId: string }>;
+    expect(rows.map((r) => r.songId)).toEqual(["s3", "s4"]);
+
+    // No-op when under the cap: the OFFSET subquery yields NULL and deletes nothing.
+    botDb.db
+      .prepare(
+        "DELETE FROM play_history WHERE id <= (SELECT id FROM play_history ORDER BY id DESC LIMIT 1 OFFSET 100)"
+      )
+      .run();
+    expect((botDb.db.prepare("SELECT COUNT(*) AS n FROM play_history").get() as { n: number }).n).toBe(2);
+  });
+
   it("creates users and sessions tables on init", () => {
     const tables = botDb.db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
