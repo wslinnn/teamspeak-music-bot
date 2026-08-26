@@ -57,6 +57,24 @@ export function createLocalUploadBody(limit: string): express.RequestHandler {
 
 const localUploadBody = createLocalUploadBody(LOCAL_UPLOAD_LIMIT);
 
+// One upload at a time, process-wide (review P2): express.raw buffers the WHOLE
+// body in memory, so concurrent uploads multiply peak RAM by the concurrency.
+// Serializing bounds it to a single LOCAL_UPLOAD_LIMIT buffer. Checked BEFORE
+// the body parser so a queued attacker never even gets buffered.
+let localUploadInFlight = false;
+const localUploadGate: express.RequestHandler = (_req, res, next) => {
+  if (localUploadInFlight) {
+    res.status(429).json({ error: "已有上传进行中，请稍后重试" });
+    return;
+  }
+  localUploadInFlight = true;
+  // 'close' fires on finish, abort and error alike — idempotent release.
+  res.on("close", () => {
+    localUploadInFlight = false;
+  });
+  next();
+};
+
 export function createMusicRouter(
   neteaseProvider: MusicProvider,
   qqProvider: MusicProvider,
@@ -115,6 +133,7 @@ export function createMusicRouter(
       }
       next();
     },
+    localUploadGate,
     localUploadBody,
     async (req, res) => {
       try {

@@ -465,3 +465,58 @@ describe("music router POST /local/upload — content types and size cap (#149)"
     expect(uploadAudio).not.toHaveBeenCalled();
   });
 });
+
+describe("POST /local/upload — concurrency gate (review P2)", () => {
+  it("429s a second upload while one is in flight, then accepts again", async () => {
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((r) => (releaseA = r));
+    const local = {
+      platform: "local",
+      search: vi.fn().mockResolvedValue({ songs: [], albums: [], playlists: [] }),
+      getQuality: vi.fn().mockReturnValue("original"),
+      uploadAudio: vi.fn(async () => {
+        await gateA;
+        return { id: "u1", name: "n", platform: "local" };
+      }),
+    } as unknown as MusicProvider;
+    const router = createMusicRouter(
+      fakeProvider("netease"),
+      fakeProvider("qq"),
+      fakeProvider("bilibili"),
+      pino({ level: "silent" }),
+      local,
+      undefined,
+    );
+    const app = express();
+    app.use((req, _res, next) => {
+      (req as unknown as { user: unknown }).user = {
+        id: "u1", username: "alice", role: "member",
+        capabilities: new Set(["player.queue"]), bots: "all" as const,
+      };
+      next();
+    });
+    app.use("/api/music", router);
+
+    // .then() actually dispatches the supertest request (a bare Test defers).
+    const aStarted = request(app)
+      .post("/api/music/local/upload")
+      .set("Content-Type", "audio/mpeg")
+      .send(Buffer.from("aaaa"))
+      .then((res) => res);
+    await new Promise((r) => setTimeout(r, 50)); // let A reach the gate first
+    const b = await request(app)
+      .post("/api/music/local/upload")
+      .set("Content-Type", "audio/mpeg")
+      .send(Buffer.from("bbbb"));
+    expect(b.status).toBe(429);
+    releaseA();
+    const aRes = await aStarted;
+    expect(aRes.status).toBe(200);
+
+    const c = await request(app)
+      .post("/api/music/local/upload")
+      .set("Content-Type", "audio/mpeg")
+      .send(Buffer.from("cccc"));
+    expect(c.status).toBe(200);
+  });
+});
