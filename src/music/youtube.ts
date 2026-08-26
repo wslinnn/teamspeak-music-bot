@@ -180,7 +180,9 @@ export class YouTubeProvider implements MusicProvider {
 
   async getPlaylistSongs(playlistId: string): Promise<Song[]> {
     try {
-      const url = playlistId.startsWith("http")
+      // Only http(s) URLs pass through verbatim (startsWith("http") would also
+      // admit strings like "httpx://…"); anything else is treated as a list id.
+      const url = /^https?:\/\//i.test(playlistId)
         ? playlistId
         : `https://www.youtube.com/playlist?list=${playlistId}`;
       const raw = await runYtDlp([

@@ -1026,6 +1026,22 @@ export class BotInstance extends EventEmitter {
         this.logger.warn({ songId: song.id, name: song.name }, "No URL available, skipping");
         return false;
       }
+      // Scheme allowlist (review S5): http(s) URLs, the spotify: sentinel, and
+      // plain filesystem paths (local uploads carry no scheme). Any other
+      // scheme:// prefix (file:, concat:, rtp:, …) is refused — ffmpeg honors
+      // those protocols and a hostile platform response must not be able to
+      // point playback at local files or other protocols.
+      if (
+        !/^https?:\/\//i.test(result.url) &&
+        !isSpotifyUri(result.url) &&
+        /^[a-z][a-z0-9+.-]*:\/\//i.test(result.url)
+      ) {
+        this.logger.warn(
+          { songId: song.id, platform: song.platform, scheme: result.url.split(":")[0] },
+          "Refusing playback URL with a non-http scheme — skipping",
+        );
+        return false;
+      }
       // 时长回填：播放历史等来源的歌曲可能缺 duration——进度条增长与点击
       // 跳转都依赖它（除以 0 会导致进度条不动、每次点击跳回开头）。按
       // songId 重新解析详情补全，失败不阻塞播放。

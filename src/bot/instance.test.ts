@@ -1596,3 +1596,40 @@ describe("BotInstance live-queue persistence (#119)", () => {
     }
   });
 });
+describe("BotInstance.resolveAndPlay — playback URL scheme allowlist (review S5)", () => {
+  it("refuses file:/concat: style URLs but allows http(s), spotify:, and plain paths", async () => {
+    const ctx: any = {
+      connected: true,
+      voteSkipUsers: new Set(),
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      getProviderFor: () => ({
+        getSongUrl: vi.fn(async (id: string) => ({ url: id })),
+      }),
+    };
+    const songOf = (id: string) => ({ id, name: "x", platform: "netease", artist: "", album: "", coverUrl: "", duration: 0 });
+    // Legitimate inputs pass the guard (they may fail later in the mocked
+    // network path, but never with the scheme-refusal warning).
+    for (const url of [
+      "https://cdn.example/a.mp3",
+      "http://cdn.example/a.mp3",
+      "spotify:track:abc",
+      "D:/data/uploads/uuid.mp3",
+      "/data/uploads/uuid.mp3",
+    ]) {
+      await resolveAndPlay.call(ctx, songOf(url));
+    }
+    expect(ctx.logger.warn).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "Refusing playback URL with a non-http scheme — skipping",
+    );
+
+    for (const url of ["file:///etc/passwd", "concat:///a|/b", "rtp://x"]) {
+      const ok = await resolveAndPlay.call(ctx, songOf(url));
+      expect(ok).toBe(false);
+    }
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      expect.anything(),
+      "Refusing playback URL with a non-http scheme — skipping",
+    );
+  });
+});

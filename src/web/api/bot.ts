@@ -216,7 +216,13 @@ export function createBotRouter(
     if (jf && typeof jf === "object") {
       const t = config.jellyfin;
       if (typeof jf.serverUrl === "string") {
-        t.serverUrl = jf.serverUrl.trim().replace(/\/+$/, "");
+        // Scheme allowlist (review S5): the server fetches this URL on the
+        // operator's behalf — anything outside http(s) (file:, ftp:, …) is
+        // rejected rather than stored.
+        const trimmedUrl = jf.serverUrl.trim().replace(/\/+$/, "");
+        if (trimmedUrl === "" || /^https?:\/\//i.test(trimmedUrl)) {
+          t.serverUrl = trimmedUrl;
+        }
       }
       if (jf.authMode === "userpass" || jf.authMode === "apikey") t.authMode = jf.authMode;
       if (typeof jf.username === "string") t.username = jf.username;
