@@ -155,7 +155,22 @@ export class BotProfileManager {
   }
 
   updateConfig(partial: Partial<ProfileConfig>): void {
-    Object.assign(this.config, partial);
+    // Whitelist the known boolean fields only. The web route feeds this the
+    // RAW request body — a deep Object.assign would let a `__proto__` key
+    // re-prototype the live config and persist arbitrary junk fields.
+    const keys = [
+      "avatarEnabled",
+      "descriptionEnabled",
+      "nicknameEnabled",
+      "awayStatusEnabled",
+      "channelDescEnabled",
+      "nowPlayingMsgEnabled",
+    ] as const;
+    for (const k of keys) {
+      if (typeof partial[k] === "boolean") {
+        this.config[k] = partial[k];
+      }
+    }
   }
 
   // --- Internal update methods ---

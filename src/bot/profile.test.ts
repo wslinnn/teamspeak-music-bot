@@ -202,3 +202,31 @@ describe("BotProfileManager loadCustomAvatar (pre-connect load, #148)", () => {
     expect(ts.uploadCalls[0].equals(Buffer.from([2, 2]))).toBe(true);
   });
 });
+
+describe("BotProfileManager.updateConfig — field whitelist (review S2)", () => {
+  it("applies only known boolean fields and ignores junk/__proto__ keys", () => {
+    const ts = makeMockTs();
+    const pm = new BotProfileManager(ts as any, noopLogger, { ...cfgOn }, "Bot");
+    pm.updateConfig({
+      avatarEnabled: false,
+      descriptionEnabled: true,
+      // @ts-expect-error deliberate junk beyond ProfileConfig
+      __proto__: { injected: true },
+      // @ts-expect-error deliberate junk beyond ProfileConfig
+      bogusField: "x",
+    } as any);
+    const cfg = pm.getConfig();
+    expect(cfg.avatarEnabled).toBe(false);
+    expect(cfg.descriptionEnabled).toBe(true);
+    // Unknown keys never land on the config object (own or inherited).
+    expect((cfg as any).bogField).toBeUndefined();
+    expect(Object.keys(cfg).sort()).toEqual([
+      "avatarEnabled",
+      "awayStatusEnabled",
+      "channelDescEnabled",
+      "descriptionEnabled",
+      "nicknameEnabled",
+      "nowPlayingMsgEnabled",
+    ]);
+  });
+});
