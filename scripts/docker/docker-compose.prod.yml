@@ -1,10 +1,11 @@
 # TSMusicBot — Docker Compose (预构建镜像版，Linux)
 # 用法：
-#   1. docker load -i tsmusicbot-v1.x.x.tar.gz
+#   1. docker load -i tsmusicbot-v2.x.x.tar.gz   # 注意：tar.gz 仅含 amd64 镜像，
+#      ARM 服务器请改用 GHCR 拉取渠道（docker-compose.yml，多架构）
 #   2. cd scripts/docker && docker-compose -f docker-compose.prod.yml up -d
 #
 # 或指定镜像版本：
-#   TSMUSICBOT_IMAGE=tsmusicbot:v1.0.0 docker-compose -f docker-compose.prod.yml up -d
+#   TSMUSICBOT_IMAGE=tsmusicbot:v2.0.0 docker-compose -f docker-compose.prod.yml up -d
 
 services:
   tsmusicbot:
@@ -14,6 +15,9 @@ services:
     network_mode: host
     volumes:
       - tsmusicbot-data:/app/data
+      # 可选：把宿主机的 yt-dlp / go-librespot（Linux）挂进容器启用
+      # YouTube / Spotify 音源，见 README「可选：YouTube 音源」
+      # - ./bin:/app/bin
     environment:
       - NODE_ENV=production
     healthcheck:

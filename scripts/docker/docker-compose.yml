@@ -26,6 +26,9 @@ services:
     #   - "9987:9987/udp" # TS3 voice (only if TS3 server is in another container)
     volumes:
       - tsmusicbot-data:/app/data
+      # 可选：把宿主机的 yt-dlp / go-librespot（Linux）挂进容器启用
+      # YouTube / Spotify 音源，见 README「可选：YouTube 音源」
+      # - ./bin:/app/bin
     restart: unless-stopped
     environment:
       - NODE_ENV=production
