@@ -3,10 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    # 纯文档提交不触发安装+测试+构建（规则仅在提交的全部文件都命中时生效）
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
   pull_request:
   # 文档提交被路径过滤跳过时，也可手动触发
   workflow_dispatch:
