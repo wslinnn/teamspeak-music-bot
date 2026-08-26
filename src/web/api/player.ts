@@ -4,6 +4,7 @@ import type { BotDatabase } from "../../data/database.js";
 import type { MusicProvider } from "../../music/provider.js";
 import type { Logger } from "../../logger.js";
 import { parseCommand } from "../../bot/commands.js";
+import { sanitizeJellyfinCoverUrl } from "../../music/jellyfin.js";
 import { requireBotAccess } from "../middleware/requirePermission.js";
 import { authorize } from "../middleware/authorize.js";
 
@@ -731,7 +732,8 @@ export function createPlayerRouter(
       artist: r.artist,
       album: r.album,
       duration: r.duration ?? 0,
-      coverUrl: r.coverUrl,
+      // 存量行可能带旧版内嵌 api_key 的 Jellyfin 封面直链，出库即改写为代理路径
+      coverUrl: sanitizeJellyfinCoverUrl(r.coverUrl),
       platform: r.platform,
       playedAt: r.playedAt,
       requestedBy: r.requestedBy,

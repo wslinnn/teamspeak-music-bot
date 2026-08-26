@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import express from "express";
 import cookieParser from "cookie-parser";
 import request from "supertest";
@@ -115,6 +115,33 @@ describe("music router provider gating (enabledProviders) + jellyfin endpoints",
     const res = await request(app).get("/api/music/search?q=hello&platform=jellyfin");
     expect(res.status).toBe(200);
     expect(jellyfin.search).toHaveBeenCalledWith("hello", 20, 0);
+  });
+
+  it("GET /jellyfin/cover/:itemId proxies image bytes server-side", async () => {
+    const config = getDefaultConfig();
+    config.enabledProviders = [...config.enabledProviders, "jellyfin"];
+    const { app, jellyfin } = mount(config);
+    (jellyfin as unknown as { getCoverImage: Mock }).getCoverImage = vi
+      .fn()
+      .mockResolvedValue({ data: Buffer.from("fakejpg"), contentType: "image/jpeg" });
+    const res = await request(app).get("/api/music/jellyfin/cover/abc123");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("image/jpeg");
+    expect(res.headers["cache-control"]).toContain("private");
+    expect((jellyfin as unknown as { getCoverImage: Mock }).getCoverImage).toHaveBeenCalledWith("abc123");
+  });
+
+  it("GET /jellyfin/cover/:itemId 404s when the image is missing, 400 when disabled", async () => {
+    const config = getDefaultConfig();
+    config.enabledProviders = [...config.enabledProviders, "jellyfin"];
+    const { app, jellyfin } = mount(config);
+    (jellyfin as unknown as { getCoverImage: Mock }).getCoverImage = vi
+      .fn()
+      .mockResolvedValue(null);
+    expect((await request(app).get("/api/music/jellyfin/cover/abc123")).status).toBe(404);
+    // Disabled provider → jellyfinOrReject 400 before touching the provider.
+    const off = mount(getDefaultConfig());
+    expect((await request(off.app).get("/api/music/jellyfin/cover/abc123")).status).toBe(400);
   });
 
   it("GET /providers reports enabled sources and the default platform", async () => {

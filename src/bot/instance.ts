@@ -25,6 +25,7 @@ import {
   type VoiceDuckingConfig,
 } from "../data/config.js";
 import type { JellyfinPlaybackReporter } from "../music/jellyfin.js";
+import { sanitizeJellyfinCoverUrl } from "../music/jellyfin.js";
 import { BotProfileManager } from "./profile.js";
 import type { AvatarStore } from "../data/avatars.js";
 import { decideOccupancyAction, shouldResumeOnReturn } from "./auto-pause.js";
@@ -1281,8 +1282,12 @@ export class BotInstance extends EventEmitter {
     mode: "replace" | "append",
     requesterName?: string,
   ): Promise<void> {
+    // 存量快照可能带旧版内嵌 api_key 的 Jellyfin 封面直链，载入即改写为代理路径
     const tagged = songs.map((s) =>
-      this.withRequester({ ...(s as QueuedSong) }, requesterName),
+      this.withRequester(
+        { ...(s as QueuedSong), coverUrl: sanitizeJellyfinCoverUrl(s.coverUrl ?? "") },
+        requesterName,
+      ),
     );
     if (mode === "replace") {
       this.player.stop();
@@ -1882,7 +1887,8 @@ export class BotInstance extends EventEmitter {
     }
     if (!st || st.songs.length === 0) return;
     this.queue.restore({
-      songs: st.songs,
+      // 旧快照的 Jellyfin 封面可能内嵌 api_key（代理化之前写入），恢复时改写
+      songs: st.songs.map((s) => ({ ...s, coverUrl: sanitizeJellyfinCoverUrl(s.coverUrl ?? "") })),
       currentIndex: st.currentIndex,
       mode: st.mode as PlayMode,
     });

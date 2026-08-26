@@ -1,5 +1,12 @@
 import { Router } from "express";
 import type { BotDatabase } from "../../data/database.js";
+import { sanitizeJellyfinCoverUrl } from "../../music/jellyfin.js";
+
+/** Egress mapper: legacy rows may carry Jellyfin covers with an embedded
+ *  api_key (pre-proxy writes) — rewrite them to the token-free proxy path. */
+function sanitizeList<T extends { coverUrl?: string }>(favorites: T[]): T[] {
+  return favorites.map((f) => ({ ...f, coverUrl: sanitizeJellyfinCoverUrl(f.coverUrl ?? "") }));
+}
 
 /**
  * Song favorites (fork feature): PER-USER song favorites, isolated by the
@@ -16,7 +23,7 @@ export function createSongFavoritesRouter(
 
   router.get("/", (req, res) => {
     try {
-      const favorites = database.getSongFavorites(req.user!.id);
+      const favorites = sanitizeList(database.getSongFavorites(req.user!.id));
       res.json({ favorites });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
@@ -45,13 +52,13 @@ export function createSongFavoritesRouter(
         const e = insErr as { code?: string };
         if (e?.code === "SQLITE_CONSTRAINT_UNIQUE") {
           // 红心状态过期（WS 事件丢失等）：已收藏过，幂等成功即可
-          res.json({ success: true, favorites: database.getSongFavorites(userId) });
+          res.json({ success: true, favorites: sanitizeList(database.getSongFavorites(userId)) });
           return;
         }
         throw insErr;
       }
       broadcast({ type: "favoritesChanged" });
-      res.json({ success: true, favorites: database.getSongFavorites(userId) });
+      res.json({ success: true, favorites: sanitizeList(database.getSongFavorites(userId)) });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
     }
@@ -70,7 +77,7 @@ export function createSongFavoritesRouter(
         return;
       }
       broadcast({ type: "favoritesChanged" });
-      res.json({ success: true, favorites: database.getSongFavorites(req.user!.id) });
+      res.json({ success: true, favorites: sanitizeList(database.getSongFavorites(req.user!.id)) });
     } catch (err) {
       res.status(500).json({ success: false, error: (err as Error).message });
     }

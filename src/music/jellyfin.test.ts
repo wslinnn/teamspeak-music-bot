@@ -3,6 +3,7 @@ import {
   ticksToSeconds,
   TICKS_PER_SECOND,
   buildCoverUrl,
+  sanitizeJellyfinCoverUrl,
   buildStreamUrl,
   buildUniversalUrl,
   mapJellyfinSong,
@@ -84,21 +85,31 @@ describe("Jellyfin mapping helpers", () => {
     expect(pl).toMatchObject({ id: "p1", songCount: 7, platform: "jellyfin" });
   });
 
-  it("cover URL prefers the item's Primary image, falls back to the album's", () => {
-    const own = buildCoverUrl("https://jf", "K", {
+  it("cover URL is a same-origin proxy path (token never reaches the client)", () => {
+    const own = buildCoverUrl({
       Id: "i1",
       ImageTags: { Primary: "tag1" },
       AlbumId: "a1",
       AlbumPrimaryImageTag: "tag2",
     });
-    expect(own).toBe("https://jf/Items/i1/Images/Primary?maxWidth=512&tag=tag1&api_key=K");
-    const album = buildCoverUrl("https://jf", "K", {
+    expect(own).toBe("/api/music/jellyfin/cover/i1");
+    const album = buildCoverUrl({
       Id: "i1",
       AlbumId: "a1",
       AlbumPrimaryImageTag: "tag2",
     });
-    expect(album).toBe("https://jf/Items/a1/Images/Primary?maxWidth=512&tag=tag2&api_key=K");
-    expect(buildCoverUrl("https://jf", "K", { Id: "i1" })).toBe("");
+    expect(album).toBe("/api/music/jellyfin/cover/a1");
+    expect(buildCoverUrl({ Id: "i1" })).toBe("");
+  });
+
+  it("sanitizes legacy stored cover URLs that embed the api_key", () => {
+    expect(
+      sanitizeJellyfinCoverUrl("https://jf/Items/abc123/Images/Primary?maxWidth=512&tag=t&api_key=SECRET"),
+    ).toBe("/api/music/jellyfin/cover/abc123");
+    // No api_key → not a legacy leak, leave untouched.
+    expect(sanitizeJellyfinCoverUrl("https://cdn.example/x.jpg")).toBe("https://cdn.example/x.jpg");
+    expect(sanitizeJellyfinCoverUrl("/api/music/jellyfin/cover/abc123")).toBe("/api/music/jellyfin/cover/abc123");
+    expect(sanitizeJellyfinCoverUrl("")).toBe("");
   });
 
   it("builds direct and transcoded stream URLs", () => {

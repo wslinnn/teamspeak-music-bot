@@ -75,16 +75,35 @@ export interface JellyfinItem {
  * for missing art). The api_key query param authenticates browser <img> loads
  * and the TS-avatar download alike.
  */
-export function buildCoverUrl(baseUrl: string, apiKey: string, item: JellyfinItem): string {
-  if (!baseUrl) return "";
-  const key = apiKey ? `&api_key=${encodeURIComponent(apiKey)}` : "";
+/**
+ * Cover URL for a Jellyfin item. Returns a SAME-ORIGIN proxy path
+ * (`/api/music/jellyfin/cover/:id`), NEVER the raw Jellyfin URL — the raw
+ * form embeds the auth token as `api_key=`, and coverUrl travels to every
+ * API consumer (search results, queue broadcasts, stored favorites/history),
+ * including guests. The proxy route holds the token server-side.
+ */
+export function buildCoverUrl(item: JellyfinItem): string {
   if (item.ImageTags?.Primary) {
-    return `${baseUrl}/Items/${item.Id}/Images/Primary?maxWidth=512&tag=${item.ImageTags.Primary}${key}`;
+    return `/api/music/jellyfin/cover/${item.Id}`;
   }
   if (item.AlbumId && item.AlbumPrimaryImageTag) {
-    return `${baseUrl}/Items/${item.AlbumId}/Images/Primary?maxWidth=512&tag=${item.AlbumPrimaryImageTag}${key}`;
+    return `/api/music/jellyfin/cover/${item.AlbumId}`;
   }
   return "";
+}
+
+/**
+ * Rewrite a legacy stored coverUrl (pre-proxy rows in play_history /
+ * queue_state snapshots / favorites) into the token-free proxy path.
+ * Non-Jellyfin URLs pass through unchanged.
+ */
+export function sanitizeJellyfinCoverUrl(url: string): string {
+  if (typeof url !== "string") return url;
+  const m = url.match(/\/Items\/([^/?#]+)\/Images\/Primary/);
+  if (m && /[?&]api_key=/.test(url)) {
+    return `/api/music/jellyfin/cover/${m[1]}`;
+  }
+  return url;
 }
 
 /** Direct (untranscoded) stream URL — the default playback path. */
@@ -362,7 +381,7 @@ export class JellyfinProvider implements MusicProvider {
   // --- MusicProvider ---
 
   private coverFor(item: JellyfinItem): string {
-    return buildCoverUrl(this.cfg.serverUrl, this.token, item);
+    return buildCoverUrl(item);
   }
 
   private mapSongs(items: JellyfinItem[] | undefined | null): Song[] {
@@ -419,6 +438,25 @@ export class JellyfinProvider implements MusicProvider {
     });
     const item = res?.Items?.[0];
     return item ? mapJellyfinSong(item, this.coverFor(item)) : null;
+  }
+
+  /** Fetch the Primary image bytes server-side (token never leaves the process;
+   *  backs the /api/music/jellyfin/cover/:itemId proxy route). */
+  async getCoverImage(itemId: string): Promise<{ data: Buffer; contentType: string } | null> {
+    if (!this.isConfigured() || typeof itemId !== "string" || !/^[A-Za-z0-9-]+$/.test(itemId)) {
+      return null;
+    }
+    await this.ensureAuth();
+    const res = await this.api.request<ArrayBuffer>({
+      method: "get",
+      url: `${this.cfg.serverUrl}/Items/${itemId}/Images/Primary`,
+      params: { maxWidth: 512 },
+      headers: { "X-Emby-Token": this.token },
+      responseType: "arraybuffer",
+    });
+    const type = String(res.headers?.["content-type"] ?? "image/jpeg");
+    if (!/^image\//i.test(type)) return null;
+    return { data: Buffer.from(res.data), contentType: type };
   }
 
   async getPlaylistSongs(playlistId: string): Promise<Song[]> {

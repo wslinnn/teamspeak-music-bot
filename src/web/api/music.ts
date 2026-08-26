@@ -412,6 +412,8 @@ export function createMusicRouter(
     getFavoriteSongs?: (limit?: number) => Promise<Song[]>;
     getGenres?: (limit?: number) => Promise<{ id: string; name: string }[]>;
     getGenreSongs?: (genreId: string, limit?: number) => Promise<Song[]>;
+    /** Cover-proxy backing store: fetch image bytes with the server-side token. */
+    getCoverImage?: (itemId: string) => Promise<{ data: Buffer; contentType: string } | null>;
   };
   const jellyfinHome = jellyfinProvider as JellyfinHomeProvider | undefined;
 
@@ -487,6 +489,33 @@ export function createMusicRouter(
     } catch (err) {
       logger.error({ err }, "Jellyfin genre songs failed");
       res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  // Cover proxy. Jellyfin coverUrl is emitted as this same-origin path — the
+  // raw Jellyfin image URL embeds the auth token (api_key=) and must never
+  // reach a client (search results / queue broadcasts include guests). The
+  // token stays server-side; every authenticated session may fetch covers.
+  router.get("/jellyfin/cover/:itemId", async (req, res) => {
+    try {
+      const p = jellyfinOrReject(res);
+      if (!p) return;
+      if (!p.getCoverImage) {
+        res.status(501).json({ error: "Jellyfin cover proxy not available" });
+        return;
+      }
+      const img = await p.getCoverImage(req.params.itemId);
+      if (!img) {
+        res.status(404).end();
+        return;
+      }
+      res.set("Content-Type", img.contentType);
+      // Bytes are keyed by itemId; `private` because the route is session-gated.
+      res.set("Cache-Control", "private, max-age=86400");
+      res.send(img.data);
+    } catch (err) {
+      logger.warn({ err, itemId: req.params.itemId }, "Jellyfin cover proxy failed");
+      res.status(502).json({ error: "cover fetch failed" });
     }
   });
 
