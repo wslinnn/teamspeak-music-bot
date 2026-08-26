@@ -9,5 +9,14 @@ config.json
 cookies/
 .git/
 .claude/
+docs/
 docs/superpowers/
 test-*.ts
+# 宿主机的可选二进制（yt-dlp / librespot）与本地调试产物不进构建上下文；
+# 容器内如需这些二进制用卷挂载 ./bin:/app/bin。
+/bin/
+audio-worker/
+.workbuddy/
+*.log
+*_out.txt
+debug_worker.mjs

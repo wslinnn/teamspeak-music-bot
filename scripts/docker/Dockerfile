@@ -27,7 +27,8 @@ RUN npm run build
 
 # Install production dependencies (with native addons compiled) in the builder
 # so we don't need build tools in the production image.
-RUN rm -rf node_modules && npm ci --production && npm cache clean --force
+# (--omit=dev is the modern form; --production is deprecated in npm 10+.)
+RUN rm -rf node_modules && npm ci --omit=dev && npm cache clean --force
 
 # --- Stage 2: Production image ---
 FROM node:20-slim
