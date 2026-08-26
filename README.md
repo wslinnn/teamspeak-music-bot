@@ -26,15 +26,31 @@
 
 > v1.10.0 新增**可选**的 [Jellyfin](https://jellyfin.org/) 音源（由 [@ItsEricRao](https://github.com/ItsEricRao) 在 [PR #123](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot/pull/123) 中贡献）：连接自建 Jellyfin 服务器直接播放你自己的音乐库。默认关闭，在 **设置 → Jellyfin 音乐库** 一键开启；原有在线音源保持默认启用，行为不变。
 
-> **本 Fork 增补**（相对上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot)）：
+> ## 与上游的差异
 >
-> - **Tailwind CSS 4 重设计前端** — 深浅主题、移动端适配（底部抽屉播放控制）、通用组件库（上游为 SCSS）
+> 本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。
+>
+> **前端与体验**
+>
+> - **Tailwind CSS 4 全新界面** — 深浅主题、移动端适配（底部播放控制 + 抽屉式队列）、自建通用组件库（BaseModal / BaseButton 等）、PWA Service Worker 离线缓存层
 > - **TS 服务器频道树** — WebUI 侧边抽屉浏览完整频道树与在线用户，管理员点击频道一键移动机器人
-> - **队列拖拽重排序** — 播放队列鼠标/触屏拖拽，配合 `!reorder <from> <to>` 命令
-> - **跨客户端歌曲收藏** — 任意歌曲一键收藏（`/api/song-favorites`），WebSocket 实时同步
-> - **Docker 预构建镜像发布流** — GitHub Actions 导出 tar.gz，配合 `scripts/docker/docker-compose.prod.yml` 秒级启动
+> - **播放队列拖拽重排序** — 鼠标 / 触屏拖拽，配合 `!reorder <from> <to>` 聊天命令
+> - **点歌人显示与精确高亮** — 队列行显示由谁点歌；「正在播放」高亮按播放实例精确匹配（上游按歌曲 id 匹配，同名重复曲目会全部点亮）
 >
-> 与上游的同步策略与维护说明见 [FORK.md](FORK.md)。
+> **功能**
+>
+> - **跨客户端歌曲收藏** — 任意歌曲一键红心（`/api/song-favorites`），WebSocket 实时同步；与上游按用户的歌单收藏并存互补
+>
+> **行为改进与加固**
+>
+> - **频道无人自动暂停事件源化** — 基于客户端进出频道事件即时判定（上游依赖的 `clientlist` 查询在多人服务器上会超时导致误判），查询仅作低频对账
+> - **重启忠实恢复播放状态** — 关机前在播 → 重启后续播；关机前暂停 → 恢复为暂停（上游总是续播）
+> - **播放互斥锁全覆盖** — 聊天命令 / WebUI / 队列恢复全部入口串行化，杜绝并发操作下可听轨道与队列错位
+> - **安全加固批次** — Jellyfin 封面经服务端代理（凭据不下发客户端）、机器人密码只写不回显、播放地址 scheme 白名单、本地上传串行化、搜索限流、登录时序等化等（完整清单见 [docs/code-review-2026-08-24.md](docs/code-review-2026-08-24.md)）
+>
+> **运维**
+>
+> - **Docker 预构建镜像发布流** — GitHub Actions 构建并导出镜像，配合 `scripts/docker/docker-compose.prod.yml` 离线秒级启动
 
 ## 功能特性
 
@@ -496,12 +512,19 @@ teamspeak-music-bot/
 │   │       ├── users.ts        # 用户管理 + 成员权限
 │   │       └── auth.ts         # QR登录/Cookie/SMS
 │   └── index.ts                # 入口（启动所有服务）
-├── web/src/                    # 前端源码 (Vue 3)
-│   ├── components/             # Player, Navbar, Queue, CoverArt, SongCard
-│   ├── views/                  # Home, Search, Playlist, Lyrics, History, Settings, Setup
-│   ├── stores/                 # Pinia 状态管理（含服务端时间同步）
-│   ├── composables/            # WebSocket 自动重连
-│   └── styles/                 # SCSS 主题变量（深色/浅色）
+├── web/src/                    # 前端源码 (Vue 3 + Tailwind CSS 4，本 fork 完全接管)
+│   ├── App.vue                 # 应用骨架（主题应用、路由出口、会话/状态轮询）
+│   ├── router/                 # 路由（含 /bot/:id 专属链接模式、guest 访问拦截）
+│   ├── stores/                 # Pinia 状态：player（播放/队列/多 bot）、auth（会话/能力）、favorites、toast
+│   ├── composables/            # useWebSocket（自动重连）、useToast、useDecoupledSlider（滑块拖拽解耦）
+│   ├── utils/                  # http（axios 拦截器）、searchPagination（分页合并去重）、serverTree、format、platform
+│   ├── components/
+│   │   ├── common/             # 通用组件库：BaseButton/BaseModal/BaseToggle/BaseCard、Toast、SkeletonLoader、EmptyState
+│   │   ├── home/               # 首页分区：NowPlaying、QuickActions、RecentHistory、JellyfinSections
+│   │   ├── settings/           # 设置分区：SettingsLayout + 机器人/行为/平台账号/音源/用户/权限/审计/主题/通用
+│   │   └── (根级)              # Player、Navbar、Queue（拖拽抽屉）、ServerTree*（频道树）、SongCard/SongGridCard、CoverArt、MobilePlayerControls
+│   ├── views/                  # Home、Search、Playlist、Library、Favorites、History、Lyrics、Settings、Login、FirstRun、BotRedirect、NotFound
+│   └── styles/                 # Tailwind 4 @theme 主题令牌（深/浅色，index.css）
 ├── scripts/                    # 部署脚本
 │   ├── setup.bat               # Windows 首次安装
 │   ├── start.bat               # Windows 启动脚本
@@ -530,8 +553,8 @@ teamspeak-music-bot/
 | **QQ 音乐 API** | @sansenjian/qq-music-api（锁定 `~2.4.0`，需 Node ≥ 20.17） |
 | **哔哩哔哩** | BiliBili Web API（搜索、DASH 音频流、QR 登录） |
 | **酷狗音乐** | 酷狗公开 API（直连，无 npm 依赖 / 无内嵌服务；请求签名 / KRC 歌词解码 / 设备注册移植自 MIT 的 MakcRe/KuGouMusicApi，改用 Node 内置 crypto + zlib） |
-| **前端框架** | Vue 3, Vite 5, Pinia, Vue Router 4 |
-| **界面样式** | SCSS（YesPlayMusic 设计风格） |
+| **前端框架** | Vue 3, Vite 6, Pinia, Vue Router 4 |
+| **界面样式** | Tailwind CSS 4（YesPlayMusic 设计风格，深/浅主题，PWA） |
 | **图标** | @iconify/vue |
 | **日志** | pino |
 
