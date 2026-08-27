@@ -57,13 +57,20 @@ export function parseLyrics(lrc: string, tlyric?: string): LyricLine[] {
   return lines.sort((a, b) => a.time - b.time);
 }
 
+/** NCM 接口返回的封面 URL 常为 http://（实测 /recommend/songs 30/30 全 http），
+ *  https 站点下属混合内容会被部分移动端浏览器直接拦截。NCM CDN 支持 https，
+ *  统一升级（与 bilibili normalizeCover / kugou fixCover 同一口径）。 */
+function toHttpsCover(url: string | null | undefined): string {
+  return (url ?? "").replace(/^http:/, "https:");
+}
+
 export function mapNeteaseAlbums(raw: any[] | null | undefined): Album[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((a) => ({
     id: String(a.id),
     name: a.name ?? "",
     artist: (a.artists ?? []).map((x: any) => x.name).join(" / "),
-    coverUrl: a.picUrl ?? "",
+    coverUrl: toHttpsCover(a.picUrl),
     songCount: a.size ?? 0,
     platform: "netease",
   }));
@@ -77,7 +84,7 @@ export function mapNeteaseSongs(raw: any[] | null | undefined): Song[] {
     artist: (s.ar ?? s.artists ?? []).map((a: any) => a.name).join(" / "),
     album: s.al?.name ?? s.album?.name ?? "",
     duration: Math.round((s.dt ?? s.duration ?? 0) / 1000),
-    coverUrl: s.al?.picUrl ?? s.album?.picUrl ?? "",
+    coverUrl: toHttpsCover(s.al?.picUrl ?? s.album?.picUrl),
     platform: "netease",
     // fee: 0=free, 1=VIP, 4=album-only, 8=free low-quality (plays in full, NOT vip)
     vip: s.fee === 1 || s.fee === 4,
@@ -160,7 +167,7 @@ export class NeteaseProvider implements MusicProvider {
     ).map((p: any) => ({
       id: String(p.id),
       name: p.name,
-      coverUrl: p.coverImgUrl ?? "",
+      coverUrl: toHttpsCover(p.coverImgUrl),
       songCount: p.trackCount ?? 0,
       platform: "netease",
     }));
@@ -202,7 +209,7 @@ export class NeteaseProvider implements MusicProvider {
     return (res.data?.result ?? []).map((p: any) => ({
       id: String(p.id),
       name: p.name,
-      coverUrl: p.picUrl ?? "",
+      coverUrl: toHttpsCover(p.picUrl),
       songCount: p.trackCount ?? 0,
       platform: "netease",
     }));
@@ -331,7 +338,7 @@ export class NeteaseProvider implements MusicProvider {
       id: String(p.id),
       name: p.name ?? "",
       description: p.description ?? "",
-      coverUrl: p.coverImgUrl ?? "",
+      coverUrl: toHttpsCover(p.coverImgUrl),
       songCount: p.trackCount ?? 0,
     };
   }
@@ -350,7 +357,7 @@ export class NeteaseProvider implements MusicProvider {
     return (res.data?.playlist ?? []).map((p: any) => ({
       id: String(p.id),
       name: p.name,
-      coverUrl: p.coverImgUrl ?? "",
+      coverUrl: toHttpsCover(p.coverImgUrl),
       songCount: p.trackCount ?? 0,
       platform: "netease",
     }));
