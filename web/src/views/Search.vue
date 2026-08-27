@@ -1,5 +1,5 @@
 <template>
-  <div> @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
+  <div>
     <!-- Back button -->
     <button class="mb-4 flex items-center gap-1.5 text-sm text-foreground-muted opacity-70 transition-opacity hover:opacity-100" @click="$router.back()">
       <Icon icon="mdi:arrow-left" />
@@ -20,7 +20,44 @@
       </div>
     </div>
 
-    <!-- Platform filter tabs + local upload -->
+    <!-- 本地音视频上传（设置→行为 的 localAudioEnabled 门控） -->
+    <div
+      v-if="!auth.isGuest && store.localAudioEnabled"
+      class="mb-4 flex items-center gap-4 rounded-[var(--radius-lg)] border border-dashed p-4 transition-colors"
+      :class="dragOver ? 'border-primary bg-primary/5' : 'border-border-color bg-surface-card'"
+      @dragenter.prevent="dragOver = true"
+      @dragover.prevent="dragOver = true"
+      @dragleave.prevent="dragOver = false"
+      @drop.prevent="onDrop"
+    >
+      <Icon icon="mdi:tray-arrow-up" class="text-2xl shrink-0" :class="[dragOver ? 'text-primary' : 'opacity-50', { 'animate-spin': uploading }]" />
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium">拖拽本地音频 / 视频到这里上传</div>
+        <div class="text-xs text-text-tertiary mt-0.5">音频 mp3/flac/wav/m4a/ogg/opus 等，视频仅保留音轨；上传后可直接播放或加入队列</div>
+      </div>
+      <button
+        class="shrink-0 flex items-center gap-1.5 rounded-full bg-primary/10 text-primary px-4 py-2 text-sm font-medium transition-colors hover:bg-primary/20 disabled:opacity-60"
+        :disabled="uploading"
+        @click="fileInput?.click()"
+      >
+        <Icon :icon="uploading ? 'mdi:loading' : 'mdi:upload'" :class="{ 'animate-spin': uploading }" />
+        {{ uploading ? '上传中…' : '选择文件' }}
+      </button>
+      <input
+        ref="fileInput"
+        type="file"
+        class="hidden"
+        multiple
+        accept="audio/*,video/*,.mp3,.flac,.wav,.m4a,.ogg,.opus,.mp4,.mov,.mkv,.avi,.flv,.wmv,.m4v,.mpg,.mpeg,.3gp,.ts,.m2ts,.ogv"
+        @change="onFilePicked"
+      />
+    </div>
+    <div v-else-if="!auth.isGuest" class="mb-4 flex items-center gap-3 rounded-[var(--radius-lg)] bg-surface-card p-4 opacity-70">
+      <Icon icon="mdi:music-off" class="text-xl opacity-50 shrink-0" />
+      <div class="text-xs text-text-tertiary">本地上传已关闭：管理员可在「设置 → 行为设置」开启</div>
+    </div>
+
+    <!-- Platform filter tabs -->
     <div class="mb-6 flex flex-wrap items-center gap-2">
       <button
         v-for="tab in platformTabs"
@@ -33,26 +70,6 @@
       >
         {{ tab.label }}
       </button>
-
-      <div class="ml-auto flex items-center gap-2">
-        <span v-if="dragOver" class="text-xs text-primary">松开以上传本地文件</span>
-        <button
-          class="flex items-center gap-1.5 rounded-full bg-surface-card px-4 py-1.5 text-sm font-medium text-foreground-muted transition-all hover:bg-interactive-hover hover:text-foreground disabled:opacity-60"
-          :disabled="uploading"
-          title="上传本地音频/视频（视频仅保留音轨）"
-          @click="fileInput?.click()"
-        >
-          <Icon :icon="uploading ? 'mdi:loading' : 'mdi:upload'" :class="{ 'animate-spin': uploading }" />
-          {{ uploading ? '上传中' : '本地上传' }}
-        </button>
-        <input
-          ref="fileInput"
-          type="file"
-          class="hidden"
-          accept=".mp3,.flac,.wav,.m4a,.ogg,.opus,.mp4,.mov,.mkv,.avi,.flv,.wmv,.m4v,.mpg,.mpeg,.3gp,.ts,.m2ts,.ogv,audio/*,video/*"
-          @change="onFilePicked"
-        />
-      </div>
     </div>
 
     <!-- Category tabs（搜索后显示） -->
@@ -181,6 +198,7 @@ import { http } from '../utils/http';
 import { getProviderLabel, orderedProviders } from '../utils/platform';
 import { mergeDedup, hasMore, nextOffset } from '../utils/searchPagination.js';
 import { usePlayerStore, type Song } from '../stores/player';
+import { useAuthStore } from '../stores/auth';
 import { useToast } from '../composables/useToast';
 import SongGridCard from '../components/SongGridCard.vue';
 import CoverCard from '../components/common/CoverCard.vue';
@@ -190,6 +208,7 @@ import SkeletonLoader from '../components/common/SkeletonLoader.vue';
 import BaseButton from '../components/common/BaseButton.vue';
 
 const store = usePlayerStore();
+const auth = useAuthStore();
 const toast = useToast();
 const route = useRoute();
 const router = useRouter();
@@ -363,10 +382,11 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const dragOver = ref(false);
 
-function onFilePicked(e: Event) {
+async function onFilePicked(e: Event) {
   const input = e.target as HTMLInputElement;
-  if (input.files?.length) uploadFile(input.files[0]);
+  const files = [...(input.files ?? [])];
   input.value = '';
+  for (const f of files) await uploadFile(f);
 }
 
 function onDrop(e: DragEvent) {
