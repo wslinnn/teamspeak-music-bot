@@ -118,7 +118,7 @@ function describeAction(e: AuditEntry): string {
 
 function actionClass(action: string): string {
   if (action === 'user.deleted') return 'text-red-500';
-  if (action === 'user.password_reset' || action === 'user.password_changed') return 'text-yellow-500';
+  if (action === 'user.password_reset' || action === 'user.password_changed') return 'text-warning';
   return '';
 }
 

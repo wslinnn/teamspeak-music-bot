@@ -7,24 +7,17 @@
         最近添加
       </h2>
       <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-        <RouterLink
+        <CoverCard
           v-for="al in latestAlbums"
           :key="al.id"
           :to="`/album/${al.id}?platform=jellyfin`"
-          class="group"
-          :title="`打开专辑：${al.name}`"
+          :cover-url="al.coverUrl"
+          :name="al.name"
+          hover-icon="mdi:open-in-new"
+          :link-title="`打开专辑：${al.name}`"
         >
-          <div class="relative aspect-square overflow-hidden rounded-[10px]">
-            <CoverArt :url="al.coverUrl" :fill="true" :radius="0" />
-            <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-              <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
-                <Icon icon="mdi:open-in-new" class="text-2xl" />
-              </div>
-            </div>
-          </div>
-          <div class="mt-2 text-[13px] font-medium truncate">{{ al.name }}</div>
-          <div class="text-xs text-text-tertiary truncate">{{ al.artist }}</div>
-        </RouterLink>
+          <template #subtitle>{{ al.artist }}</template>
+        </CoverCard>
       </div>
     </section>
 
@@ -92,12 +85,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { RouterLink } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { http } from '../../utils/http';
 import { usePlayerStore, type Song } from '../../stores/player';
 import { useAuthStore } from '../../stores/auth';
 import CoverArt from '../CoverArt.vue';
+import CoverCard from '../common/CoverCard.vue';
 
 interface AlbumItem {
   id: string;

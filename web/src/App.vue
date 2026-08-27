@@ -36,6 +36,9 @@ const { connect } = useWebSocket();
 
 watch(theme, (t) => {
   document.documentElement.setAttribute('data-theme', t);
+  // 手机状态栏/PWA 标题栏颜色跟随主题（index.html 里的静态值只是初始深色）
+  document.querySelector('meta[name="theme-color"]')
+    ?.setAttribute('content', t === 'dark' ? '#222222' : '#ffffff');
 }, { immediate: true });
 
 let syncTimer: ReturnType<typeof setInterval> | null = null;

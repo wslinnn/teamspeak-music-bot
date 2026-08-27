@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="modelValue" class="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <div v-if="modelValue" class="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4">
         <div
           class="absolute inset-0 bg-black/50"
           @click="close"
@@ -12,7 +12,7 @@
           aria-modal="true"
           :aria-labelledby="title ? 'modal-title' : undefined"
           tabindex="-1"
-          class="relative w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-xl p-6"
+          class="relative w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-xl p-6 mb-[env(safe-area-inset-bottom)]"
           :style="{ background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-elevated)' }"
           @click.stop
         >

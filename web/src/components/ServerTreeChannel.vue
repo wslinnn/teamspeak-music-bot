@@ -5,14 +5,14 @@
       class="flex items-center gap-1.5 rounded-[var(--radius-sm)] select-none"
       :class="[
         isMobile ? 'py-2.5 px-2' : 'py-1.5 px-1.5',
-        isActiveBotChannel ? 'bg-[rgba(34,197,94,0.08)]' : 'hover:bg-hover-bg',
+        isActiveBotChannel ? 'bg-success/8' : 'hover:bg-hover-bg',
       ]"
       @click="handleChannelClick"
     >
       <!-- Active indicator -->
       <div
         v-if="isActiveBotChannel"
-        class="w-[3px] h-5 rounded-full bg-green-500 shrink-0"
+        class="w-[3px] h-5 rounded-full bg-success shrink-0"
       />
       <div v-else class="w-[3px] h-5 shrink-0" />
 
@@ -31,14 +31,14 @@
       <Icon
         :icon="channel.isSpacer ? 'mdi:dots-horizontal' : 'mdi:folder-outline'"
         class="shrink-0"
-        :class="isActiveBotChannel ? 'text-green-500' : 'opacity-60'"
+        :class="isActiveBotChannel ? 'text-success' : 'opacity-60'"
       />
 
       <!-- Channel name -->
       <span
         class="text-sm truncate"
         :class="[
-          isActiveBotChannel ? 'font-semibold text-green-500' : 'text-text-secondary',
+          isActiveBotChannel ? 'font-semibold text-success' : 'text-text-secondary',
           channel.isSpacer ? 'text-xs text-text-tertiary italic' : '',
         ]"
         :title="channel.description"
@@ -57,7 +57,7 @@
       <!-- Playing pulse -->
       <span
         v-if="isActiveBotChannel && isPlaying"
-        class="ml-1 w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shrink-0"
+        class="ml-1 w-1.5 h-1.5 rounded-full bg-success animate-pulse shrink-0"
       />
     </div>
 
@@ -68,7 +68,7 @@
         v-for="client in channel.clients"
         :key="client.id"
         class="flex items-center gap-2 py-1 px-1.5 rounded-[var(--radius-sm)]"
-        :class="client.isBot ? 'bg-[rgba(51,94,234,0.06)]' : 'hover:bg-hover-bg'"
+        :class="client.isBot ? 'bg-primary/5' : 'hover:bg-hover-bg'"
       >
         <span class="w-[3px] shrink-0" />
         <span class="w-5 shrink-0" />
@@ -84,7 +84,7 @@
         >
           {{ client.nickname }}
         </span>
-        <span v-if="client.isBot" class="ml-auto text-[10px] px-1 py-px rounded bg-[rgba(51,94,234,0.12)] text-primary font-medium shrink-0">Bot</span>
+        <span v-if="client.isBot" class="ml-auto text-[10px] px-1 py-px rounded bg-primary/10 text-primary font-medium shrink-0">Bot</span>
       </div>
 
       <!-- Sub-channels -->

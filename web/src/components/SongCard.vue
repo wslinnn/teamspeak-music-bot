@@ -1,7 +1,7 @@
 <template>
   <div
     class="group flex items-center gap-3 px-3 py-2 rounded-[var(--radius-md)] transition-colors cursor-pointer hover:bg-hover-bg"
-    :class="{ 'bg-[rgba(51,94,234,0.1)]': active }"
+    :class="{ 'bg-primary/10': active }"
     @dblclick="showPlay && $emit('play')"
   >
     <div class="w-6 text-center text-[13px] text-text-tertiary">{{ index }}</div>

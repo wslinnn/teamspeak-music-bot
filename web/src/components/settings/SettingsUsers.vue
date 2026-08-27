@@ -148,7 +148,7 @@
                 @change="toggleBotSelection(bot.id, ($event.target as HTMLInputElement).checked)"
               />
               <span class="text-sm truncate">{{ bot.name }}</span>
-              <span class="w-2 h-2 rounded-full shrink-0" :class="bot.connected ? 'bg-green-500' : 'bg-text-tertiary'" />
+              <span class="w-2 h-2 rounded-full shrink-0" :class="bot.connected ? 'bg-success' : 'bg-text-tertiary'" />
             </label>
             <p v-if="bots.length === 0" class="text-xs text-text-tertiary px-3">还没有机器人</p>
           </div>

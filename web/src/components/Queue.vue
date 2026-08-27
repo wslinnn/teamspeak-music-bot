@@ -3,12 +3,12 @@
     <Transition name="queue-backdrop">
       <div
         v-if="open"
-        class="fixed inset-0 z-[110] bg-black/40"
+        class="fixed inset-0 z-[var(--z-queue)] bg-black/40"
         @click="$emit('close')"
       />
     </Transition>
     <div
-      class="fixed top-0 bottom-0 right-0 w-[min(360px,85vw)] z-[111] transition-transform duration-[var(--transition-normal)] flex flex-col will-change-transform"
+      class="fixed top-0 bottom-0 right-0 w-[min(360px,85vw)] z-[var(--z-queue-panel)] transition-transform duration-[var(--transition-normal)] flex flex-col will-change-transform"
       :style="{ background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-elevated)' }"
       :class="open ? 'translate-x-0' : 'translate-x-full'"
     >
@@ -64,7 +64,7 @@
           <template #item="{ element: song, index: i }">
             <div
               class="flex items-center gap-2 p-2 rounded-[var(--radius-sm)] transition-colors cursor-pointer select-none hover:bg-hover-bg group"
-              :class="{ 'bg-[rgba(51,94,234,0.1)]': isCurrentRow(song, i) }"
+              :class="{ 'bg-primary/10': isCurrentRow(song, i) }"
               @click="playAtIndex(i)"
             >
               <span class="drag-handle cursor-grab text-foreground-subtle opacity-50 md:opacity-0 md:group-hover:opacity-50 transition-opacity shrink-0 text-base p-0.5 active:opacity-100">

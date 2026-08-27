@@ -3,7 +3,7 @@
   <Transition name="fade">
     <div
       v-if="modelValue"
-      class="fixed inset-0 bg-black/40 z-[150] backdrop-blur-sm"
+      class="fixed inset-0 bg-black/40 z-[var(--z-server-tree)] backdrop-blur-sm"
       @click="$emit('update:modelValue', false)"
     />
   </Transition>
@@ -12,8 +12,7 @@
   <Transition name="slide-from-right">
     <aside
       v-if="modelValue"
-      class="fixed top-0 right-0 bottom-0 z-[160] bg-bg-secondary border-l border-border-color flex flex-col will-change-transform"
-      :class="isMobile ? 'w-full' : 'w-[360px]'"
+      class="fixed top-0 right-0 bottom-0 z-[var(--z-server-tree-panel)] bg-bg-secondary border-l border-border-color flex flex-col will-change-transform w-full md:w-[360px]"
     >
       <!-- Mobile header with close button -->
       <div class="flex items-center justify-between px-4 py-3 border-b border-border-color">

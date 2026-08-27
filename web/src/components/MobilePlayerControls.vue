@@ -10,7 +10,7 @@
     >
       <div
         v-if="modelValue"
-        class="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm"
+        class="fixed inset-0 z-[var(--z-mobile-controls)] bg-black/40 backdrop-blur-sm"
         @click="close"
       />
     </Transition>
@@ -25,7 +25,7 @@
     >
       <div
         v-if="modelValue"
-        class="fixed bottom-0 left-0 right-0 z-[201] bg-bg-primary rounded-t-2xl px-6 pt-4 pb-8 sm:hidden will-change-transform"
+        class="fixed bottom-0 left-0 right-0 z-[var(--z-mobile-controls-panel)] bg-bg-primary rounded-t-2xl px-6 pt-4 pb-[calc(2rem+env(safe-area-inset-bottom))] sm:hidden will-change-transform"
       >
         <!-- Drag handle -->
         <div class="flex justify-center mb-5" @click="close">

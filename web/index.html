@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- viewport-fit=cover：配合 env(safe-area-inset-*)，全面屏 PWA 下播放条/弹层避让 home indicator -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <!-- same-origin：CSRF Origin 校验依赖；no-referrer 会导致 POST 带 Origin: null 被全量 403 -->
   <meta name="referrer" content="same-origin">
   <!-- 防止部署实例被搜索引擎收录（issue #128） -->
@@ -17,8 +18,7 @@
   <link rel="manifest" href="/site.webmanifest">
   <!-- 与深色主题 --bg-primary 一致（应用默认从深色启动）。 -->
   <meta name="theme-color" content="#222222">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Barlow 自托管（public/fonts/，SW 预缓存）：googleapis 在目标用户网络不可达，且随包分发无第三方依赖 -->
 </head>
 <body>
   <div id="app"></div>

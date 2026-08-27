@@ -13,7 +13,7 @@ export default defineConfig({
       manifest: false,
       includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png'],
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,woff2}'],
         navigateFallback: '/index.html',
         // API/WS 永不落入 SPA 兜底；robots 也要真实文件
         navigateFallbackDenylist: [/^\/api\//, /^\/ws/, /^\/robots\.txt$/],
@@ -28,16 +28,6 @@ export default defineConfig({
             options: {
               cacheName: 'cover-art',
               expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30, purgeOnQuotaError: true },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            // Barlow 字体（CSS + woff2）：CacheFirst，加载一次终身使用
-            urlPattern: /^https?:\/\/fonts\.(?:googleapis|gstatic)\.com\//i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts',
-              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [0, 200] },
             },
           },

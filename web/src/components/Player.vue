@@ -1,8 +1,8 @@
 <template>
-  <div class="fixed bottom-0 left-0 right-0 z-[100]" v-if="currentSong">
+  <div class="fixed bottom-0 left-0 right-0 z-[var(--z-player)] frosted-glass pb-[env(safe-area-inset-bottom)]" v-if="currentSong">
     <Queue :open="showQueue" @close="showQueue = false" />
 
-    <div class="h-[var(--player-height)] flex items-center px-6 relative frosted-glass">
+    <div class="h-[var(--player-height)] flex items-center px-6 relative">
       <!-- Progress bar -->
       <div
         class="absolute -top-1.5 left-0 right-0 h-3 z-[101] flex items-center px-0"
@@ -27,7 +27,7 @@
         </div>
       </div>
 
-      <div class="flex items-center gap-3 w-[240px] no-underline text-inherit cursor-pointer transition-opacity duration-[var(--transition-fast)] hover:opacity-80" @click="toggleLyrics">
+      <div class="flex items-center gap-3 min-w-0 flex-1 sm:flex-none sm:w-[240px] no-underline text-inherit cursor-pointer transition-opacity duration-[var(--transition-fast)] hover:opacity-80" @click="toggleLyrics">
         <CoverArt :url="currentSong.coverUrl" :size="40" :show-shadow="true" />
         <div class="min-w-0">
           <div class="text-[13px] font-medium truncate">
@@ -37,7 +37,7 @@
           <div class="text-[11px] text-text-secondary flex items-center gap-1">
             <button
               v-if="showBotBadge"
-              class="inline-flex items-center gap-0.5 text-[10px] font-semibold px-[5px] bg-[rgba(51,94,234,0.15)] text-primary rounded-[3px] leading-4 whitespace-nowrap shrink-0 cursor-pointer hover:brightness-110 transition-all"
+              class="inline-flex items-center gap-0.5 text-[10px] font-semibold px-[5px] bg-primary/15 text-primary rounded-[3px] leading-4 whitespace-nowrap shrink-0 cursor-pointer hover:brightness-110 transition-all"
               @click.stop="openServerTree"
             >
               <Icon icon="mdi:account-voice" class="text-[10px]" />
@@ -48,7 +48,7 @@
         </div>
       </div>
 
-      <div class="flex-1 flex justify-center items-center gap-5">
+      <div class="flex justify-center items-center gap-5 sm:flex-1 shrink-0">
         <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-right hidden sm:inline">{{ formatTime(currentElapsed) }}</span>
         <button v-if="canControl" aria-label="上一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.prev()">
           <Icon icon="mdi:skip-previous" />
@@ -66,7 +66,7 @@
         <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-left hidden sm:inline">{{ formatTime(activeDuration) }}</span>
       </div>
 
-      <div class="w-[240px] flex items-center justify-end gap-2">
+      <div class="hidden sm:flex sm:w-[240px] sm:shrink-0 items-center justify-end gap-2">
         <!-- Desktop volume -->
         <template v-if="canTransport">
           <Icon icon="mdi:volume-high" class="text-lg opacity-60 hidden sm:block" />
@@ -83,10 +83,15 @@
             class="volume-slider hidden sm:block"
           />
         </template>
-        <!-- Mobile volume button -->
+        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" :class="{ 'opacity-100 text-primary': showQueue }" @click="showQueue = !showQueue">
+          <Icon icon="mdi:playlist-music" />
+        </button>
+      </div>
+      <!-- Mobile: volume/playmode sheet toggle + queue toggle -->
+      <div class="sm:hidden flex items-center gap-2 shrink-0">
         <button
           v-if="canTransport || canModeCtl"
-          class="sm:hidden text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100"
+          class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100"
           aria-label="音量与播放设置"
           @click="mobileControlsOpen = true"
         >

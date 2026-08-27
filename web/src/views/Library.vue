@@ -10,19 +10,16 @@
         <span class="text-sm font-medium text-text-tertiary">{{ store.favoritedPlaylists.length }}</span>
       </h2>
       <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        <RouterLink
+        <CoverCard
           v-for="fav in store.favoritedPlaylists"
           :key="fav.id"
           :to="`/playlist/${fav.playlistId}?platform=${fav.platform}`"
-          class="group"
-          :title="`打开歌单：${fav.name}`"
+          :cover-url="fav.coverUrl"
+          :name="fav.name"
+          :link-title="`打开歌单：${fav.name}`"
         >
-          <div class="relative aspect-square overflow-hidden rounded-[10px]">
-            <CoverArt :url="fav.coverUrl" :fill="true" :radius="0" />
-          </div>
-          <div class="mt-2 text-[13px] font-medium truncate">{{ fav.name }}</div>
-          <div class="text-xs text-text-tertiary truncate">{{ getProviderLabel(fav.platform) }} · {{ fav.songCount }} 首</div>
-        </RouterLink>
+          <template #subtitle>{{ getProviderLabel(fav.platform) }} · {{ fav.songCount }} 首</template>
+        </CoverCard>
       </div>
     </section>
 
@@ -45,19 +42,16 @@
       </div>
       <EmptyState v-else-if="playlists.length === 0" :message="`未获取到${getProviderLabel(activeSource)}歌单（可能需要先在设置里登录账号）`" icon="mdi:playlist-music-outline" />
       <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        <RouterLink
+        <CoverCard
           v-for="pl in playlists"
           :key="pl.id"
           :to="`/playlist/${pl.id}?platform=${pl.platform}`"
-          class="group"
-          :title="`打开歌单：${pl.name}`"
+          :cover-url="pl.coverUrl"
+          :name="pl.name"
+          :link-title="`打开歌单：${pl.name}`"
         >
-          <div class="relative aspect-square overflow-hidden rounded-[10px]">
-            <CoverArt :url="pl.coverUrl" :fill="true" :radius="0" />
-          </div>
-          <div class="mt-2 text-[13px] font-medium truncate">{{ pl.name }}</div>
-          <div class="text-xs text-text-tertiary truncate">{{ pl.songCount }} 首</div>
-        </RouterLink>
+          <template #subtitle>{{ pl.songCount }} 首</template>
+        </CoverCard>
       </div>
     </section>
 
@@ -89,7 +83,7 @@ import { http } from '../utils/http';
 import { usePlayerStore, type Song, type PlaylistItem } from '../stores/player';
 import { useAuthStore } from '../stores/auth';
 import { getProviderLabel } from '../utils/platform';
-import CoverArt from '../components/CoverArt.vue';
+import CoverCard from '../components/common/CoverCard.vue';
 import SongCard from '../components/SongCard.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 

@@ -3,7 +3,7 @@
     <TransitionGroup
       tag="div"
       name="toast"
-      class="fixed top-4 right-4 z-[9999] flex flex-col gap-2"
+      class="fixed top-[calc(1rem+env(safe-area-inset-top))] right-[calc(1rem+env(safe-area-inset-right))] z-[var(--z-toast)] flex flex-col gap-2 max-w-[calc(100vw-2rem)]"
     >
       <Toast
         v-for="item in store.items"

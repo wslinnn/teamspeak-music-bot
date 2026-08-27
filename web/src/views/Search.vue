@@ -1,5 +1,5 @@
 <template>
-  <div class="search-page" @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
+  <div> @dragover.prevent="dragOver = true" @dragleave="dragOver = false" @drop.prevent="onDrop">
     <!-- Back button -->
     <button class="mb-4 flex items-center gap-1.5 text-sm text-foreground-muted opacity-70 transition-opacity hover:opacity-100" @click="$router.back()">
       <Icon icon="mdi:arrow-left" />
@@ -103,34 +103,27 @@
     <!-- Playlists results -->
     <div v-else-if="activeCategory === 'playlists' && playlists.length > 0">
       <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        <RouterLink
+        <CoverCard
           v-for="pl in playlists"
           :key="`${pl.platform}-${pl.id}`"
           :to="`/playlist/${pl.id}?platform=${pl.platform}`"
-          class="group text-left"
-          :title="`打开歌单：${pl.name}`"
+          :cover-url="pl.coverUrl"
+          :name="pl.name"
+          hover-icon="mdi:open-in-new"
+          :link-title="`打开歌单：${pl.name}`"
         >
-          <div class="relative aspect-square overflow-hidden rounded-[10px]">
-            <CoverArt :url="pl.coverUrl" :fill="true" :radius="0" />
-            <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-              <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
-                <Icon icon="mdi:open-in-new" class="text-2xl" />
-              </div>
-            </div>
-            <div class="absolute right-1.5 top-1.5 z-[10]">
-              <PlaylistFavoriteButton
-                :playlist-id="pl.id"
-                :platform="pl.platform"
-                :name="pl.name"
-                :cover-url="pl.coverUrl"
-                :song-count="pl.songCount"
-                overlay
-              />
-            </div>
-          </div>
-          <div class="mt-2 text-[13px] font-medium truncate">{{ pl.name }}</div>
-          <div class="text-xs text-text-tertiary truncate">{{ pl.songCount }} 首</div>
-        </RouterLink>
+          <template #corner>
+            <PlaylistFavoriteButton
+              :playlist-id="pl.id"
+              :platform="pl.platform"
+              :name="pl.name"
+              :cover-url="pl.coverUrl"
+              :song-count="pl.songCount"
+              overlay
+            />
+          </template>
+          <template #subtitle>{{ pl.songCount }} 首</template>
+        </CoverCard>
       </div>
       <div v-if="currentHasMore" class="mt-6 flex justify-center">
         <BaseButton :loading="loadingMore" :disabled="loadingMore" @click="loadMore">加载更多</BaseButton>
@@ -140,24 +133,17 @@
     <!-- Albums results -->
     <div v-else-if="activeCategory === 'albums' && albums.length > 0">
       <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        <RouterLink
+        <CoverCard
           v-for="ab in albums"
           :key="`${ab.platform}-${ab.id}`"
           :to="`/album/${ab.id}?platform=${ab.platform}`"
-          class="group text-left"
-          :title="`打开专辑：${ab.name}`"
+          :cover-url="ab.coverUrl"
+          :name="ab.name"
+          hover-icon="mdi:open-in-new"
+          :link-title="`打开专辑：${ab.name}`"
         >
-          <div class="relative aspect-square overflow-hidden rounded-[10px]">
-            <CoverArt :url="ab.coverUrl" :fill="true" :radius="0" />
-            <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-              <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
-                <Icon icon="mdi:open-in-new" class="text-2xl" />
-              </div>
-            </div>
-          </div>
-          <div class="mt-2 text-[13px] font-medium truncate">{{ ab.name }}</div>
-          <div class="text-xs text-text-tertiary truncate">{{ ab.artist }}</div>
-        </RouterLink>
+          <template #subtitle>{{ ab.artist }}</template>
+        </CoverCard>
       </div>
       <div v-if="currentHasMore" class="mt-6 flex justify-center">
         <BaseButton :loading="loadingMore" :disabled="loadingMore" @click="loadMore">加载更多</BaseButton>
@@ -197,7 +183,7 @@ import { mergeDedup, hasMore, nextOffset } from '../utils/searchPagination.js';
 import { usePlayerStore, type Song } from '../stores/player';
 import { useToast } from '../composables/useToast';
 import SongGridCard from '../components/SongGridCard.vue';
-import CoverArt from '../components/CoverArt.vue';
+import CoverCard from '../components/common/CoverCard.vue';
 import PlaylistFavoriteButton from '../components/PlaylistFavoriteButton.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import SkeletonLoader from '../components/common/SkeletonLoader.vue';
