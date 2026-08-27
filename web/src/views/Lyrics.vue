@@ -1,5 +1,5 @@
 <template>
-  <div class="lyrics-page" :style="bgStyle">
+  <div class="lyrics-page" :style="rootStyle">
     <div class="lyrics-overlay" />
     <button class="back-btn" @click="goBack">
       <Icon icon="mdi:arrow-left" />
@@ -147,6 +147,24 @@ const bgStyle = computed(() => {
   }
   return {};
 });
+
+// 歌词字号三档（设置 → 通用，localStorage lyrics.fontScale）：CSS 变量
+// 缩放正文/活跃行/译文全部字号，行高比例随 calc 自动保持
+const fontScale = ref(readFontScale());
+
+function readFontScale(): number {
+  try {
+    const v = parseFloat(localStorage.getItem('lyrics.fontScale') ?? '1');
+    return v === 0.85 || v === 1 || v === 1.25 ? v : 1;
+  } catch {
+    return 1;
+  }
+}
+
+const rootStyle = computed(() => ({
+  ...bgStyle.value,
+  '--lyrics-font-scale': String(fontScale.value),
+}));
 
 async function fetchLyrics() {
   if (!currentSong.value) return;
@@ -549,14 +567,14 @@ onUnmounted(() => {
 }
 
 .lyrics-text {
-  font-size: 18px;
+  font-size: calc(18px * var(--lyrics-font-scale, 1));
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.3);
   transition: all 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 .lyrics-translation {
-  font-size: 14px;
+  font-size: calc(14px * var(--lyrics-font-scale, 1));
   line-height: 1.4;
   color: rgba(255, 255, 255, 0.15);
   margin-top: 2px;
@@ -564,7 +582,7 @@ onUnmounted(() => {
 }
 
 .lyrics-line.active .lyrics-text {
-  font-size: 22px;
+  font-size: calc(22px * var(--lyrics-font-scale, 1));
   font-weight: 600;
   color: white;
 }
@@ -647,15 +665,15 @@ onUnmounted(() => {
   }
 
   .lyrics-line .lyrics-text {
-    font-size: 16px;
+    font-size: calc(16px * var(--lyrics-font-scale, 1));
   }
 
   .lyrics-line.active .lyrics-text {
-    font-size: 20px;
+    font-size: calc(20px * var(--lyrics-font-scale, 1));
   }
 
   .lyrics-line .lyrics-translation {
-    font-size: 13px;
+    font-size: calc(13px * var(--lyrics-font-scale, 1));
   }
 }
 </style>
