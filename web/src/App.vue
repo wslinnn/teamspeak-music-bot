@@ -1,6 +1,7 @@
 <template>
   <div class="app">
     <Navbar v-if="!route.meta.hideNavbar" />
+    <ConnectionBanner :state="connectionState" @reconnect="reconnect" />
     <main class="main-content">
       <RouterView v-slot="{ Component }">
         <Transition name="fade" mode="out-in">
@@ -28,6 +29,7 @@ import Navbar from './components/Navbar.vue';
 import Player from './components/Player.vue';
 import MiniPlayer from './components/MiniPlayer.vue';
 import MobileTabBar from './components/MobileTabBar.vue';
+import ConnectionBanner from './components/ConnectionBanner.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
 
 const route = useRoute();
@@ -37,7 +39,13 @@ const authStore = useAuthStore();
 const favoritesStore = useFavoritesStore();
 const toast = useToast();
 const theme = computed(() => playerStore.theme);
-const { connect } = useWebSocket();
+const { connect, disconnect, connectionState } = useWebSocket();
+
+// 手动重连：disconnect 会清零重试计数（自动重连 10 次失败后不再重试），再重新建连
+function reconnect() {
+  disconnect();
+  connect();
+}
 
 watch(theme, (t) => {
   document.documentElement.setAttribute('data-theme', t);
