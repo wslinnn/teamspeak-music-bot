@@ -493,9 +493,18 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-/* 浏览中视口中央的行：非活跃但提亮（自二开版 manual-target 复刻） */
+/* 浏览中视口中央的行：整行提亮并压在分割线之上（z-index 高于指示层的 1），
+   保证 dash 穿过时文字清晰；译文同步提亮 */
+.lyrics-line.manual-target:not(.active) {
+  z-index: 2;
+}
+
 .lyrics-line.manual-target:not(.active) .lyrics-text {
-  color: rgba(255, 255, 255, 0.72);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.lyrics-line.manual-target:not(.active) .lyrics-translation {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 /* 位置指示层：常驻视口中央。跟随正常时与活跃行重合；浏览时指向最近行 */
@@ -565,7 +574,11 @@ onUnmounted(() => {
 }
 
 .lyrics-line:hover:not(.active) .lyrics-text {
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.lyrics-line:hover:not(.active) .lyrics-translation {
+  color: rgba(255, 255, 255, 0.45);
 }
 
 .lyrics-loading,
@@ -591,9 +604,9 @@ onUnmounted(() => {
     overflow: hidden;
   }
 
+  /* 移动端有 tabbar + 胶囊切换回歌词，返回按钮冗余，隐藏 */
   .back-btn {
-    top: calc(12px + env(safe-area-inset-top));
-    left: 14px;
+    display: none;
   }
 
   .lyrics-content {

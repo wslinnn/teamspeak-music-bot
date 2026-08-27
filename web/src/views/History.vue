@@ -1,6 +1,6 @@
 <template>
   <div>
-    <button class="mb-4 flex items-center gap-1.5 text-sm text-foreground-muted opacity-70 transition-opacity hover:opacity-100" @click="$router.back()">
+    <button class="mb-4 hidden md:flex items-center gap-1.5 text-sm text-foreground-muted opacity-70 transition-opacity hover:opacity-100" @click="$router.back()">
       <Icon icon="mdi:arrow-left" />
       返回
     </button>
