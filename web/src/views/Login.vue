@@ -43,27 +43,25 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import BaseButton from '../components/common/BaseButton.vue';
 
-const router = useRouter();
 const authStore = useAuthStore();
 const username = ref('');
 const password = ref('');
 
 async function handleLogin() {
   const success = await authStore.login(username.value, password.value);
-  if (success) {
-    const redirect = (router.currentRoute.value.query.redirect as string) || '/';
-    router.push(redirect);
-  }
+  if (!success) return;
+  // 整页重载进入应用：WebSocket 与首屏数据以已登录身份完整初始化
+  // （SPA 内跳转会沿用启动时无会话的空状态，导致需要手动刷新）
+  const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+  window.location.replace(redirect);
 }
 
 async function handleGuest() {
   const success = await authStore.loginGuest();
-  if (success) {
-    router.push('/');
-  }
+  if (!success) return;
+  window.location.replace('/');
 }
 </script>

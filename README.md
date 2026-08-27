@@ -32,10 +32,14 @@
 >
 > **前端与体验**
 >
-> - **Tailwind CSS 4 全新界面** — 深浅主题、移动端适配（底部播放控制 + 抽屉式队列）、自建通用组件库（BaseModal / BaseButton 等）、PWA Service Worker 离线缓存层
+> - **Tailwind CSS 4 全新界面** — 深浅主题、移动端适配（底部胶囊播放器 + 底部导航 + 抽屉式队列）、自建通用组件库（BaseModal / BaseButton 等）、PWA Service Worker 离线缓存层
 > - **TS 服务器频道树** — WebUI 侧边抽屉浏览完整频道树与在线用户，管理员点击频道一键移动机器人
-> - **播放队列拖拽重排序** — 鼠标 / 触屏拖拽，配合 `!reorder <from> <to>` 聊天命令
+> - **播放队列拖拽重排序** — 鼠标 / 触屏拖拽，配合 `!reorder <from> <to>` 聊天命令；队列抽屉打开自动定位当前播放行
 > - **点歌人显示与精确高亮** — 队列行显示由谁点歌；「正在播放」高亮按播放实例精确匹配（上游按歌曲 id 匹配，同名重复曲目会全部点亮）
+> - **歌词页体验重构** — 单轴原生滚动（跟手，已播歌词可回滚）；手动浏览时暂停自动跟随，分割线 + ▶时间胶囊指示视口位置、点击即跳转；上下留白随视口高度动态计算；译文开关、三档字号
+> - **移动端胶囊播放器** — 封面 / 歌名点击直达歌词页，44px 触控控制键，切歌与 seek 触感反馈；移动端输入框防 iOS 聚焦缩放
+> - **断线全局横幅** — WebSocket 断连即时可见（重连中 / 重试耗尽两态），一键手动重连
+> - **PWA 安装引导** — 设置页一键安装（Chromium 系），iOS 给出「添加到主屏幕」指引
 >
 > **功能**
 >
@@ -50,7 +54,7 @@
 >
 > **运维**
 >
-> - **Docker 发版流水线** — 一条流水线完成完整发版：测试门槛 → 推送多架构镜像到 GHCR（`x.y.z` / `latest`）→ Release 挂载 amd64/arm64 双架构离线 tar.gz（`docker load` 后配合 `docker-compose.prod.yml` 秒级启动）
+> - **Docker 发版流水线** — 一条流水线完成完整发版：测试门槛 → 推送多架构镜像到 GHCR（`x.y.z` / `latest`）→ Release 挂载 amd64/arm64 双架构离线 tar.gz。部署与上游同构：`docker-compose pull && docker-compose up -d` 即可运行 / 升级，无需本地编译；离线服务器可下载 Release 离线包 `docker load` 后配合 `docker-compose.prod.yml` 启动
 
 ## 功能特性
 
@@ -67,7 +71,7 @@
 - **YesPlayMusic 风格 WebUI** — 精美界面，支持深色/浅色主题切换
 - **完整播放控制** — 播放/暂停/上一首/下一首/进度跳转/音量调节
 - **四种播放模式** — 顺序播放/循环播放/随机播放/随机循环
-- **实时歌词同步** — 歌词滚动显示，支持翻译歌词，服务端帧计数精确同步
+- **实时歌词同步** — 歌词滚动显示，支持翻译歌词、手动浏览定位（分割线指示 + 点击跳转）与三档字号，服务端帧计数精确同步
 - **歌单管理** — 推荐歌单/我的歌单/每日推荐/私人FM，点击播放全部；私人 FM 支持网易云、**QQ 音乐雷达推荐**（`!fm -q`）与**酷狗私人电台**（`!fm -k`）。网易云、QQ、酷狗均提供登录后的推荐歌单 / 每日推荐 / 我的歌单
 - **音质选择** — 标准(128k) / 较高(192k) / 极高(320k) / 无损(FLAC) / Hi-Res / 超清母带
 - **B站视频音频提取** — 搜索B站视频，自动提取DASH最高码率音频流播放
@@ -129,12 +133,12 @@ npm start
 
 ### 方式三：Docker 一键部署
 
-所有依赖已内置（Node.js、FFmpeg、Opus 编码器），无需安装任何额外软件。
+所有依赖已内置（Node.js、FFmpeg、Opus 编码器）。默认直接拉取 GitHub Container Registry 的预构建多架构镜像（amd64 / arm64），**无需本地编译、无需 Node.js 与构建工具链**。
 
 ```bash
 git clone https://github.com/wslinnn/teamspeak-music-bot.git
 cd teamspeak-music-bot/scripts/docker
-docker-compose up -d
+docker-compose pull && docker-compose up -d
 ```
 
 打开浏览器访问 **http://localhost:3000**
@@ -142,7 +146,8 @@ docker-compose up -d
 <details>
 <summary>Docker 详细说明</summary>
 
-- 首次构建需要几分钟（编译原生模块）
+- 镜像由 CI 在推送 `v*.*.*` tag 时自动发布到本仓库的 GHCR 命名空间（`x.y.z` + `latest` 两个标签）
+- 固定版本：`TSMUSICBOT_IMAGE=ghcr.io/wslinnn/teamspeak-music-bot:2.1.0 docker-compose up -d`
 - 默认使用 `host` 网络模式，机器人可直接连接局域网 TS3 服务器
 - 数据持久化在 Docker 命名卷 `tsmusicbot-data` 中（数据库、Cookie、日志）
 - 内置健康检查（`/api/health`），支持 Docker 自动重启
@@ -150,8 +155,23 @@ docker-compose up -d
 ```bash
 docker logs -f tsmusicbot          # 查看日志
 docker-compose down                # 停止
-docker-compose up -d --build       # 代码更新后重新构建
+docker-compose pull && docker-compose up -d   # 升级到最新版
 ```
+
+**离线服务器（访问不了 GHCR 时）**：从 [Releases](https://github.com/wslinnn/teamspeak-music-bot/releases) 下载对应架构的离线包（服务器上 `uname -m` 查看：x86_64 选 amd64、aarch64 选 arm64），上传后：
+
+```bash
+# ① 载入镜像（成功后镜像名即 tsmusicbot:latest）
+docker load -i tsmusicbot-v2.1.0-linux-amd64.tar.gz
+
+# ② 切到仓库的 scripts/docker 目录，用离线专用 compose 启动
+cd teamspeak-music-bot/scripts/docker
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+> 仓库没法 clone 的离线服务器，把 `scripts/docker/docker-compose.prod.yml` 这一个文件单独拷过去放在任意目录也可以，`cd` 到它所在目录执行即可。
+>
+> 后续升级同理：载入新版本的 tar.gz 后重复第 ② 步的 `up -d`（需要固定版本时加 `TSMUSICBOT_IMAGE=tsmusicbot:v2.1.0`）。
 
 如果 TS3 服务器在其他机器上，编辑 `docker-compose.yml`：
 ```yaml
@@ -304,17 +324,19 @@ npm start
 
 ### Docker 用户
 
+预构建镜像部署（推荐，与上游相同的升级方式）：
+
 ```bash
 cd scripts/docker
 
-# 拉取最新代码
-git pull
-
-# 重新构建并启动（数据自动保留）
-docker-compose up -d --build
+# 拉取最新镜像并滚动更新（数据自动保留）
+docker-compose pull && docker-compose up -d
 ```
 
 > 数据（数据库、Cookie、日志）保存在 Docker 命名卷 `tsmusicbot-data` 中，更新不会丢失。
+>
+> - 从源码构建方式升级上来的老用户：新的 `docker-compose.yml` 默认使用 GHCR 预构建镜像，首次执行 `docker-compose pull && docker-compose up -d` 会自动切换过去
+> - 离线服务器（Release 离线包）：`docker load -i <离线包>` 后，`cd` 到 `docker-compose.prod.yml` 所在目录（仓库的 `scripts/docker/`）执行 `docker-compose -f docker-compose.prod.yml up -d`，完整步骤见[快速开始 → 方式三](#方式三docker-一键部署)
 
 ### Linux systemd 用户
 
@@ -917,7 +939,31 @@ A：本项目内置 `/login` 限流（每 IP 每分钟 5 次），但生产部�
 
 > 完整历史请查看 [git log](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot/commits/main) 或 [Releases](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot/releases)。这里只列出重要变更和面向用户的破坏性改动。
 
-### 最新版本 — v2.0.0：Fork 首个独立版本
+### v2.1.0：WebUI 体验重构（移动端优先）
+
+**歌词页重构**（交互对齐社区二开版）
+
+- 滚动架构改为纯原生单轴：自动跟随与手动滚动共用滚动位置，跟手且已播歌词可随时回滚（原 transform 方案会卡死向上滚动）
+- 手动浏览状态：滚动歌词时暂停自动跟随、高亮视口中央最近的行，视口中央显示分割线 + ▶时间胶囊（点击 seek 到该位置，无权限时置灰），停止操作 2 秒后自动恢复跟随
+- 上下留白按滚动容器高度动态计算，首尾行也能滚到正中；进页 / 切歌瞬时定位到当前行，不再从顶部滑入
+- 新增「歌词字号」三档（设置 → 通用，本地记忆）；译文开关保留，音译 / 逐字暂未提供（后端已透出音译字段，便于日后恢复）
+
+**移动端体验**
+
+- 胶囊迷你播放器：封面 / 歌名点击直达歌词页；控制键加大到 44px 触控高度；切歌与 seek 提供触感反馈（Android）
+- 搜索 / 播放历史 / 收藏 / 设置 / 歌词页隐藏返回按钮（底部导航已覆盖），歌单详情等下钻页保留
+- 移动端输入框统一 16px，规避 iOS 聚焦时整页放大；全局防横向溢出兜底
+
+**稳定性与细节**
+
+- WebSocket 断连全局横幅：重连中可见、重试耗尽可一键手动重连，恢复后自动消失
+- 队列抽屉打开时自动滚动到当前播放行（长队列免翻找）
+- PWA 安装引导（设置 → 通用，Chromium 系一键安装；iOS 提供添加到主屏幕指引）
+- 修复：播放进度时钟在 Pinia 缓存下冻结（进度条 / 歌词不同步）、歌词上下留白在移动端塌缩、首页封面移动端溢出挤压、网易封面 http:// 混合内容被移动端拦截；搜索页本地上传改为拖拽卡片并支持多选
+
+**升级说明**：无配置变化与破坏性改动。源码部署拉取后重新构建即可；**Docker 部署只需 `docker-compose pull && docker-compose up -d`**（GHCR 已发布 `2.1.0` / `latest` 多架构镜像）；移动端浏览器若行为异常请强刷一次（Service Worker 缓存旧资源）。
+
+### v2.0.0：Fork 首个独立版本
 
 基于上游 v1.13.1 的后端 + 本 fork 完全重写的前端。完整差异见顶部「与上游的差异」，此处为面向用户的要点与升级说明。
 

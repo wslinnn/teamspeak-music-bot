@@ -21,6 +21,8 @@
           @save-idle-timeout="saveIdleTimeout"
         />
 
+        <SettingsAccount v-if="activeTab === 'general'" class="mt-6" />
+
         <SettingsBots
           v-if="activeTab === 'bots'"
           :bots="store.bots"
@@ -187,6 +189,7 @@ import { useToast } from '../composables/useToast';
 import { useAuthStore } from '../stores/auth';
 import SettingsLayout from '../components/settings/SettingsLayout.vue';
 import SettingsTheme from '../components/settings/SettingsTheme.vue';
+import SettingsAccount from '../components/settings/SettingsAccount.vue';
 import SettingsGeneral from '../components/settings/SettingsGeneral.vue';
 import SettingsBots from '../components/settings/SettingsBots.vue';
 import SettingsPlatforms from '../components/settings/SettingsPlatforms.vue';

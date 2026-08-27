@@ -38,13 +38,13 @@
         </div>
         <!-- 仅按键区阻断冒泡：点封面/歌名/歌手要冒泡到根节点进歌词页 -->
         <div class="flex items-center gap-0.5 shrink-0" @click.stop>
-          <button v-if="canControl" aria-label="上一首" class="mini-ctrl-btn text-[21px] opacity-80 active:scale-95" @click="store.prev()">
+          <button v-if="canControl" aria-label="上一首" class="mini-ctrl-btn text-[21px] opacity-80 active:scale-95" @click="skipPrev">
             <Icon icon="mdi:skip-previous" />
           </button>
           <button v-if="canTransport" :aria-label="store.isPlaying ? '暂停' : '播放'" class="mini-ctrl-btn text-[24px] text-primary active:scale-95" @click="togglePlay">
             <Icon :icon="store.isPlaying ? 'mdi:pause' : 'mdi:play'" />
           </button>
-          <button v-if="canSkip" aria-label="下一首" class="mini-ctrl-btn text-[21px] opacity-80 active:scale-95" @click="store.next()">
+          <button v-if="canSkip" aria-label="下一首" class="mini-ctrl-btn text-[21px] opacity-80 active:scale-95" @click="skipNext">
             <Icon icon="mdi:skip-next" />
           </button>
           <button v-if="canModeCtl" :aria-label="`播放模式: ${modeLabel}`" :title="modeLabel" class="mini-ctrl-btn text-[19px]" :class="currentMode !== 'seq' ? 'text-primary' : 'opacity-80'" @click="cycleMode">
@@ -92,6 +92,7 @@ import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
 import { useDecoupledSlider } from '../composables/useDecoupledSlider.js';
+import { haptic } from '../utils/haptic';
 import CoverArt from './CoverArt.vue';
 import PlayingIndicator from './PlayingIndicator.vue';
 import Queue from './Queue.vue';
@@ -136,6 +137,17 @@ function onRowClick() {
 function togglePlay() {
   if (store.isPlaying) store.pause();
   else store.resume();
+}
+
+// 切歌带触感确认（Android 生效，iOS 静默）；播放/暂停是高频操作不加震动
+function skipPrev() {
+  store.prev();
+  haptic(10);
+}
+
+function skipNext() {
+  store.next();
+  haptic(10);
 }
 
 function toggleQueue() {
@@ -263,7 +275,10 @@ async function onSeekUp(e: PointerEvent) {
   const sameSong = currentSong.value?.id === seekSongId;
   endSeekGesture(); // 必须在 await 之前同步执行
   try {
-    if (duration > 0 && sameSong) await store.seek(ratio * duration);
+    if (duration > 0 && sameSong) {
+      await store.seek(ratio * duration);
+      haptic(8); // seek 提交成功的物理确认
+    }
   } catch {
     // seek 被拒（403/400/离线）——交还服务器时钟即可
   } finally {

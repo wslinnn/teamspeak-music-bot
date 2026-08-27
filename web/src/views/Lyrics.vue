@@ -167,6 +167,8 @@ const rootStyle = computed(() => ({
 }));
 
 async function fetchLyrics() {
+  // 请求序号守卫：快速连续切歌时旧响应不得覆盖新歌状态
+  const requestId = ++lyricsRequestId;
   if (!currentSong.value) return;
   loading.value = true;
   lines.value = [];
@@ -176,12 +178,14 @@ async function fetchLyrics() {
     const res = await http.get(`/api/music/lyrics/${currentSong.value.id}`, {
       params: { platform: currentSong.value.platform },
     });
+    if (requestId !== lyricsRequestId) return;
     lines.value = res.data.lyrics || [];
   } catch (err) {
     console.warn('Failed to load lyrics:', err);
+    if (requestId !== lyricsRequestId) return;
     lines.value = [];
   } finally {
-    loading.value = false;
+    if (requestId === lyricsRequestId) loading.value = false;
   }
   await positionAfterFetch();
 }
@@ -227,6 +231,9 @@ function syncLyrics() {
 }
 
 let seekInFlight = false;
+
+// 歌词请求序号：旧响应不得覆盖新歌状态（见 fetchLyrics 守卫）
+let lyricsRequestId = 0;
 
 async function seekToLine(index: number) {
   resetBrowsing();
@@ -341,7 +348,12 @@ function stopSync() {
   }
 }
 
-watch(currentSong, () => {
+// 按内容键监听而非对象引用：stateChange 广播会整体替换 bot 对象导致
+// currentSong 引用翻转（同一首歌），浅 watch 会误触发重新拉取歌词
+watch(() => {
+  const song = currentSong.value;
+  return song ? `${song.platform}:${song.id}` : null;
+}, () => {
   resetBrowsing();
   fetchLyrics();
   lineRefs.value = {};

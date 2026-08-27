@@ -12,7 +12,7 @@
     </div>
 
     <div v-if="error" class="text-xs text-red-500 px-3">{{ error }}</div>
-    <EmptyState v-else-if="!loading && entries.length === 0" message="暂无操作记录" icon="mdi:file-document-outline-outline" />
+    <EmptyState v-else-if="!loading && entries.length === 0" message="暂无操作记录" icon="mdi:file-document-outline" />
 
     <div v-else class="flex flex-col gap-1">
       <div

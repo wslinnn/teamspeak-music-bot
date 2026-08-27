@@ -29,13 +29,16 @@
       </div>
     </div>
 
-    <div v-if="canInstall || showIosHint" class="flex items-center justify-between">
-      <div class="flex items-center gap-2 text-sm font-medium">
+    <div class="flex items-start justify-between gap-3">
+      <div class="flex items-center gap-2 text-sm font-medium shrink-0 pt-0.5">
         <Icon icon="mdi:cellphone-arrow-down" class="text-lg opacity-60" />
         安装到主屏幕
       </div>
-      <BaseButton v-if="canInstall" variant="secondary" size="sm" @click="install">安装</BaseButton>
-      <span v-else class="text-xs text-text-secondary">iOS：分享 → 添加到主屏幕</span>
+      <p class="text-xs text-text-secondary text-right leading-relaxed">
+        安卓 Chrome：菜单 →「添加到主屏幕」<br />
+        iOS Safari：分享 →「添加到主屏幕」<br />
+        桌面 Chrome / Edge：地址栏右侧安装图标
+      </p>
     </div>
   </div>
 </template>
@@ -44,11 +47,9 @@
 import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../../stores/player';
-import { usePwaInstall } from '../../composables/usePwaInstall';
 import BaseButton from '../common/BaseButton.vue';
 
 const store = usePlayerStore();
-const { canInstall, showIosHint, install } = usePwaInstall();
 
 // 歌词字号：纯本地显示偏好（与主题同级），三档缩放正文/活跃行/译文
 const FONT_OPTIONS = [

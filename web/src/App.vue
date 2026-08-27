@@ -1,7 +1,7 @@
 <template>
   <div class="app">
     <Navbar v-if="!route.meta.hideNavbar" />
-    <ConnectionBanner :state="connectionState" @reconnect="reconnect" />
+    <ConnectionBanner v-if="wsStarted" :state="connectionState" @reconnect="reconnect" />
     <main class="main-content">
       <RouterView v-slot="{ Component }">
         <Transition name="fade" mode="out-in">
@@ -18,7 +18,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerStore } from './stores/player.js';
 import { useAuthStore } from './stores/auth';
@@ -40,6 +40,8 @@ const favoritesStore = useFavoritesStore();
 const toast = useToast();
 const theme = computed(() => playerStore.theme);
 const { connect, disconnect, connectionState } = useWebSocket();
+// WS 只在有会话后启动；未登录不尝试连接，此时也不渲染断线横幅
+const wsStarted = ref(false);
 
 // 手动重连：disconnect 会清零重试计数（自动重连 10 次失败后不再重试），再重新建连
 function reconnect() {
@@ -90,8 +92,18 @@ function onVisibilityChange() {
 }
 
 onMounted(async () => {
-  authStore.init().catch((err) => console.warn('auth init failed:', err));
   playerStore.loadTheme();
+  try {
+    await authStore.init();
+  } catch (err) {
+    console.warn('auth init failed:', err);
+  }
+
+  // 未登录：只渲染静态壳，登录成功会整页重载走一遍完整启动
+  if (!authStore.user) return;
+
+  // 有会话才连 WS（服务端会拒绝未鉴权连接，白白触发 4001 停止重连）
+  wsStarted.value = true;
   connect();
   // 先拿到 bot 列表再校验 ?bot= 专属锁定（路由守卫只是先记录，这里才决定锁不锁）
   await playerStore.fetchBots();

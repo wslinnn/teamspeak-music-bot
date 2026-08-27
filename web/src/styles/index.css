@@ -158,6 +158,8 @@
 
   html {
     font-size: 16px;
+    /* 根元素同步主题底色：safe-area / overscroll 露出的区域不再显示系统黑底 */
+    background: var(--bg-primary);
   }
 
   body {

@@ -267,8 +267,9 @@ function exitScope() {
 }
 
 function handleLogout() {
+  // 整页重载回登录页：与登录流程对齐，应用以未登录状态完整重建
   authStore.logout();
-  router.push('/login');
+  window.location.replace('/login');
 }
 
 function selectBot(id: string) {
