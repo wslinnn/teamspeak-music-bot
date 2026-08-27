@@ -4,52 +4,58 @@
     class="fixed left-2 right-2 bottom-[calc(var(--tabbar-height)+env(safe-area-inset-bottom)+8px)] z-[var(--z-mini-player)] md:hidden"
     @click="onRowClick"
   >
-    <!-- 点按/拖拽 seek 细条：视觉 2px，命中区 12px 向下长入胶囊自身内边距
-         （#143，手势与解耦逻辑自上游 App.vue 等价移植） -->
-    <div
-      ref="seekBarRef"
-      class="absolute top-0 left-2.5 right-2.5 h-3 select-none"
-      :class="canSeek ? 'cursor-pointer touch-none' : ''"
-      @pointerdown="onSeekDown"
-      @pointermove="onSeekMove"
-      @pointerup="onSeekUp"
-      @pointercancel="onSeekCancel"
-    >
-      <div class="relative mt-[3px] h-0.5 rounded-sm bg-border-color">
-        <div class="absolute inset-y-0 left-0 bg-primary rounded-sm" :style="{ width: seekBarPct + '%' }" />
-        <div
-          class="absolute top-1/2 w-2 h-2 -mt-1 -ml-1 rounded-full bg-primary pointer-events-none transition-[opacity,transform] duration-[var(--transition-fast)]"
-          :class="seeking ? 'opacity-100 scale-100' : 'opacity-0 scale-0'"
-          :style="{ left: seekBarPct + '%' }"
-        />
+    <div class="flex flex-col h-[var(--mini-player-height)] rounded-[12px] bg-bg-secondary shadow-[0_6px_20px_rgba(0,0,0,0.35)] overflow-hidden">
+      <!-- 进度行：已播放/总时长分列两端；点按或拖拽 seek（命中区整行，#143 等价移植） -->
+      <div
+        ref="seekBarRef"
+        class="flex items-center gap-2 px-3 pt-2 pb-0.5 select-none"
+        :class="canSeek ? 'cursor-pointer touch-none' : ''"
+        @pointerdown="onSeekDown"
+        @pointermove="onSeekMove"
+        @pointerup="onSeekUp"
+        @pointercancel="onSeekCancel"
+      >
+        <span class="text-[10px] leading-none text-text-secondary tabular-nums">{{ formatTime(displayElapsed) }}</span>
+        <div class="relative flex-1 h-1 rounded-full bg-border-color">
+          <div class="absolute inset-y-0 left-0 rounded-full bg-primary" :style="{ width: seekBarPct + '%' }" />
+          <div
+            class="absolute top-1/2 w-2.5 h-2.5 -mt-[5px] -ml-[5px] rounded-full bg-primary shadow-[0_1px_4px_rgba(0,0,0,0.3)] pointer-events-none transition-[opacity,transform] duration-[var(--transition-fast)]"
+            :class="seeking ? 'opacity-100 scale-100' : 'opacity-0 scale-0'"
+            :style="{ left: seekBarPct + '%' }"
+          />
+        </div>
+        <span class="text-[10px] leading-none text-text-secondary tabular-nums">{{ formatTime(activeDuration) }}</span>
       </div>
-    </div>
 
-    <div class="flex items-center gap-2.5 h-[var(--mini-player-height)] pl-2.5 pr-1.5 rounded-[10px] bg-bg-secondary shadow-[0_6px_20px_rgba(0,0,0,0.35)]">
-      <CoverArt :url="currentSong.coverUrl" :size="40" :radius="8" />
-      <div class="flex-1 min-w-0">
-        <div class="text-[13px] font-medium truncate">{{ currentSong.name }}</div>
-        <div class="text-[11px] text-text-secondary truncate">{{ currentSong.artist }}</div>
-      </div>
-      <div class="flex items-center gap-0.5 shrink-0" @click.stop>
-        <button v-if="canControl" aria-label="上一首" class="w-7 h-8 flex items-center justify-center text-[19px] opacity-80 active:scale-95" @click="store.prev()">
-          <Icon icon="mdi:skip-previous" />
-        </button>
-        <button v-if="canTransport" :aria-label="store.isPlaying ? '暂停' : '播放'" class="w-7 h-8 flex items-center justify-center text-[22px] text-primary active:scale-95" @click="togglePlay">
-          <Icon :icon="store.isPlaying ? 'mdi:pause' : 'mdi:play'" />
-        </button>
-        <button v-if="canSkip" aria-label="下一首" class="w-7 h-8 flex items-center justify-center text-[19px] opacity-80 active:scale-95" @click="store.next()">
-          <Icon icon="mdi:skip-next" />
-        </button>
-        <button v-if="canModeCtl" :aria-label="`播放模式: ${modeLabel}`" :title="modeLabel" class="w-7 h-8 flex items-center justify-center text-[17px] opacity-80" @click="cycleMode">
-          <Icon :icon="modeIcon" />
-        </button>
-        <button aria-label="播放队列" class="w-7 h-8 flex items-center justify-center text-[17px] opacity-80" :class="{ 'text-primary': queueOpen }" @click="toggleQueue">
-          <Icon icon="mdi:playlist-music" />
-        </button>
-        <button v-if="canTransport" aria-label="音量" class="w-7 h-8 flex items-center justify-center text-[17px] opacity-80" @click="toggleVolume">
-          <Icon icon="mdi:volume-high" />
-        </button>
+      <div class="flex items-center gap-2.5 px-2.5 pb-1.5 min-h-0" @click.stop>
+        <CoverArt :url="currentSong.coverUrl" :size="40" :radius="8" />
+        <div class="flex-1 min-w-0">
+          <div class="text-[13px] font-medium truncate flex items-center">
+            <PlayingIndicator v-if="store.isPlaying && !store.isPaused" :is-playing="true" class="mr-1.5 inline-flex shrink-0" />
+            <span class="truncate">{{ currentSong.name }}</span>
+          </div>
+          <div class="text-[11px] text-text-secondary truncate">{{ currentSong.artist }}</div>
+        </div>
+        <div class="flex items-center gap-0.5 shrink-0">
+          <button v-if="canControl" aria-label="上一首" class="w-7 h-8 flex items-center justify-center text-[19px] opacity-80 active:scale-95" @click="store.prev()">
+            <Icon icon="mdi:skip-previous" />
+          </button>
+          <button v-if="canTransport" :aria-label="store.isPlaying ? '暂停' : '播放'" class="w-7 h-8 flex items-center justify-center text-[22px] text-primary active:scale-95" @click="togglePlay">
+            <Icon :icon="store.isPlaying ? 'mdi:pause' : 'mdi:play'" />
+          </button>
+          <button v-if="canSkip" aria-label="下一首" class="w-7 h-8 flex items-center justify-center text-[19px] opacity-80 active:scale-95" @click="store.next()">
+            <Icon icon="mdi:skip-next" />
+          </button>
+          <button v-if="canModeCtl" :aria-label="`播放模式: ${modeLabel}`" :title="modeLabel" class="w-7 h-8 flex items-center justify-center text-[17px]" :class="currentMode !== 'seq' ? 'text-primary' : 'opacity-80'" @click="cycleMode">
+            <Icon :icon="modeIcon" />
+          </button>
+          <button aria-label="播放队列" class="w-7 h-8 flex items-center justify-center text-[17px] opacity-80" :class="{ 'text-primary': queueOpen }" @click="toggleQueue">
+            <Icon icon="mdi:playlist-music" />
+          </button>
+          <button v-if="canTransport" aria-label="音量" class="w-7 h-8 flex items-center justify-center text-[17px] opacity-80" @click="toggleVolume">
+            <Icon icon="mdi:volume-high" />
+          </button>
+        </div>
       </div>
 
       <!-- 音量浮层 -->
@@ -86,6 +92,7 @@ import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
 import { useDecoupledSlider } from '../composables/useDecoupledSlider.js';
 import CoverArt from './CoverArt.vue';
+import PlayingIndicator from './PlayingIndicator.vue';
 import Queue from './Queue.vue';
 
 const route = useRoute();
@@ -153,14 +160,23 @@ const {
 
 // ── 进度显示（rAF + liveElapsed，#107）───────────────────────────────
 const mobileProgressPct = ref(0);
+const mobileElapsed = ref(0);
 let rafId: number | null = null;
+
+function formatTime(seconds: number): string {
+  if (!seconds || seconds < 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 function updateProgress() {
   // 拖动期间跳过写入：手指拥有进度条，不让时钟每帧把它拽回去
   if (!seeking.value) {
     const duration = activeDuration.value;
+    mobileElapsed.value = store.liveElapsed();
     mobileProgressPct.value = duration > 0
-      ? Math.min((store.liveElapsed() / duration) * 100, 100)
+      ? Math.min((mobileElapsed.value / duration) * 100, 100)
       : 0;
   }
   rafId = requestAnimationFrame(updateProgress);
@@ -179,6 +195,9 @@ let seekGeneration = 0;
 let seekEndedAt = 0;
 
 const seekBarPct = computed(() => (seeking.value ? seekPct.value : mobileProgressPct.value));
+const displayElapsed = computed(() =>
+  seeking.value ? (seekPct.value / 100) * seekableDuration() : mobileElapsed.value,
+);
 
 /** 指针 x → 0..1；量不到（元素不可测）时返回 null */
 function seekRatio(e: PointerEvent): number | null {

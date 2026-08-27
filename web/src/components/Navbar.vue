@@ -43,7 +43,7 @@
           <Icon v-else-if="activeBot?.paused" icon="mdi:pause" class="text-sm text-warning" />
           <Icon icon="mdi:chevron-down" class="text-xl opacity-50 transition-transform duration-200" :class="{ 'rotate-180': dropdownOpen }" />
         </button>
-        <div v-if="dropdownOpen" class="absolute top-[calc(100%+6px)] right-0 w-[calc(100vw-32px)] max-w-[260px] min-w-[200px] bg-bg-secondary rounded-[var(--radius-md)] p-1 shadow-[0_8px_30px_rgba(0,0,0,0.3)]">
+        <div v-if="dropdownOpen" class="absolute top-[calc(100%+6px)] right-0 w-[calc(100vw-32px)] max-w-[260px] min-w-[200px] bg-bg-secondary rounded-[var(--radius-md)] p-1 shadow-[0_8px_30px_rgba(0,0,0,0.3)] max-md:fixed max-md:top-[calc(var(--navbar-height)+4px)] max-md:left-3 max-md:right-3 max-md:w-auto max-md:min-w-0 max-md:max-w-none">
           <div
             v-for="bot in store.bots"
             :key="bot.id"
@@ -122,9 +122,6 @@
       <!-- 登录/设置：移动端也可用（底部 TabBar 不含账户入口） -->
       <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-3 md:px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
         登录
-      </RouterLink>
-      <RouterLink v-if="!authStore.isGuest" to="/settings" aria-label="设置" class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 flex items-center justify-center min-h-[44px] min-w-[44px] md:hidden">
-        <Icon icon="mdi:cog" />
       </RouterLink>
       <!-- Desktop-only auth controls -->
       <div class="hidden md:flex items-center gap-4">

@@ -60,12 +60,11 @@
   --player-height: 56px;
   /* 移动端底部结构（MiniPlayer 胶囊 + TabBar，md 以下） */
   --tabbar-height: 60px;
-  --mini-player-height: 58px;
+  --mini-player-height: 72px;
 
   /* Overlay 层级：全站浮层统一从这里取值，避免魔法数互踩。
      放普通 :root 而非 @theme——这些只被 z-[var(--…)] 任意值引用，
      @theme 的按需裁剪可能不生成它们 */
-  --z-mobile-menu: 99;
   --z-navbar: 100;
   --z-player: 100;
   --z-mini-player: 95;
