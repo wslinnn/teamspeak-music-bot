@@ -9,6 +9,9 @@
       </RouterView>
     </main>
     <Player />
+    <!-- 移动端（md 以下）：胶囊迷你播放器悬浮于底部导航之上 -->
+    <MiniPlayer />
+    <MobileTabBar />
     <ToastContainer />
   </div>
 </template>
@@ -23,6 +26,8 @@ import { useWebSocket } from './composables/useWebSocket.js';
 import { useToast } from './composables/useToast';
 import Navbar from './components/Navbar.vue';
 import Player from './components/Player.vue';
+import MiniPlayer from './components/MiniPlayer.vue';
+import MobileTabBar from './components/MobileTabBar.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
 
 const route = useRoute();
@@ -127,6 +132,14 @@ onUnmounted(() => {
 @media (max-width: 1336px) {
   .main-content {
     padding: 80px 5vw 80px;
+  }
+}
+
+/* 移动端：导航交给底部 TabBar，底部预留 TabBar + 胶囊高度 + 安全区 */
+@media (max-width: 767px) {
+  .main-content {
+    padding: calc(var(--navbar-height) + 12px) 18px
+      calc(var(--tabbar-height) + var(--mini-player-height) + env(safe-area-inset-bottom) + 18px);
   }
 }
 </style>

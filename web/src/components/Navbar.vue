@@ -1,6 +1,6 @@
 <template>
   <nav class="fixed top-0 left-0 right-0 h-[var(--navbar-height)] flex items-center px-[10vw] z-[var(--z-navbar)] frosted-glass max-[1336px]:px-[5vw]">
-    <RouterLink to="/" class="text-lg font-bold text-primary mr-10">TSMusicBot</RouterLink>
+    <RouterLink to="/" class="text-lg font-bold text-primary mr-4 md:mr-10 max-[380px]:text-base">TSMusicBot</RouterLink>
 
     <!-- Desktop nav links -->
     <div class="hidden md:flex gap-6">
@@ -115,6 +115,17 @@
       <button class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center" @click="store.toggleTheme()">
         <Icon :icon="store.theme === 'dark' ? 'mdi:weather-night' : 'mdi:white-balance-sunny'" />
       </button>
+      <!-- 服务器状态：移动端经此进入（桌面走左侧链接） -->
+      <button class="md:hidden text-[20px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="服务器状态" @click="serverTreeOpen = true">
+        <Icon icon="mdi:server" />
+      </button>
+      <!-- 登录/设置：移动端也可用（底部 TabBar 不含账户入口） -->
+      <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-3 md:px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
+        登录
+      </RouterLink>
+      <RouterLink v-if="!authStore.isGuest" to="/settings" aria-label="设置" class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 flex items-center justify-center min-h-[44px] min-w-[44px] md:hidden">
+        <Icon icon="mdi:cog" />
+      </RouterLink>
       <!-- Desktop-only auth controls -->
       <div class="hidden md:flex items-center gap-4">
         <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
@@ -133,71 +144,8 @@
           </button>
         </div>
       </div>
-
-      <!-- Mobile hamburger -->
-      <button class="md:hidden p-2 text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="mobileMenuOpen = !mobileMenuOpen">
-        <Icon :icon="mobileMenuOpen ? 'mdi:close' : 'mdi:menu'" class="text-2xl" />
-      </button>
     </div>
   </nav>
-
-  <!-- Mobile menu overlay -->
-  <Transition name="mobile-menu">
-    <div v-if="mobileMenuOpen" class="fixed top-[var(--navbar-height)] right-0 bottom-0 left-0 bg-black/50 z-[var(--z-mobile-menu)] backdrop-blur-sm md:hidden" @click="mobileMenuOpen = false">
-      <div class="absolute top-0 right-0 w-60 max-w-[80vw] bg-bg-secondary border-l border-border-color p-3 flex flex-col gap-1" @click.stop>
-        <RouterLink
-          v-for="link in mobileLinks"
-          :key="link.to"
-          :to="link.to"
-          class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg"
-          active-class="opacity-100 !text-primary bg-primary/10"
-          @click="mobileMenuOpen = false"
-        >
-          <Icon :icon="link.icon" class="mr-3" /> {{ link.label }}
-        </RouterLink>
-        <button
-          class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg w-full text-left"
-          @click="mobileMenuOpen = false; serverTreeOpen = true"
-        >
-          <Icon icon="mdi:server" class="mr-3" /> 服务器
-        </button>
-        <RouterLink
-          v-if="!authStore.isGuest"
-          to="/settings"
-          class="flex items-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-medium opacity-70 transition-all duration-[var(--transition-fast)] hover:opacity-90 hover:bg-hover-bg"
-          active-class="opacity-100 !text-primary bg-primary/10"
-          @click="mobileMenuOpen = false"
-        >
-          <Icon icon="mdi:cog" class="mr-3" /> 设置
-        </RouterLink>
-
-        <!-- Mobile auth section -->
-        <div class="mt-2 pt-2 border-t border-border-color">
-          <RouterLink
-            v-if="!authStore.isAuthenticated"
-            to="/login"
-            class="flex items-center justify-center px-4 py-3 rounded-[var(--radius-md)] text-[15px] font-semibold bg-primary text-white transition-all duration-[var(--transition-fast)] hover:brightness-110"
-            @click="mobileMenuOpen = false"
-          >
-            <Icon icon="mdi:login" class="mr-3" /> 登录
-          </RouterLink>
-
-          <div v-if="authStore.isAuthenticated" class="flex items-center justify-between px-4 py-3">
-            <div class="flex items-center gap-2 text-[15px] font-medium text-text-secondary" :title="authStore.roleLabel">
-              <Icon :icon="authStore.isAdmin ? 'mdi:shield-account' : authStore.isGuest ? 'mdi:walk' : 'mdi:account'" class="text-lg" />
-              <span>{{ authStore.username }} · {{ authStore.roleLabel }}</span>
-            </div>
-            <button
-              class="flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-md)] text-[13px] font-medium opacity-60 transition-all duration-[var(--transition-fast)] hover:opacity-100 hover:bg-hover-bg"
-              @click="handleLogout(); mobileMenuOpen = false"
-            >
-              <Icon icon="mdi:logout" /> 退出
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </Transition>
 
   <ServerTreeDrawer v-model="serverTreeOpen" />
 
@@ -240,16 +188,8 @@ const desktopLinks = computed(() => [
   ...(!authStore.isGuest ? [{ to: '/favorites', label: '收藏' }] : []),
 ]);
 
-const mobileLinks = computed(() => [
-  { to: '/', label: '发现', icon: 'mdi:home' },
-  { to: '/search', label: '搜索', icon: 'mdi:magnify' },
-  ...(!authStore.isGuest ? [{ to: '/library', label: '音乐库', icon: 'mdi:music-box-multiple' }] : []),
-  { to: '/history', label: '播放历史', icon: 'mdi:history' },
-  ...(!authStore.isGuest ? [{ to: '/favorites', label: '收藏', icon: 'mdi:heart' }] : []),
-]);
 
 const dropdownOpen = ref(false);
-const mobileMenuOpen = ref(false);
 const serverTreeOpen = ref(false);
 const selectorRef = ref<HTMLElement | null>(null);
 const togglingBots = ref<Record<string, boolean>>({});
@@ -372,12 +312,5 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.mobile-menu-enter-active,
-.mobile-menu-leave-active {
-  transition: opacity 0.2s ease;
-}
-.mobile-menu-enter-from,
-.mobile-menu-leave-to {
-  opacity: 0;
-}
+
 </style>
