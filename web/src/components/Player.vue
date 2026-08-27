@@ -1,5 +1,6 @@
 <template>
-  <div class="fixed bottom-0 left-0 right-0 z-[var(--z-player)] frosted-glass pb-[env(safe-area-inset-bottom)]" v-if="currentSong">
+  <!-- 移动端由 MiniPlayer + MobileTabBar 接管（App.vue），本栏桌面专用 -->
+  <div class="hidden md:block fixed bottom-0 left-0 right-0 z-[var(--z-player)] frosted-glass pb-[env(safe-area-inset-bottom)]" v-if="currentSong">
     <Queue :open="showQueue" @close="showQueue = false" />
 
     <div class="h-[var(--player-height)] flex items-center px-6 relative">
@@ -66,10 +67,10 @@
         <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-left hidden sm:inline">{{ formatTime(activeDuration) }}</span>
       </div>
 
-      <div class="hidden sm:flex sm:w-[240px] sm:shrink-0 items-center justify-end gap-2">
+      <div class="sm:w-[240px] sm:shrink-0 flex items-center justify-end gap-2">
         <!-- Desktop volume -->
         <template v-if="canTransport">
-          <Icon icon="mdi:volume-high" class="text-lg opacity-60 hidden sm:block" />
+          <Icon icon="mdi:volume-high" class="text-lg opacity-60" />
           <input
             type="range"
             min="0"
@@ -80,30 +81,15 @@
             @pointerup="onVolumeRelease"
             @pointercancel="onVolumeRelease"
             @blur="onVolumeRelease"
-            class="volume-slider hidden sm:block"
+            class="volume-slider"
           />
         </template>
         <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" :class="{ 'opacity-100 text-primary': showQueue }" @click="showQueue = !showQueue">
           <Icon icon="mdi:playlist-music" />
         </button>
       </div>
-      <!-- Mobile: volume/playmode sheet toggle + queue toggle -->
-      <div class="sm:hidden flex items-center gap-2 shrink-0">
-        <button
-          v-if="canTransport || canModeCtl"
-          class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100"
-          aria-label="音量与播放设置"
-          @click="mobileControlsOpen = true"
-        >
-          <Icon icon="mdi:volume-high" />
-        </button>
-        <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" :class="{ 'opacity-100 text-primary': showQueue }" @click="showQueue = !showQueue">
-          <Icon icon="mdi:playlist-music" />
-        </button>
-      </div>
     </div>
     <ServerTreeDrawer v-model="serverTreeOpen" />
-    <MobilePlayerControls v-model="mobileControlsOpen" />
   </div>
 </template>
 
@@ -118,14 +104,12 @@ import CoverArt from './CoverArt.vue';
 import Queue from './Queue.vue';
 import PlayingIndicator from './PlayingIndicator.vue';
 import ServerTreeDrawer from './ServerTreeDrawer.vue';
-import MobilePlayerControls from './MobilePlayerControls.vue';
 import { formatDuration } from '../utils/format';
 
 const route = useRoute();
 const router = useRouter();
 const showQueue = ref(false);
 const serverTreeOpen = ref(false);
-const mobileControlsOpen = ref(false);
 
 function openServerTree() {
   serverTreeOpen.value = true;
@@ -174,7 +158,9 @@ function formatTime(seconds: number): string {
 }
 
 function updateProgress() {
-  currentElapsed.value = store.elapsed;
+  // liveElapsed()（action，非缓存的 elapsed getter）逐帧从服务器锚点重新插值，
+  // 时钟才能每秒平滑推进而不是随轮询台阶跳变（上游 issue #107）
+  currentElapsed.value = store.liveElapsed();
   const duration = activeDuration.value;
   progressPercent.value = duration > 0
     ? Math.min((currentElapsed.value / duration) * 100, 100)

@@ -47,7 +47,7 @@ export interface FavoritePlaylist {
   songCount: number;
 }
 
-interface TimingState {
+export interface TimingState {
   serverElapsed: number;
   serverSyncTime: number;
   wasPlaying: boolean;
@@ -57,6 +57,22 @@ const HOME_CACHE_TTL = 5 * 60 * 1000;
 
 function defaultTiming(): TimingState {
   return { serverElapsed: 0, serverSyncTime: 0, wasPlaying: false };
+}
+
+/** 从最后一次服务器锚点插值出当前播放进度。纯函数：唯一时间源是 Date.now()。
+ *  刻意不放进 Pinia getter——getter 是 computed，缓存只在响应式依赖变化时失效，
+ *  而 Date.now() 不是响应式依赖，rAF/interval 循环直接读 getter 会在两次服务器
+ *  推送之间拿到冻结值，时钟呈台阶状跳变（上游 issue #107）。
+ *  逐帧消费方（进度条/歌词同步）必须经由 liveElapsed() action 调用。 */
+export function interpolateElapsed(
+  timing: TimingState,
+  isPaused: boolean,
+  maxDuration: number,
+): number {
+  if (!timing.wasPlaying || timing.serverSyncTime === 0 || isPaused) {
+    return Math.min(timing.serverElapsed, maxDuration);
+  }
+  return Math.min(timing.serverElapsed + (Date.now() - timing.serverSyncTime) / 1000, maxDuration);
 }
 
 export const usePlayerStore = defineStore('player', {
@@ -85,6 +101,8 @@ export const usePlayerStore = defineStore('player', {
 
     // 已存清单功能开关（GET /api/bot/settings；控制 Queue 抽屉的清单按钮显隐）
     savedQueuesEnabled: false,
+    /** 本地音视频上传播放开关（GET /api/bot/settings；默认视为关闭，搜索页据此显隐上传卡） */
+    localAudioEnabled: false,
 
     // 音源启用状态（GET /api/music/providers）与平台登录态（GET /api/auth/status），
     // 供首页推荐/FM 多源切换与各处显隐使用
@@ -115,17 +133,14 @@ export const usePlayerStore = defineStore('player', {
       if (!botId) return [];
       return this.queues[botId] ?? [];
     },
-    /** Interpolated elapsed for the active bot */
+    /** Interpolated elapsed for the active bot（一次性响应式读；逐帧消费用 liveElapsed） */
     elapsed(): number {
       const botId = this.activeBotId ?? this.bots[0]?.id;
       if (!botId || !this.activeBot?.currentSong) return 0;
       const timing = this.timings[botId] ?? defaultTiming();
-      // 试听曲按 effectiveDuration 钳制（B1）：否则进度条按完整曲长走不完
       const maxDuration =
         (this.activeBot.effectiveDuration ?? this.activeBot.currentSong.duration) || Infinity;
-      if (!timing.wasPlaying || timing.serverSyncTime === 0) return Math.min(timing.serverElapsed, maxDuration);
-      if (this.isPaused) return Math.min(timing.serverElapsed, maxDuration);
-      return Math.min(timing.serverElapsed + (Date.now() - timing.serverSyncTime) / 1000, maxDuration);
+      return interpolateElapsed(timing, this.isPaused, maxDuration);
     },
   },
 
@@ -253,11 +268,12 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    /** 拉取 bot 全局设置里的功能开关（当前只消费 savedQueuesEnabled） */
+    /** 拉取 bot 全局设置里的功能开关（savedQueuesEnabled / localAudioEnabled） */
     async fetchBotSettings() {
       try {
         const res = await http.get('/api/bot/settings');
         this.savedQueuesEnabled = res.data?.savedQueuesEnabled === true;
+        this.localAudioEnabled = res.data?.localAudioEnabled === true;
       } catch {
         // 拉不到保持默认（隐藏），后端禁用时清单接口本就 403
       }
@@ -389,6 +405,19 @@ export const usePlayerStore = defineStore('player', {
       } catch (err) {
         console.debug('fetchBots failed:', err);
       }
+    },
+
+    /** Live elapsed seconds for the active bot。与 elapsed getter 的区别：action
+     *  不被缓存，每次调用都重新插值——进度条/歌词等 rAF/interval 消费方必须用它，
+     *  否则时钟在两次服务器推送之间冻结（上游 issue #107）。 */
+    liveElapsed(): number {
+      const botId = this.activeBotId ?? this.bots[0]?.id;
+      if (!botId || !this.activeBot?.currentSong) return 0;
+      const timing = this.timings[botId] ?? defaultTiming();
+      // 试听曲按 effectiveDuration 钳制（B1）：否则进度条按完整曲长走不完
+      const maxDuration =
+        (this.activeBot.effectiveDuration ?? this.activeBot.currentSong.duration) || Infinity;
+      return interpolateElapsed(timing, this.isPaused, maxDuration);
     },
 
     /** Poll server for real elapsed time and playback state for active bot */
@@ -639,8 +668,14 @@ export const usePlayerStore = defineStore('player', {
         bot.paused = false;
       }
       // 再发请求到服务端
-      await http.post(`/api/player/${this.activeBotId}/seek`, { position });
-      this._syncAfterAction();
+      try {
+        await http.post(`/api/player/${this.activeBotId}/seek`, { position });
+        this._syncAfterAction();
+      } catch {
+        // 服务端拒绝（权限/离线）时撤销乐观锚点，恢复最近一次服务器时钟；
+        // 错误提示由 http 拦截器统一弹出
+        await this.syncElapsed().catch(() => {});
+      }
     },
 
     async setVolume(volume: number) {
