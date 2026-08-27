@@ -20,7 +20,9 @@
         class="cursor-pointer hover-scale"
         @click="store.playSong(song)"
       >
-        <CoverArt :url="song.coverUrl" :size="120" :radius="10" :show-shadow="true" />
+        <div class="relative aspect-square overflow-hidden rounded-[10px]">
+          <CoverArt :url="song.coverUrl" :fill="true" :radius="0" />
+        </div>
         <div class="mt-2 text-[13px] font-medium truncate">{{ song.name }}</div>
         <div class="text-xs text-foreground-muted truncate">{{ song.artist }}</div>
       </div>
@@ -48,7 +50,9 @@
         :to="`/playlist/${playlist.id}?platform=${playlist.platform}`"
         class="block cursor-pointer text-inherit no-underline hover-scale"
       >
-        <CoverArt :url="playlist.coverUrl" :size="160" :radius="10" :show-shadow="true" />
+        <div class="relative aspect-square overflow-hidden rounded-[10px]">
+          <CoverArt :url="playlist.coverUrl" :fill="true" :radius="0" />
+        </div>
         <div class="mt-2 text-[13px] font-medium line-clamp-2">{{ playlist.name }}</div>
       </RouterLink>
     </div>
@@ -67,7 +71,9 @@
         :to="`/playlist/${pl.id}?platform=${pl.platform}`"
         class="block cursor-pointer text-inherit no-underline hover-scale"
       >
-        <CoverArt :url="pl.coverUrl" :size="160" :radius="10" :show-shadow="true" />
+        <div class="relative aspect-square overflow-hidden rounded-[10px]">
+          <CoverArt :url="pl.coverUrl" :fill="true" :radius="0" />
+        </div>
         <div class="mt-2 text-[13px] font-medium line-clamp-2">{{ pl.name }}</div>
         <div class="mt-0.5 text-xs text-foreground-subtle">{{ pl.songCount }} 首</div>
       </RouterLink>
@@ -96,7 +102,9 @@
         class="cursor-pointer hover-scale"
         @click="store.playSong(song)"
       >
-        <CoverArt :url="song.coverUrl" :size="120" :radius="10" :show-shadow="true" />
+        <div class="relative aspect-square overflow-hidden rounded-[10px]">
+          <CoverArt :url="song.coverUrl" :fill="true" :radius="0" />
+        </div>
         <div class="mt-2 text-[13px] font-medium truncate">{{ song.name }}</div>
         <div class="text-xs text-foreground-muted truncate">{{ song.artist }}</div>
       </div>

@@ -8,7 +8,7 @@
 
     <template v-else-if="playlist">
       <!-- Hero Header -->
-      <div class="flex gap-8 mb-9">
+      <div class="flex flex-col gap-6 sm:flex-row sm:gap-8 mb-9">
         <CoverArt :url="playlist.coverUrl" :size="200" :radius="14" :show-shadow="true" />
         <div class="flex flex-col justify-center">
           <h1 class="text-[28px] font-extrabold mb-2 flex items-center gap-3">{{ playlist.name }}
