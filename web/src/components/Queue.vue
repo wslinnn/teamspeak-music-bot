@@ -52,7 +52,7 @@
         队列为空
       </div>
 
-      <div v-else class="flex-1 overflow-y-auto py-2 px-3" :style="{ paddingBottom: 'var(--player-height)' }">
+      <div v-else ref="listRef" class="flex-1 overflow-y-auto py-2 px-3" :style="{ paddingBottom: 'var(--player-height)' }">
         <draggable
           :model-value="botQueue"
           item-key="id"
@@ -64,7 +64,7 @@
           <template #item="{ element: song, index: i }">
             <div
               class="flex items-center gap-2 p-2 rounded-[var(--radius-sm)] transition-colors cursor-pointer select-none hover:bg-hover-bg group"
-              :class="{ 'bg-primary/10': isCurrentRow(song, i) }"
+              :class="{ 'bg-primary/10 queue-item-current': isCurrentRow(song, i) }"
               @click="playAtIndex(i)"
             >
               <span class="drag-handle cursor-grab text-foreground-subtle opacity-50 md:opacity-0 md:group-hover:opacity-50 transition-opacity shrink-0 text-base p-0.5 active:opacity-100">
@@ -158,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch, computed, ref } from 'vue';
+import { watch, computed, ref, nextTick } from 'vue';
 import { Icon } from '@iconify/vue';
 import draggable from 'vuedraggable';
 import { http } from '../utils/http';
@@ -214,6 +214,19 @@ function isCurrentRow(song: Song, index: number): boolean {
   const cur = store.currentSong;
   return !!cur && cur.id === song.id && cur.platform === song.platform;
 }
+
+// 打开抽屉时把当前播放行滚到可视区中部：长队列免翻找。v-if 挂载后要等
+// nextTick 才有 DOM；instant 定位不要动画，开门即见
+const listRef = ref<HTMLElement | null>(null);
+
+watch(
+  () => props.open,
+  async (open) => {
+    if (!open) return;
+    await nextTick();
+    listRef.value?.querySelector('.queue-item-current')?.scrollIntoView({ block: 'center' });
+  }
+);
 
 // Fetch queue when panel opens
 watch(() => props.open, (isOpen) => {
