@@ -27,7 +27,8 @@
     <section v-if="!authStore.isGuest && playlistSources.length > 0" class="mb-9">
       <h2 class="mb-4 text-[22px] font-bold flex items-center gap-3 flex-wrap">
         我的歌单
-        <div class="flex gap-1.5">
+        <span v-if="playlistSources.length === 1" class="text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-interactive-hover text-foreground-subtle">数据来自{{ getProviderLabel(playlistSources[0]) }}</span>
+        <div v-else class="flex gap-1.5">
           <button
             v-for="src in playlistSources"
             :key="src"
@@ -54,6 +55,13 @@
         </CoverCard>
       </div>
     </section>
+
+    <!-- 全空引导：没有收藏歌单、没有可用音源歌单、也没有播放记录时指路 -->
+    <EmptyState
+      v-if="!authStore.isGuest && store.favoritedPlaylists.length === 0 && playlistSources.length === 0 && !historyLoading && history.length === 0"
+      message="登录网易云或 QQ 音乐后，这里将显示你的歌单和播放记录"
+      icon="mdi:music-box-multiple"
+    />
 
     <!-- 最近播放 -->
     <section class="mb-9">

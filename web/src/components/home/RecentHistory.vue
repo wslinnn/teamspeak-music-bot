@@ -3,6 +3,7 @@
   <section v-if="dailyList.length > 0" class="mb-9">
     <h2 class="mb-4 text-[22px] font-bold flex items-center gap-3 flex-wrap">
       每日推荐
+      <span v-if="recommendSources.length === 1" class="text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-interactive-hover text-foreground-subtle">数据来自{{ getProviderLabel(recommendSources[0]) }}</span>
       <div v-if="recommendSources.length > 1" class="flex gap-1.5">
         <button
           v-for="src in recommendSources"
@@ -13,7 +14,7 @@
         >{{ getProviderLabel(src) }}</button>
       </div>
     </h2>
-    <div class="grid grid-cols-3 gap-5 sm:grid-cols-4 lg:grid-cols-6">
+    <div class="grid grid-cols-2 gap-4 min-[380px]:grid-cols-3 min-[380px]:gap-5 sm:grid-cols-4 lg:grid-cols-6">
       <div
         v-for="song in dailyList.slice(0, 12)"
         :key="song.id"
@@ -33,6 +34,7 @@
   <section v-if="recommendList.length > 0" class="mb-9">
     <h2 class="mb-4 text-[22px] font-bold flex items-center gap-3 flex-wrap">
       推荐歌单
+      <span v-if="recommendSources.length === 1" class="text-[11px] font-medium px-1.5 py-0.5 rounded-full bg-interactive-hover text-foreground-subtle">数据来自{{ getProviderLabel(recommendSources[0]) }}</span>
       <div v-if="recommendSources.length > 1" class="flex gap-1.5">
         <button
           v-for="src in recommendSources"
@@ -95,7 +97,7 @@
       <span class="inline-flex h-6 w-6 items-center justify-center rounded bg-[#00a1d6] text-sm font-extrabold text-white">B</span>
       B站热门
     </h2>
-    <div class="grid grid-cols-3 gap-5 sm:grid-cols-4 lg:grid-cols-6">
+    <div class="grid grid-cols-2 gap-4 min-[380px]:grid-cols-3 min-[380px]:gap-5 sm:grid-cols-4 lg:grid-cols-6">
       <div
         v-for="song in store.bilibiliPopular.slice(0, 12)"
         :key="song.id"
