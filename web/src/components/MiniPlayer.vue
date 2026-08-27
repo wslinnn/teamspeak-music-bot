@@ -27,32 +27,33 @@
         <span class="text-[10px] leading-none text-text-secondary tabular-nums">{{ formatTime(activeDuration) }}</span>
       </div>
 
-      <div class="flex items-center gap-2.5 px-2.5 pb-1.5 min-h-0" @click.stop>
-        <CoverArt :url="currentSong.coverUrl" :size="40" :radius="8" />
-        <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2.5 px-2.5 pb-1 min-h-0">
+        <CoverArt :url="currentSong.coverUrl" :size="44" :radius="8" />
+        <div class="flex-1 min-w-0 cursor-pointer">
           <div class="text-[13px] font-medium truncate flex items-center">
             <PlayingIndicator v-if="store.isPlaying && !store.isPaused" :is-playing="true" class="mr-1.5 inline-flex shrink-0" />
             <span class="truncate">{{ currentSong.name }}</span>
           </div>
           <div class="text-[11px] text-text-secondary truncate">{{ currentSong.artist }}</div>
         </div>
-        <div class="flex items-center gap-0.5 shrink-0">
-          <button v-if="canControl" aria-label="上一首" class="w-7 h-8 flex items-center justify-center text-[19px] opacity-80 active:scale-95" @click="store.prev()">
+        <!-- 仅按键区阻断冒泡：点封面/歌名/歌手要冒泡到根节点进歌词页 -->
+        <div class="flex items-center gap-0.5 shrink-0" @click.stop>
+          <button v-if="canControl" aria-label="上一首" class="mini-ctrl-btn text-[21px] opacity-80 active:scale-95" @click="store.prev()">
             <Icon icon="mdi:skip-previous" />
           </button>
-          <button v-if="canTransport" :aria-label="store.isPlaying ? '暂停' : '播放'" class="w-7 h-8 flex items-center justify-center text-[22px] text-primary active:scale-95" @click="togglePlay">
+          <button v-if="canTransport" :aria-label="store.isPlaying ? '暂停' : '播放'" class="mini-ctrl-btn text-[24px] text-primary active:scale-95" @click="togglePlay">
             <Icon :icon="store.isPlaying ? 'mdi:pause' : 'mdi:play'" />
           </button>
-          <button v-if="canSkip" aria-label="下一首" class="w-7 h-8 flex items-center justify-center text-[19px] opacity-80 active:scale-95" @click="store.next()">
+          <button v-if="canSkip" aria-label="下一首" class="mini-ctrl-btn text-[21px] opacity-80 active:scale-95" @click="store.next()">
             <Icon icon="mdi:skip-next" />
           </button>
-          <button v-if="canModeCtl" :aria-label="`播放模式: ${modeLabel}`" :title="modeLabel" class="w-7 h-8 flex items-center justify-center text-[17px]" :class="currentMode !== 'seq' ? 'text-primary' : 'opacity-80'" @click="cycleMode">
+          <button v-if="canModeCtl" :aria-label="`播放模式: ${modeLabel}`" :title="modeLabel" class="mini-ctrl-btn text-[19px]" :class="currentMode !== 'seq' ? 'text-primary' : 'opacity-80'" @click="cycleMode">
             <Icon :icon="modeIcon" />
           </button>
-          <button aria-label="播放队列" class="w-7 h-8 flex items-center justify-center text-[17px] opacity-80" :class="{ 'text-primary': queueOpen }" @click="toggleQueue">
+          <button aria-label="播放队列" class="mini-ctrl-btn text-[19px] opacity-80" :class="{ 'text-primary': queueOpen }" @click="toggleQueue">
             <Icon icon="mdi:playlist-music" />
           </button>
-          <button v-if="canTransport" aria-label="音量" class="w-7 h-8 flex items-center justify-center text-[17px] opacity-80" @click="toggleVolume">
+          <button v-if="canTransport" aria-label="音量" class="mini-ctrl-btn text-[19px] opacity-80" @click="toggleVolume">
             <Icon icon="mdi:volume-high" />
           </button>
         </div>
@@ -325,6 +326,21 @@ function cycleMode() {
 </script>
 
 <style scoped>
+/* 胶囊控制键：44px 高触控目标（Apple HIG 下限），≤380px 小屏收窄保歌名空间 */
+.mini-ctrl-btn {
+  width: 32px;
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+@media (max-width: 380px) {
+  .mini-ctrl-btn {
+    width: 26px;
+    height: 38px;
+  }
+}
 .mini-volume-slider {
   height: 6px;
   appearance: none;
