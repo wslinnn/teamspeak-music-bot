@@ -12,7 +12,7 @@ import type {
   Album,
 } from "./provider.js";
 
-export function parseLyrics(lrc: string, tlyric?: string): LyricLine[] {
+export function parseLyrics(lrc: string, tlyric?: string, roma?: string): LyricLine[] {
   if (!lrc) return [];
 
   const parseLine = (
@@ -32,12 +32,22 @@ export function parseLyrics(lrc: string, tlyric?: string): LyricLine[] {
 
   const lines: LyricLine[] = [];
   const translationMap = new Map<number, string>();
+  const romaMap = new Map<number, string>();
 
   if (tlyric) {
     for (const line of tlyric.split("\n")) {
       const parsed = parseLine(line);
       if (parsed) {
         translationMap.set(Math.round(parsed.time * 100), parsed.text);
+      }
+    }
+  }
+
+  if (roma) {
+    for (const line of roma.split("\n")) {
+      const parsed = parseLine(line);
+      if (parsed) {
+        romaMap.set(Math.round(parsed.time * 100), parsed.text);
       }
     }
   }
@@ -50,6 +60,7 @@ export function parseLyrics(lrc: string, tlyric?: string): LyricLine[] {
         time: parsed.time,
         text: parsed.text,
         translation: translationMap.get(timeKey),
+        roma: romaMap.get(timeKey),
       });
     }
   }
@@ -228,7 +239,8 @@ export class NeteaseProvider implements MusicProvider {
     });
     return parseLyrics(
       res.data?.lrc?.lyric ?? "",
-      res.data?.tlyric?.lyric
+      res.data?.tlyric?.lyric,
+      res.data?.romalrc?.lyric
     );
   }
 

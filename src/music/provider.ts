@@ -63,6 +63,8 @@ export interface LyricLine {
   time: number; // seconds
   text: string;
   translation?: string;
+  /** 音译（罗马音）；仅部分歌曲/音源提供 */
+  roma?: string;
 }
 
 export interface SearchResult {
