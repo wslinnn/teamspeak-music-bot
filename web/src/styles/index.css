@@ -286,3 +286,22 @@
     transform: none !important;
   }
 }
+
+/* ── 移动端卫生带（≤768px）──
+   ① iOS 聚焦输入框时整页放大的阈值是 16px，移动端表单统一抬到 16px；
+   ② overflow-x 双保险防意外横滚。
+   不加全局 * { min-width: 0 }：会压扁 overflow-x-auto 横向滚动行
+   （设置页 tabs 等）的 flex 子项导致文字重叠，溢出防护交给组件级 min-w-0 */
+@media (max-width: 768px) {
+  html,
+  body,
+  #app {
+    overflow-x: hidden;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
