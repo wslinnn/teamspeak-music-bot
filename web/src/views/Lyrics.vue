@@ -18,23 +18,38 @@
       <div class="lyrics-right">
         <div v-if="loading" class="lyrics-loading">加载歌词中...</div>
         <div v-else-if="lines.length === 0" class="lyrics-empty">暂无歌词</div>
-        <div v-else class="lyrics-scroll" ref="scrollContainer">
-          <div class="lyrics-inner" :style="{ transform: `translateY(${scrollOffset}px)`, transition: 'transform 0.6s cubic-bezier(0.25, 0.1, 0.25, 1)' }">
-            <div class="lyrics-spacer" />
-            <div
-              v-for="(line, i) in lines"
-              :key="i"
-              :ref="el => { if (el) lineRefs[i] = el as HTMLElement }"
-              class="lyrics-line"
-              :class="{ active: i === activeLine }"
-              @click="seekToLine(i)"
-            >
-              <div class="lyrics-text">{{ line.text }}</div>
-              <div v-if="line.translation" class="lyrics-translation">{{ line.translation }}</div>
-            </div>
-            <div class="lyrics-spacer" />
+        <template v-else>
+          <div class="lyrics-actions">
+            <button v-if="hasTranslation" class="lyrics-toggle" :class="{ on: showTranslation }" @click="showTranslation = !showTranslation">译文</button>
           </div>
-        </div>
+          <div class="lyrics-stage">
+            <div class="lyrics-scroll" ref="scrollContainer" @scroll="onUserScroll">
+              <div class="lyrics-inner">
+                <div class="lyrics-spacer" />
+                <div
+                  v-for="(line, i) in lines"
+                  :key="i"
+                  :ref="el => { if (el) lineRefs[i] = el as HTMLElement }"
+                  class="lyrics-line"
+                  :class="{ active: i === activeLine, 'manual-target': browsing && i === manualLine }"
+                  @click="seekToLine(i)"
+                >
+                  <div class="lyrics-text">{{ line.text }}</div>
+                  <div v-if="showTranslation && line.translation" class="lyrics-translation">{{ line.translation }}</div>
+                </div>
+                <div class="lyrics-spacer" />
+              </div>
+            </div>
+            <!-- 位置指示层：仅手动浏览时显示（自二开版复刻）。停在视口中央指向最近的
+                 行，胶囊可点击 seek，无 transport 权限时置灰 -->
+            <div v-if="browsing" class="lyrics-position-overlay">
+              <div class="lyrics-position-dash" />
+              <button class="lyrics-position-play" :disabled="!canTransport" @click="seekToPositionLine">
+                <Icon icon="mdi:play" class="text-[11px]" /> {{ positionTime }}
+              </button>
+            </div>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -45,10 +60,11 @@
 </template>
 
 <script setup lang="ts">
-// 结构与交互自上游 web/src/views/Lyrics.vue 移植（transform 平滑滚动 + 500ms 同步），
-// 两处本地适配：①同步源用 liveElapsed()（#107，上游同款修法）；②点击歌词行在
-// 有 transport 权限时执行真实 seek（上游后端不支持 seek，只做高亮）。
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+// 结构自上游 Lyrics.vue 移植，滚动架构改为对手二开的纯原生滚动单轴：
+// 自动跟随与用户手动滚动共用容器 scrollTop（transform 双轴会让上方歌词
+// 滚不回去）。同步源用 liveElapsed()（#107）；点击歌词行/位置胶囊在有
+// transport 权限时执行真实 seek。
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
@@ -81,8 +97,45 @@ const activeLine = ref(-1);
 const loading = ref(false);
 const scrollContainer = ref<HTMLElement | null>(null);
 const lineRefs = ref<Record<number, HTMLElement>>({});
-const scrollOffset = ref(0);
+// 程序化滚动（scrollTo）期间容器会连续触发 scroll 事件，需与用户手动滚动
+// 区分：置抑制标志，平滑滚动 520ms / 瞬时定位 80ms 后解除（自二开版复刻）
+let scrollSuppressed = false;
+let scrollSuppressTimer: ReturnType<typeof setTimeout> | null = null;
+// 手动浏览状态：用户滚动列表时暂停自动跟随，高亮视口中央最近的行（自二开版复刻）
+const browsing = ref(false);
+const manualLine = ref(-1);
+let browsingTimer: ReturnType<typeof setTimeout> | null = null;
 let syncTimer: ReturnType<typeof setInterval> | null = null;
+
+// 译文显隐开关（localStorage 记忆；默认开）
+const showTranslation = ref(readPref("lyrics.showTranslation", true));
+const hasTranslation = computed(() => lines.value.some((l) => l.translation));
+
+watch(showTranslation, (v) => writePref("lyrics.showTranslation", v));
+
+function readPref(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === "1";
+  } catch {
+    return fallback;
+  }
+}
+
+function writePref(key: string, v: boolean): void {
+  try {
+    localStorage.setItem(key, v ? "1" : "0");
+  } catch {
+    /* 隐私模式等场景忽略 */
+  }
+}
+
+function formatTime(seconds: number): string {
+  if (!seconds || seconds < 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 const bgStyle = computed(() => {
   if (currentSong.value?.coverUrl) {
@@ -112,6 +165,7 @@ async function fetchLyrics() {
   } finally {
     loading.value = false;
   }
+  await positionAfterFetch();
 }
 
 function findActiveLine(elapsed: number): number {
@@ -128,33 +182,36 @@ function findActiveLine(elapsed: number): number {
   return idx;
 }
 
-function scrollToActiveLine(idx: number) {
+function scrollToActiveLine(idx: number, behavior: 'smooth' | 'auto' = 'smooth') {
   const el = lineRefs.value[idx];
   const container = scrollContainer.value;
   if (!el || !container) return;
 
-  // 用 transform 定位实现无卡顿平滑滚动
-  const containerHeight = container.clientHeight;
-  const lineTop = el.offsetTop;
-  const lineHeight = el.offsetHeight;
-  const targetOffset = -(lineTop - containerHeight / 2 + lineHeight / 2);
-  scrollOffset.value = targetOffset;
+  // 纯原生滚动单轴：跟随与手动滚动共用 scrollTop，天然无漂移、上方始终可回滚
+  const target = Math.max(0, el.offsetTop - container.clientHeight / 2 + el.offsetHeight / 2);
+  scrollSuppressed = true;
+  if (scrollSuppressTimer) clearTimeout(scrollSuppressTimer);
+  scrollSuppressTimer = setTimeout(() => {
+    scrollSuppressed = false;
+  }, behavior === 'auto' ? 80 : 520);
+  container.scrollTo({ top: target, behavior });
 }
 
 function syncLyrics() {
   if (!store.isPlaying || lines.value.length === 0) return;
   const elapsed = store.liveElapsed();
   const idx = findActiveLine(elapsed);
-  // 仅在活跃行真正变化时更新
+  // 浏览中仍静默跟踪真实活跃行（恢复时无需重算），仅暂停自动滚动
   if (idx !== activeLine.value && idx >= 0) {
     activeLine.value = idx;
-    scrollToActiveLine(idx);
+    if (!browsing.value) scrollToActiveLine(idx);
   }
 }
 
 let seekInFlight = false;
 
 async function seekToLine(index: number) {
+  resetBrowsing();
   activeLine.value = index;
   scrollToActiveLine(index);
   if (!canTransport.value || seekInFlight) return;
@@ -163,6 +220,92 @@ async function seekToLine(index: number) {
   seekInFlight = true;
   try {
     await store.seek(time);
+  } finally {
+    seekInFlight = false;
+  }
+}
+
+// ── 手动浏览与位置指示（自二开版 Lyrics 复刻）────────────────────────
+const positionTime = computed(
+  () => formatTime(lines.value[browsing.value ? manualLine.value : activeLine.value]?.time ?? 0)
+);
+
+/** 边距 = 滚动容器高度一半：首尾行也能滚动到正中（替代固定 32vh 的近似值） */
+function updateEdgePadding() {
+  const container = scrollContainer.value;
+  if (!container) return;
+  container.style.setProperty('--lyrics-edge-padding', `${Math.max(0, container.clientHeight / 2)}px`);
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+/** 进页/切歌后瞬时定位到当前行（对手 E(t,'auto')；避免每次从顶部滑入） */
+async function positionAfterFetch() {
+  await nextTick();
+  await nextFrame();
+  await nextFrame();
+  updateEdgePadding();
+  if (lines.value.length === 0) return;
+  const idx = findActiveLine(store.liveElapsed());
+  if (idx >= 0) {
+    activeLine.value = idx;
+    scrollToActiveLine(idx, 'auto');
+  }
+}
+
+/** 视口中央最近的行（自二开版 ct() 同款：比较行中心与 scrollTop+半高） */
+function nearestLineToCenter(): number {
+  const container = scrollContainer.value;
+  if (!container) return -1;
+  const center = container.scrollTop + container.clientHeight / 2;
+  let best = -1;
+  let bestDist = Infinity;
+  for (let i = 0; i < lines.value.length; i++) {
+    const el = lineRefs.value[i];
+    if (!el) continue;
+    const mid = el.offsetTop + el.offsetHeight / 2;
+    const dist = Math.abs(mid - center);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = i;
+    }
+  }
+  return best;
+}
+
+function onUserScroll() {
+  if (scrollSuppressed || lines.value.length === 0) return;
+  browsing.value = true;
+  manualLine.value = nearestLineToCenter();
+  if (browsingTimer) clearTimeout(browsingTimer);
+  browsingTimer = setTimeout(resumeFollow, 2000);
+}
+
+function resetBrowsing() {
+  browsing.value = false;
+  manualLine.value = -1;
+  if (browsingTimer) {
+    clearTimeout(browsingTimer);
+    browsingTimer = null;
+  }
+}
+
+/** 停止滚动 2s 后恢复自动跟随：瞬时间到真实活跃行 */
+function resumeFollow() {
+  resetBrowsing();
+  if (activeLine.value >= 0) scrollToActiveLine(activeLine.value, 'auto');
+}
+
+async function seekToPositionLine() {
+  const line = lines.value[browsing.value ? manualLine.value : activeLine.value];
+  if (!line) return;
+  resetBrowsing();
+  if (!canTransport.value || seekInFlight) return;
+  seekInFlight = true;
+  try {
+    await store.seek(line.time);
   } finally {
     seekInFlight = false;
   }
@@ -181,6 +324,7 @@ function stopSync() {
 }
 
 watch(currentSong, () => {
+  resetBrowsing();
   fetchLyrics();
   lineRefs.value = {};
 });
@@ -193,10 +337,14 @@ watch(() => store.isPlaying, (playing) => {
 onMounted(() => {
   if (currentSong.value) fetchLyrics();
   if (store.isPlaying) startSync();
+  window.addEventListener('resize', updateEdgePadding);
 });
 
 onUnmounted(() => {
   stopSync();
+  window.removeEventListener('resize', updateEdgePadding);
+  if (scrollSuppressTimer) clearTimeout(scrollSuppressTimer);
+  resetBrowsing();
 });
 </script>
 
@@ -250,6 +398,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 24px;
   flex-shrink: 0;
 }
@@ -274,29 +423,120 @@ onUnmounted(() => {
   flex: 1;
   overflow: hidden;
   position: relative;
-  mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);
-  -webkit-mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);
+  display: flex;
+  flex-direction: column;
 }
 
-.lyrics-scroll {
-  height: 100%;
-  overflow: hidden;
+.lyrics-actions {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.lyrics-toggle {
+  padding: 5px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.lyrics-toggle:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.12);
+}
+.lyrics-toggle.on {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: transparent;
+  color: #1a1a1a;
+}
+
+/* 舞台容器：滚动区与位置指示层的共同定位父级（自二开版结构复刻） */
+.lyrics-stage {
+  flex: 1;
+  min-height: 0;
   position: relative;
 }
 
-.lyrics-inner {
-  will-change: transform;
+.lyrics-scroll {
+  /* 边距由 JS 按容器高度一半写入（updateEdgePadding），首尾行可滚到正中。
+     mask 只挂滚动区：挂在右栏会把顶部开关按钮一起淡掉 */
+  --lyrics-edge-padding: 0px;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(transparent 0%, black 15%, black 85%, transparent 100%);
+}
+.lyrics-scroll::-webkit-scrollbar {
+  display: none;
 }
 
-/* 上游为 height: 40%，但父容器高度 auto 时百分比塌缩为 0（上游隐性 bug）；
-   这里给 32vh（≈ 容器 80vh 的四成）实现首尾行可居中的设计意图 */
+.lyrics-inner {
+  min-width: 0;
+}
+
 .lyrics-spacer {
-  height: 32vh;
+  height: var(--lyrics-edge-padding);
 }
 
 .lyrics-line {
+  position: relative;
   padding: 8px 0;
   cursor: pointer;
+}
+
+/* 浏览中视口中央的行：非活跃但提亮（自二开版 manual-target 复刻） */
+.lyrics-line.manual-target:not(.active) .lyrics-text {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* 位置指示层：常驻视口中央。跟随正常时与活跃行重合；浏览时指向最近行 */
+.lyrics-position-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.lyrics-position-dash {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08));
+}
+
+.lyrics-position-play {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.lyrics-position-play:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .lyrics-text {
