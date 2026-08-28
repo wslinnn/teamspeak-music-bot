@@ -44,11 +44,9 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import BaseButton from '../components/common/BaseButton.vue';
 
-const router = useRouter();
 const authStore = useAuthStore();
 const username = ref('');
 const password = ref('');
@@ -73,7 +71,9 @@ async function handleSetup() {
   }
   const success = await authStore.setup(username.value, password.value);
   if (success) {
-    router.push('/');
+    // 整页重载进入应用：与登录流程对齐，WS 与首屏数据以已登录身份完整初始化
+    // （SPA 跳转会沿用启动引导阶段的无会话空状态）
+    window.location.replace('/');
   }
 }
 </script>

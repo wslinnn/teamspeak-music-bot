@@ -55,7 +55,9 @@ async function handleLogin() {
   if (!success) return;
   // 整页重载进入应用：WebSocket 与首屏数据以已登录身份完整初始化
   // （SPA 内跳转会沿用启动时无会话的空状态，导致需要手动刷新）
-  const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+  // redirect 仅接受站内路径（防开放重定向）：必须以单个 / 开头，// 与绝对 URL 一律回退首页
+  const raw = new URLSearchParams(window.location.search).get('redirect') || '/';
+  const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
   window.location.replace(redirect);
 }
 
