@@ -256,9 +256,10 @@ export const usePlayerStore = defineStore('player', {
     },
 
     toggleTheme() {
-      // 桌面月亮按钮：AUTO 下点击落到当前解析值的另一侧，转为显式深/浅
-      const next = this.resolvedTheme === 'dark' ? 'light' : 'dark';
-      this.setTheme(next);
+      // 顶栏按钮三态循环：浅色 → 深色 → 跟随系统 → 浅色
+      const order: Array<'light' | 'dark' | 'auto'> = ['light', 'dark', 'auto'];
+      const idx = order.indexOf(this.theme);
+      this.setTheme(order[(idx + 1) % order.length]);
     },
 
     setTheme(theme: 'auto' | 'dark' | 'light') {

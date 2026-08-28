@@ -569,7 +569,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  [neteaseQr, qqQr, bilibiliQr].forEach((qr) => {
+  [neteaseQr, qqQr, bilibiliQr, kugouQr].forEach((qr) => {
     if (qr.pollTimer) clearInterval(qr.pollTimer);
   });
   setAvatarPreview(null);

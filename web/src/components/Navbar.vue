@@ -119,10 +119,19 @@
       <button class="md:hidden text-[20px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="服务器状态" @click="serverTreeOpen = true">
         <Icon icon="mdi:server" />
       </button>
-      <!-- 登录/设置：移动端也可用（底部 TabBar 不含账户入口） -->
-      <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-3 md:px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
+      <!-- 登录：仅移动端（桌面走下方 Desktop-only 区）；游客已认证则给退出入口 -->
+      <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="md:hidden text-sm font-semibold px-3 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
         登录
       </RouterLink>
+      <button
+        v-if="authStore.isAuthenticated && authStore.isGuest"
+        class="md:hidden text-[20px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center"
+        title="退出游客模式"
+        aria-label="退出游客模式"
+        @click="handleLogout"
+      >
+        <Icon icon="mdi:logout" />
+      </button>
       <!-- Desktop-only auth controls -->
       <div class="hidden md:flex items-center gap-4">
         <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
