@@ -37,25 +37,29 @@
     </div>
 
     <div class="flex items-start justify-between gap-3">
-      <div class="flex items-center gap-2 text-sm font-medium shrink-0 pt-0.5">
+      <div class="flex items-center gap-2 text-sm font-medium shrink-0">
         <Icon icon="mdi:cellphone-arrow-down" class="text-lg opacity-60" />
         安装到主屏幕
       </div>
-      <p class="text-xs text-text-secondary text-right leading-relaxed">
-        安卓 Chrome：菜单 →「添加到主屏幕」<br />
-        iOS Safari：分享 →「添加到主屏幕」<br />
-        桌面 Chrome / Edge：地址栏右侧安装图标
-      </p>
+      <details class="text-right">
+        <summary class="cursor-pointer text-xs text-primary select-none">查看安装方法</summary>
+        <p class="text-xs text-text-secondary text-right leading-relaxed mt-1.5">
+          安卓 Chrome：菜单 →「添加到主屏幕」<br />
+          iOS Safari：分享 →「添加到主屏幕」<br />
+          桌面 Chrome / Edge：地址栏右侧安装图标
+        </p>
+      </details>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../../stores/player';
+import { useLyricsFontScale } from '../../composables/useLyricsFontScale';
 
 const store = usePlayerStore();
+const { fontScale, setFontScale } = useLyricsFontScale();
 
 // 主题：AUTO 跟随系统深浅色（store 内监听 prefers-color-scheme 实时解析）
 const THEME_OPTIONS = [
@@ -70,24 +74,4 @@ const FONT_OPTIONS = [
   { label: '标准', value: 1 },
   { label: '特大', value: 1.25 },
 ] as const;
-
-const fontScale = ref(readFontScale());
-
-function readFontScale(): number {
-  try {
-    const v = parseFloat(localStorage.getItem('lyrics.fontScale') ?? '1');
-    return v === 0.85 || v === 1 || v === 1.25 ? v : 1;
-  } catch {
-    return 1;
-  }
-}
-
-function setFontScale(value: number): void {
-  fontScale.value = value;
-  try {
-    localStorage.setItem('lyrics.fontScale', String(value));
-  } catch {
-    /* 隐私模式等场景忽略 */
-  }
-}
 </script>

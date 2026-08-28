@@ -21,6 +21,11 @@
         <template v-else>
           <div class="lyrics-actions">
             <button v-if="hasTranslation" class="lyrics-toggle" :class="{ on: showTranslation }" @click="showTranslation = !showTranslation">译文</button>
+            <button
+              class="lyrics-toggle"
+              :title="`歌词字号：${fontScaleLabel}（点击切换）`"
+              @click="cycleFontScale"
+            >Aa</button>
           </div>
           <div class="lyrics-stage">
             <div class="lyrics-scroll" ref="scrollContainer" @scroll="onUserScroll">
@@ -70,6 +75,7 @@ import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
+import { useLyricsFontScale } from '../composables/useLyricsFontScale';
 import CoverArt from '../components/CoverArt.vue';
 
 const router = useRouter();
@@ -148,18 +154,13 @@ const bgStyle = computed(() => {
   return {};
 });
 
-// 歌词字号三档（设置 → 通用，localStorage lyrics.fontScale）：CSS 变量
-// 缩放正文/活跃行/译文全部字号，行高比例随 calc 自动保持
-const fontScale = ref(readFontScale());
+// 歌词字号三档（设置 → 通用 / 歌词页顶栏 Aa，localStorage lyrics.fontScale）：
+// CSS 变量缩放正文/活跃行/译文全部字号；共享 composable 单例，任一处修改实时联动
+const { fontScale, cycleFontScale } = useLyricsFontScale();
 
-function readFontScale(): number {
-  try {
-    const v = parseFloat(localStorage.getItem('lyrics.fontScale') ?? '1');
-    return v === 0.85 || v === 1 || v === 1.25 ? v : 1;
-  } catch {
-    return 1;
-  }
-}
+const fontScaleLabel = computed(() =>
+  fontScale.value === 0.85 ? '紧凑' : fontScale.value === 1.25 ? '特大' : '标准'
+);
 
 const rootStyle = computed(() => ({
   ...bgStyle.value,

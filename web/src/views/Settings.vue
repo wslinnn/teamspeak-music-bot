@@ -2,20 +2,11 @@
   <div>
     <h1 class="text-[28px] font-extrabold mb-8">设置</h1>
 
-    <SettingsLayout :tabs="tabs" default-tab="general">
+    <SettingsLayout v-model:active-tab="activeTab" :tabs="tabs">
       <template #default="{ activeTab }">
         <SettingsTheme v-if="activeTab === 'general'" />
 
-        <SettingsGeneral
-          v-if="activeTab === 'general'"
-          class="mt-6"
-          :current-quality="currentQuality"
-          :command-prefix="commandPrefix"
-          :idle-timeout="idleTimeout"
-          @set-quality="setQuality"
-          @save-prefix="savePrefix"
-          @save-idle-timeout="saveIdleTimeout"
-        />
+        <SettingsQuality v-if="activeTab === 'general'" class="mt-6" />
 
         <SettingsAccount v-if="activeTab === 'general'" class="mt-6" />
 
@@ -47,6 +38,15 @@
         <SettingsAudit v-if="activeTab === 'audit'" />
       </template>
     </SettingsLayout>
+
+    <!-- 删除机器人确认 -->
+    <BaseModal v-model="deleteConfirm.open" title="删除机器人">
+      <p class="text-sm">确认删除机器人「{{ deleteConfirm.name }}」？此操作不可撤销。</p>
+      <template #footer="{ close }">
+        <BaseButton variant="secondary" @click="close">取消</BaseButton>
+        <BaseButton variant="danger" @click="confirmDeleteBot">删除</BaseButton>
+      </template>
+    </BaseModal>
 
     <!-- Edit Bot Modal -->
     <BaseModal v-model="editModalOpen" title="编辑机器人">
@@ -177,16 +177,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
+import { useRoute, useRouter } from 'vue-router';
 import { http } from '../utils/http';
 import { usePlayerStore, type BotStatus } from '../stores/player';
 import { useToast } from '../composables/useToast';
 import { useAuthStore } from '../stores/auth';
-import SettingsLayout from '../components/settings/SettingsLayout.vue';
+import SettingsLayout, { type TabDef } from '../components/settings/SettingsLayout.vue';
 import SettingsTheme from '../components/settings/SettingsTheme.vue';
 import SettingsAccount from '../components/settings/SettingsAccount.vue';
-import SettingsGeneral from '../components/settings/SettingsGeneral.vue';
+import SettingsQuality from '../components/settings/SettingsQuality.vue';
 import SettingsBots from '../components/settings/SettingsBots.vue';
 import SettingsPlatforms from '../components/settings/SettingsPlatforms.vue';
 import SettingsBehavior from '../components/settings/SettingsBehavior.vue';
@@ -201,12 +202,14 @@ import BaseToggle from '../components/common/BaseToggle.vue';
 const store = usePlayerStore();
 const toast = useToast();
 const authStore = useAuthStore();
+const route = useRoute();
+const router = useRouter();
 
-const tabs = computed(() => {
+const tabs = computed<TabDef[]>(() => {
   // 页签按能力显隐（对齐后端权限）：机器人管理/行为设置写 bot 设置需 bot.manage，
-  // 音乐账号登录需 platform.auth；通用页签人人可见（主题/改密码），内部区块再细分
-  const list = [
-    { key: 'general', label: '通用设置', icon: 'mdi:cog' },
+  // 音乐账号登录需 platform.auth；通用页签人人可见（主题/音质/改密码），内部区块再细分
+  const list: TabDef[] = [
+    { key: 'general', label: '通用', icon: 'mdi:cog' },
   ];
   if (authStore.can('bot.manage')) {
     list.push({ key: 'bots', label: '机器人管理', icon: 'mdi:robot' });
@@ -226,10 +229,24 @@ const tabs = computed(() => {
   return list;
 });
 
-// ── General settings state ──
-const currentQuality = ref('exhigh');
-const commandPrefix = ref('!');
-const idleTimeout = ref(0);
+// ── ?tab= 深链同步：非法值/无权限页签回退首个可用页签 ──
+const activeTab = ref(resolveTab(route.query.tab));
+
+function resolveTab(v: unknown): string {
+  const keys = tabs.value.map((t) => t.key);
+  return keys.includes(v as string) ? (v as string) : (keys[0] ?? 'general');
+}
+
+watch(() => route.query.tab, (v) => {
+  const next = resolveTab(v);
+  if (next !== activeTab.value) activeTab.value = next;
+});
+
+watch(activeTab, (k) => {
+  if (route.query.tab !== k) {
+    router.replace({ query: { ...route.query, tab: k } });
+  }
+});
 
 // ── Bot edit modal ──
 const editModalOpen = ref(false);
@@ -341,54 +358,6 @@ function getQrState(platform: string): QrState {
   return platform === 'netease' ? neteaseQr : qqQr;
 }
 
-// ── General handlers ──
-async function loadQuality() {
-  try {
-    const res = await http.get('/api/music/quality');
-    currentQuality.value = res.data.netease || 'exhigh';
-  } catch (err) {
-    console.debug('loadQuality failed:', err);
-  }
-}
-
-async function setQuality(q: string) {
-  currentQuality.value = q;
-  try {
-    await http.post('/api/music/quality', { quality: q });
-    toast.success('音质设置已保存');
-  } catch {
-    toast.error('保存音质设置失败');
-  }
-}
-
-async function savePrefix(prefix: string) {
-  try {
-    await http.post('/api/bot/settings', { commandPrefix: prefix });
-    toast.success('命令前缀已保存');
-  } catch {
-    toast.error('保存命令前缀失败');
-  }
-}
-
-async function loadIdleTimeout() {
-  try {
-    const res = await http.get('/api/bot/settings');
-    idleTimeout.value = res.data.idleTimeoutMinutes ?? 0;
-    commandPrefix.value = res.data.commandPrefix ?? '!';
-  } catch (err) {
-    console.debug('loadIdleTimeout failed:', err);
-  }
-}
-
-async function saveIdleTimeout(minutes: number) {
-  try {
-    await http.post('/api/bot/settings', { idleTimeoutMinutes: minutes });
-    toast.success('闲置超时设置已保存');
-  } catch {
-    toast.error('保存闲置超时设置失败');
-  }
-}
-
 // ── Bot handlers ──
 async function toggleBot(botId: string, connected: boolean) {
   try {
@@ -460,12 +429,22 @@ async function saveEditBot() {
   }
 }
 
-async function deleteBot(botId: string, botName: string) {
-  if (!confirm(`确认删除机器人 "${botName}"？此操作不可撤销。`)) return;
+// 删除走 BaseModal 确认（与全站设计语言一致），deleteBot 仅打开弹窗
+const deleteConfirm = reactive({ open: false, id: '', name: '' });
+
+function deleteBot(botId: string, botName: string) {
+  deleteConfirm.id = botId;
+  deleteConfirm.name = botName;
+  deleteConfirm.open = true;
+}
+
+async function confirmDeleteBot() {
+  const { id } = deleteConfirm;
+  deleteConfirm.open = false;
   try {
-    await http.delete(`/api/bot/${botId}`);
-    if (store.activeBotId === botId) store.activeBotId = null;
-    store.removeBotStatus(botId);
+    await http.delete(`/api/bot/${id}`);
+    if (store.activeBotId === id) store.activeBotId = null;
+    store.removeBotStatus(id);
     await store.fetchBots();
     toast.success('机器人已删除');
   } catch {
@@ -564,8 +543,6 @@ async function saveCookie(platform: string, cookie: string) {
 onMounted(() => {
   store.fetchBots();
   checkAuthStatus();
-  loadQuality();
-  loadIdleTimeout();
 });
 
 onUnmounted(() => {

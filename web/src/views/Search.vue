@@ -403,6 +403,8 @@ async function uploadFile(file: File) {
     });
     const song = res.data.song as Song | undefined;
     if (song) {
+      // 上传的是歌曲：切回歌曲类目，让用户直接看到刚上传的文件
+      activeCategory.value = 'songs';
       results.value = [song, ...results.value];
       searched.value = true;
       toast.success(`已上传：${song.name}`);
