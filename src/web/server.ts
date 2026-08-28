@@ -246,6 +246,31 @@ export function createWebServer(options: WebServerOptions): WebServer {
   wss.on("error", (err) => {
     logger.error({ err }, "WebSocket server error");
   });
+
+  // ─── WS 心跳 ───────────────────────────────────────────────────────────
+  // 广播是事件驱动的：无人操作时连接可以长时间完全静默，nginx 的
+  // proxy_read_timeout（默认 60s）/ 移动 NAT 会把空闲连接掐断，客户端
+  // 陷入"断开 → 秒级重连"循环（断线横幅频繁闪烁）。25s 一次 ping 保活
+  // 穿越所有中间层（浏览器在协议层自动回 pong，前端零改动）；连续两轮
+  // 无 pong 的半开连接 terminate 清理。
+  const HEARTBEAT_INTERVAL_MS = 25_000;
+  // WeakSet<object>：@types/ws 与 ws 包的 WebSocket 类型双声明不兼容，
+  // 这里只关心对象身份，不依赖其类型成员
+  const alive = new WeakSet<object>();
+  wss.on("connection", (ws) => {
+    alive.add(ws);
+    ws.on("pong", () => alive.add(ws));
+  });
+  setInterval(() => {
+    for (const ws of wss.clients) {
+      if (!alive.has(ws)) {
+        ws.terminate();
+        continue;
+      }
+      alive.delete(ws);
+      ws.ping();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
   server.on("upgrade", (req, socket, head) => {
     if (req.url !== "/ws") {
       socket.destroy();
