@@ -1,9 +1,5 @@
 <template>
   <div>
-    <button class="mb-4 hidden md:flex items-center gap-1.5 text-sm text-foreground-muted opacity-70 transition-opacity hover:opacity-100" @click="$router.back()">
-      <Icon icon="mdi:arrow-left" />
-      返回
-    </button>
     <h1 class="text-[28px] font-extrabold mb-8">设置</h1>
 
     <SettingsLayout :tabs="tabs" default-tab="general">
