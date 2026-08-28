@@ -709,7 +709,7 @@ export const usePlayerStore = defineStore('player', {
       const toast = useToast();
       const modeLabels: Record<string, string> = {
         seq: '顺序播放',
-        loop: '单曲循环',
+        loop: '列表循环',
         random: '随机播放',
         rloop: '随机循环',
       };
