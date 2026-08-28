@@ -87,7 +87,9 @@ export const usePlayerStore = defineStore('player', {
     queueCurrentIndex: {} as Record<string, number>,
     /** Per-bot timing state keyed by botId */
     timings: {} as Record<string, TimingState>,
-    theme: 'dark' as 'dark' | 'light',
+    theme: 'auto' as 'auto' | 'dark' | 'light',
+    /** 系统深浅色偏好（AUTO 主题的解析依据），loadTheme 时初始化并持续监听 */
+    systemPrefersDark: false,
 
     // Home page cache
     recommendPlaylists: [] as PlaylistItem[],
@@ -117,6 +119,11 @@ export const usePlayerStore = defineStore('player', {
     /** 专属链接模式下为 true（UI 锁定单 bot，隐藏切换入口） */
     isScoped(): boolean {
       return this.scopedBotId !== null;
+    },
+    /** AUTO 主题的实际解析结果：显式选择原样返回，AUTO 跟随系统深浅色 */
+    resolvedTheme(): 'dark' | 'light' {
+      if (this.theme !== 'auto') return this.theme;
+      return this.systemPrefersDark ? 'dark' : 'light';
     },
     currentSong(): Song | null {
       return this.activeBot?.currentSong ?? null;
@@ -249,13 +256,27 @@ export const usePlayerStore = defineStore('player', {
     },
 
     toggleTheme() {
-      this.theme = this.theme === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('theme', this.theme);
+      // 桌面月亮按钮：AUTO 下点击落到当前解析值的另一侧，转为显式深/浅
+      const next = this.resolvedTheme === 'dark' ? 'light' : 'dark';
+      this.setTheme(next);
+    },
+
+    setTheme(theme: 'auto' | 'dark' | 'light') {
+      this.theme = theme;
+      localStorage.setItem('theme', theme);
     },
 
     loadTheme() {
-      const saved = localStorage.getItem('theme') as 'dark' | 'light' | null;
-      if (saved) this.theme = saved;
+      const saved = localStorage.getItem('theme') as 'auto' | 'dark' | 'light' | null;
+      // 未保存过偏好（全新用户）默认跟随系统；已保存的显式选择不受影响
+      this.theme = saved ?? 'auto';
+      if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        const mq = window.matchMedia('(prefers-color-scheme: dark)');
+        this.systemPrefersDark = mq.matches;
+        mq.addEventListener('change', (e) => {
+          this.systemPrefersDark = e.matches;
+        });
+      }
     },
 
     // ── 歌单收藏（D12：/api/favorites 族）──

@@ -112,8 +112,8 @@
         </div>
       </div>
 
-      <button class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center" @click="store.toggleTheme()">
-        <Icon :icon="store.theme === 'dark' ? 'mdi:weather-night' : 'mdi:white-balance-sunny'" />
+      <button class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center" :title="store.theme === 'auto' ? '主题：跟随系统' : '切换主题'" @click="store.toggleTheme()">
+        <Icon :icon="store.theme === 'auto' ? 'mdi:theme-light-dark' : store.resolvedTheme === 'dark' ? 'mdi:weather-night' : 'mdi:white-balance-sunny'" />
       </button>
       <!-- 服务器状态：移动端经此进入（桌面走左侧链接） -->
       <button class="md:hidden text-[20px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="服务器状态" @click="serverTreeOpen = true">

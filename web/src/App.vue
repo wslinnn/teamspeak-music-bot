@@ -18,7 +18,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerStore } from './stores/player.js';
 import { useAuthStore } from './stores/auth';
@@ -38,7 +38,6 @@ const playerStore = usePlayerStore();
 const authStore = useAuthStore();
 const favoritesStore = useFavoritesStore();
 const toast = useToast();
-const theme = computed(() => playerStore.theme);
 const { connect, disconnect, connectionState } = useWebSocket();
 // WS 只在有会话后启动；未登录不尝试连接，此时也不渲染断线横幅
 const wsStarted = ref(false);
@@ -49,7 +48,9 @@ function reconnect() {
   connect();
 }
 
-watch(theme, (t) => {
+// 主题消费的是解析结果：AUTO 模式下 store 内部跟随系统深浅色，
+// OS 切换时 resolvedTheme 变化会自动触发本 watcher
+watch(() => playerStore.resolvedTheme, (t) => {
   document.documentElement.setAttribute('data-theme', t);
   // 手机状态栏/PWA 标题栏颜色跟随主题（index.html 里的静态值只是初始深色）
   document.querySelector('meta[name="theme-color"]')

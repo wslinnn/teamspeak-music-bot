@@ -5,10 +5,17 @@
         <Icon icon="mdi:theme-light-dark" class="text-lg opacity-60" />
         主题模式
       </div>
-      <BaseButton variant="secondary" size="sm" @click="store.toggleTheme()">
-        <Icon :icon="store.theme === 'dark' ? 'mdi:weather-night' : 'mdi:weather-sunny'" class="mr-1" />
-        {{ store.theme === 'dark' ? '深色' : '浅色' }}
-      </BaseButton>
+      <div class="flex items-center gap-1">
+        <button
+          v-for="opt in THEME_OPTIONS"
+          :key="opt.value"
+          class="px-2.5 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium transition-colors"
+          :class="store.theme === opt.value ? 'bg-primary text-white' : 'bg-interactive-hover opacity-70 hover:opacity-100'"
+          @click="store.setTheme(opt.value)"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
     </div>
 
     <div class="flex items-center justify-between">
@@ -47,9 +54,15 @@
 import { ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../../stores/player';
-import BaseButton from '../common/BaseButton.vue';
 
 const store = usePlayerStore();
+
+// 主题：AUTO 跟随系统深浅色（store 内监听 prefers-color-scheme 实时解析）
+const THEME_OPTIONS = [
+  { label: '浅色', value: 'light' },
+  { label: '深色', value: 'dark' },
+  { label: '跟随系统', value: 'auto' },
+] as const;
 
 // 歌词字号：纯本地显示偏好（与主题同级），三档缩放正文/活跃行/译文
 const FONT_OPTIONS = [
