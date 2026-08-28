@@ -14,22 +14,36 @@
 
     <SkeletonLoader v-if="store.loading" />
 
-    <EmptyState v-else-if="store.favorites.length === 0" message="暂无收藏歌曲" />
+    <template v-else-if="store.favorites.length > 0">
+      <!-- 批量操作：按当前筛选结果整批追加（上限 100 首防误触洪泛） -->
+      <div v-if="filteredFavorites.length > 0 && canAddQueue" class="mb-3 flex justify-end">
+        <button
+          class="flex items-center gap-1.5 rounded-full bg-primary/10 text-primary px-4 py-1.5 text-[13px] font-medium transition-colors hover:bg-primary/20 disabled:opacity-60"
+          :disabled="bulkAdding"
+          @click="addAllToQueue"
+        >
+          <Icon :icon="bulkAdding ? 'mdi:loading' : 'mdi:playlist-plus'" :class="{ 'animate-spin': bulkAdding }" />
+          {{ bulkAdding ? '加入中…' : '全部加进队列' }}
+        </button>
+      </div>
 
-    <EmptyState v-else-if="filteredFavorites.length === 0" message="无筛选结果" icon="mdi:music-note-off" />
+      <EmptyState v-if="filteredFavorites.length === 0" message="无筛选结果" icon="mdi:music-note-off" />
 
-    <div v-else class="flex flex-col gap-0.5">
-      <SongCard
-        v-for="(item, i) in filteredFavorites"
-        :key="item.id"
-        :song="toSong(item)"
-        :index="i + 1"
-        :active="playerStore.currentSong?.id === item.songId && playerStore.currentSong?.platform === item.platform"
-        @play="play(item)"
-        @playnext="playerStore.playNextSong(toSong(item))"
-        @add="add(item)"
-      />
-    </div>
+      <div v-else class="flex flex-col gap-0.5">
+        <SongCard
+          v-for="(item, i) in filteredFavorites"
+          :key="item.id"
+          :song="toSong(item)"
+          :index="i + 1"
+          :active="playerStore.currentSong?.id === item.songId && playerStore.currentSong?.platform === item.platform"
+          @play="play(item)"
+          @playnext="playerStore.playNextSong(toSong(item))"
+          @add="add(item)"
+        />
+      </div>
+    </template>
+
+    <EmptyState v-else message="暂无收藏歌曲" />
   </div>
 </template>
 
@@ -38,6 +52,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useFavoritesStore, type Favorite } from '../../stores/favorites';
 import { usePlayerStore, type Song } from '../../stores/player';
+import { useAuthStore } from '../../stores/auth';
+import { useToast } from '../../composables/useToast';
 import type { Platform } from '../../utils/platform';
 import SongCard from '../SongCard.vue';
 import EmptyState from '../common/EmptyState.vue';
@@ -45,6 +61,10 @@ import SkeletonLoader from '../common/SkeletonLoader.vue';
 
 const store = useFavoritesStore();
 const playerStore = usePlayerStore();
+const auth = useAuthStore();
+const toast = useToast();
+// 批量入队需入队权（与 SongGridCard.showAdd 同口径）
+const canAddQueue = computed(() => auth.can('player.queue') || auth.guestCan('addToQueue'));
 const query = ref('');
 // 收藏无上限，全量过滤按 200ms 防抖后再进 computed
 const debouncedQuery = ref('');
@@ -81,6 +101,33 @@ function play(item: Favorite) {
 
 function add(item: Favorite) {
   playerStore.addSong(toSong(item));
+}
+
+// ── 批量加入队列：顺序提交（/add 单首接口），上限 100 首防误触洪泛 ──
+const BULK_ADD_LIMIT = 100;
+const bulkAdding = ref(false);
+
+async function addAllToQueue() {
+  if (bulkAdding.value) return;
+  const items = filteredFavorites.value.slice(0, BULK_ADD_LIMIT);
+  bulkAdding.value = true;
+  let ok = 0;
+  try {
+    for (const item of items) {
+      try {
+        await playerStore.addSong(toSong(item));
+        ok += 1;
+      } catch {
+        // 单首失败（下架/版权等）不中断整批
+      }
+    }
+  } finally {
+    bulkAdding.value = false;
+  }
+  const capped = filteredFavorites.value.length > BULK_ADD_LIMIT
+    ? `（仅取前 ${BULK_ADD_LIMIT} 首）`
+    : '';
+  toast.success(`已加入队列 ${ok} 首${capped}`);
 }
 
 // 面板随 Tab 激活才挂载，挂载即拉取（favorites store 全站共享，重复调用幂等）
