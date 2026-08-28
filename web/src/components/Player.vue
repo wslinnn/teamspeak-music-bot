@@ -68,8 +68,8 @@
       </div>
 
       <div class="sm:w-[240px] sm:shrink-0 flex items-center justify-end gap-2">
-        <!-- Desktop volume -->
-        <template v-if="canTransport">
+        <!-- Desktop volume：滚轮步进 ±5，数值实时跟随拖动 / 滚轮 -->
+        <div v-if="canTransport" class="flex items-center gap-2" @wheel.prevent="onVolumeWheel">
           <Icon icon="mdi:volume-high" class="text-lg opacity-60" />
           <input
             type="range"
@@ -83,7 +83,8 @@
             @blur="onVolumeRelease"
             class="volume-slider"
           />
-        </template>
+          <span class="text-[11px] text-text-secondary tabular-nums w-[24px] text-right select-none">{{ Math.round(volumeDisplay) }}</span>
+        </div>
         <button class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" :class="{ 'opacity-100 text-primary': showQueue }" @click="showQueue = !showQueue">
           <Icon icon="mdi:playlist-music" />
         </button>
@@ -249,6 +250,10 @@ function togglePlay() {
 
 // 音量滑块与逐帧 rAF 重渲染解耦（#111）：拖动中绑定本地值不被拽回，
 // 松手才提交 store；外部变化（切 bot/其他客户端）在不拖动时照常跟进
+function commitVolume(value: number): void {
+  store.setVolume(value);
+}
+
 const {
   display: volumeDisplay,
   onInput: onVolumeInput,
@@ -256,8 +261,15 @@ const {
   onRelease: onVolumeRelease,
 } = useDecoupledSlider(
   () => activeBot.value?.volume,
-  (v) => store.setVolume(v)
+  commitVolume
 );
+
+// 滚轮步进 ±5：离散步进直接一次提交（无需进入拖动态）
+function onVolumeWheel(e: WheelEvent): void {
+  const next = Math.min(100, Math.max(0, Math.round(volumeDisplay.value + (e.deltaY < 0 ? 5 : -5))));
+  volumeDisplay.value = next;
+  commitVolume(next);
+}
 
 const modeOrder = ['seq', 'loop', 'random', 'rloop'] as const;
 const modeIcons: Record<string, string> = {
