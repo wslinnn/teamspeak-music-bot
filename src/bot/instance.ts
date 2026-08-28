@@ -143,6 +143,8 @@ export interface BotStatus {
   elapsed: number; // ground truth elapsed seconds from frame count
   /** 当前曲实际播放时长（秒）。试听片段=试听秒数；完整曲=duration。缺失时前端回退 currentSong.duration。 */
   effectiveDuration?: number;
+  /** 私人 FM 运行中时为 FM 音源标识，否则为空串（前端据此显示 FM 徽标/退出入口） */
+  fmPlatform: Platform | "";
 }
 
 export class BotInstance extends EventEmitter {
@@ -865,6 +867,7 @@ export class BotInstance extends EventEmitter {
       "resume",
       "stop",
       "clear",
+      "clearkeep",
       "remove",
       "reorder",
       "vol",
@@ -905,6 +908,8 @@ export class BotInstance extends EventEmitter {
         return this.cmdQueue();
       case "clear":
         return this.cmdClear();
+      case "clearkeep":
+        return this.cmdClearKeepPlaying();
       case "remove":
         return this.cmdRemove(cmd);
       case "reorder":
@@ -1550,6 +1555,14 @@ export class BotInstance extends EventEmitter {
     return "Queue cleared";
   }
 
+  /** Fork: 清空即将播放的歌曲，播完当前为止（WebUI 队列抽屉「清空队列」）。 */
+  private cmdClearKeepPlaying(): string {
+    this.queue.clearKeepCurrent();
+    this.disableFmMode();
+    this.emit("stateChange");
+    return "Upcoming songs cleared, finishing the current song";
+  }
+
   /** Fork: manual queue reorder (!reorder / WebUI drag & drop). */
   private cmdReorder(cmd: ParsedCommand): string {
     if (!cmd.args) return "Usage: !reorder <from> <to>";
@@ -1733,6 +1746,14 @@ export class BotInstance extends EventEmitter {
     this.emit("stateChange");
     const label = provider.platform === "qq" ? "QQ Radar FM" : "Personal FM";
     return `${label} started: ${first?.name ?? "unknown"} - ${first?.artist ?? ""}`;
+  }
+
+  /** 退出 FM：停止自动续播，保留当前队列并按顺序播完（供 Web UI 的 FM 徽标退出） */
+  stopFm(): void {
+    if (!this.isFmMode) return;
+    this.disableFmMode();
+    this.queue.setMode(PlayMode.Sequential);
+    this.emit("stateChange");
   }
 
   private async cmdArtist(cmd: ParsedCommand, requesterName?: string): Promise<string> {
@@ -1976,6 +1997,7 @@ export class BotInstance extends EventEmitter {
       `${p}pause/resume — Pause/resume`,
       `${p}next/prev    — Next/previous`,
       `${p}stop         — Stop and clear queue`,
+      `${p}clearkeep    — Clear upcoming songs, finish the current one`,
       `${p}vol <0-100>  — Set volume`,
       `${p}queue        — Show queue`,
       `${p}remove <pos> — Remove song at position (see ${p}queue)`,
@@ -2110,6 +2132,7 @@ export class BotInstance extends EventEmitter {
       playMode: this.queue.getMode(),
       elapsed: this.player.getElapsed(),
       effectiveDuration: this.effectiveDuration,
+      fmPlatform: this.isFmMode && this.fmProvider ? this.fmProvider.platform : "",
     };
   }
 

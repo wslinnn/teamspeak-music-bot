@@ -146,6 +146,17 @@ export function createPlayerRouter(
     }
   });
 
+  // 退出私人 FM：停止自动续播，保留队列按顺序播完（与 /fm 开启同权限口径）
+  router.post("/:botId/fm/stop", authorize({ capability: "player.control", guestFlag: "playMode" }), (req, res) => {
+    try {
+      const bot = (req as any).bot;
+      bot.stopFm(); // 同步操作，无需独占
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
   router.post("/:botId/volume", authorize({ capability: "player.control", guestFlag: "transport" }), async (req, res) => {
     try {
       const bot = (req as any).bot;
@@ -240,6 +251,9 @@ export function createPlayerRouter(
       currentIndex: bot.getQueueManager().getCurrentIndex(),
     });
   });
+
+  // 清空即将播放的歌曲，播完当前为止（与整队清空/停止相区分）
+  router.post("/:botId/queue/clear-upcoming", authorize({ capability: "player.queue", guestFlag: "removeClear" }), simpleCommand("!clearkeep"));
 
   router.delete("/:botId/queue/:index", authorize({ capability: "player.queue", guestFlag: "removeClear" }), async (req, res) => {
     try {

@@ -185,6 +185,20 @@ export class PlayQueue {
     this.forwardStack = [];
   }
 
+  /** Fork: 移除当前曲之外的全部歌曲（WebUI「清空队列，播完当前为止」）。
+   *  保留正在播放的这一首，导航栈全部作废——历史歌已不在队列里。 */
+  clearKeepCurrent(): void {
+    if (this.currentIndex < 0 || this.currentIndex >= this.songs.length) {
+      this.clear();
+      return;
+    }
+    this.songs = [this.songs[this.currentIndex]];
+    this.currentIndex = 0;
+    this.playedIndices = new Set([0]);
+    this.history = [];
+    this.forwardStack = [];
+  }
+
   play(): QueuedSong | null {
     if (this.songs.length === 0) return null;
     this.playedIndices.clear();
