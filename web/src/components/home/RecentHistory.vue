@@ -60,37 +60,6 @@
     </div>
   </section>
 
-  <!-- User Playlists -->
-  <section v-if="store.userPlaylists.length > 0" class="mb-9">
-    <h2 class="mb-4 flex items-center gap-2 text-[22px] font-bold">
-      我的歌单
-      <span class="text-[13px] font-medium text-foreground-subtle">{{ store.userPlaylists.length }}</span>
-    </h2>
-    <div class="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-      <RouterLink
-        v-for="pl in visibleUserPlaylists"
-        :key="pl.id"
-        :to="`/playlist/${pl.id}?platform=${pl.platform}`"
-        class="block cursor-pointer text-inherit no-underline hover-scale"
-      >
-        <div class="relative aspect-square overflow-hidden rounded-[10px]">
-          <CoverArt :url="pl.coverUrl" :fill="true" :radius="0" />
-        </div>
-        <div class="mt-2 text-[13px] font-medium line-clamp-2">{{ pl.name }}</div>
-        <div class="mt-0.5 text-xs text-foreground-subtle">{{ pl.songCount }} 首</div>
-      </RouterLink>
-    </div>
-    <button
-      v-if="store.userPlaylists.length > USER_PLAYLIST_LIMIT"
-      :aria-expanded="userPlaylistsExpanded"
-      class="mt-3 flex w-full items-center justify-center gap-1 rounded-[var(--radius-md)] bg-surface-card py-2.5 text-[13px] font-medium text-foreground-muted transition-colors hover:bg-interactive-hover hover:text-primary"
-      @click="userPlaylistsExpanded = !userPlaylistsExpanded"
-    >
-      <Icon :icon="userPlaylistsExpanded ? 'mdi:chevron-up' : 'mdi:chevron-down'" />
-      {{ userPlaylistsExpanded ? '收起' : `展开全部 ${store.userPlaylists.length} 个歌单` }}
-    </button>
-  </section>
-
   <!-- Bilibili Popular -->
   <section v-if="store.bilibiliPopular.length > 0" class="mb-9">
     <h2 class="mb-4 flex items-center gap-2 text-[22px] font-bold">
@@ -116,7 +85,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { Icon } from '@iconify/vue';
 import { usePlayerStore, type Song, type PlaylistItem } from '../../stores/player';
 import { useAuthStore } from '../../stores/auth';
 import { http } from '../../utils/http';
@@ -125,14 +93,6 @@ import CoverArt from '../CoverArt.vue';
 
 const store = usePlayerStore();
 const auth = useAuthStore();
-const USER_PLAYLIST_LIMIT = 20;
-const userPlaylistsExpanded = ref(false);
-
-const visibleUserPlaylists = computed(() =>
-  userPlaylistsExpanded.value
-    ? store.userPlaylists
-    : store.userPlaylists.slice(0, USER_PLAYLIST_LIMIT),
-);
 
 // ── 每日推荐/推荐歌单多源切换（上游语义）：网易云匿名可用，QQ/酷狗需登录 ──
 const recommendSources = computed(() => {
