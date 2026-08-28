@@ -1,15 +1,13 @@
 <template>
-  <div class="favorites-page">
-    <h1 class="text-[28px] font-extrabold mb-6">我的收藏</h1>
-
-    <!-- Search -->
+  <div>
+    <!-- Search：仅在有收藏时渲染（空态下无内容可筛） -->
     <div v-if="!store.loading && store.favorites.length > 0" class="mb-4">
       <div class="flex items-center rounded-[var(--radius-md)] bg-surface-card px-5 py-3.5">
         <Icon icon="mdi:magnify" class="mr-3 text-[22px] opacity-40" />
         <input
           v-model="query"
           class="flex-1 border-none bg-transparent text-base text-foreground outline-none placeholder:text-foreground-subtle"
-          placeholder="搜索歌曲、歌手..."
+          placeholder="在收藏中筛选歌曲、歌手..."
         />
       </div>
     </div>
@@ -18,7 +16,7 @@
 
     <EmptyState v-else-if="store.favorites.length === 0" message="暂无收藏歌曲" />
 
-    <EmptyState v-else-if="filteredFavorites.length === 0" message="无搜索结果" icon="mdi:music-note-off" />
+    <EmptyState v-else-if="filteredFavorites.length === 0" message="无筛选结果" icon="mdi:music-note-off" />
 
     <div v-else class="flex flex-col gap-0.5">
       <SongCard
@@ -38,12 +36,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
-import { useFavoritesStore, type Favorite } from '../stores/favorites';
-import { usePlayerStore, type Song } from '../stores/player';
-import type { Platform } from '../utils/platform';
-import SongCard from '../components/SongCard.vue';
-import EmptyState from '../components/common/EmptyState.vue';
-import SkeletonLoader from '../components/common/SkeletonLoader.vue';
+import { useFavoritesStore, type Favorite } from '../../stores/favorites';
+import { usePlayerStore, type Song } from '../../stores/player';
+import type { Platform } from '../../utils/platform';
+import SongCard from '../SongCard.vue';
+import EmptyState from '../common/EmptyState.vue';
+import SkeletonLoader from '../common/SkeletonLoader.vue';
 
 const store = useFavoritesStore();
 const playerStore = usePlayerStore();
@@ -85,6 +83,7 @@ function add(item: Favorite) {
   playerStore.addSong(toSong(item));
 }
 
+// 面板随 Tab 激活才挂载，挂载即拉取（favorites store 全站共享，重复调用幂等）
 onMounted(() => {
   store.fetchFavorites();
 });

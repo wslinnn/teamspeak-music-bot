@@ -25,10 +25,21 @@
           <div class="text-xs text-text-tertiary mb-4">
             {{ songs.length }} 首歌曲
           </div>
-          <button v-if="canPlayAll" class="flex items-center gap-1.5 px-7 py-2.5 bg-primary text-white rounded-[var(--radius-lg)] text-sm font-semibold w-fit transition-transform hover:scale-[1.04] active:scale-[0.96]" @click="playAll">
-            <Icon icon="mdi:play" />
-            播放全部
-          </button>
+          <div v-if="canPlayAll || canAddQueue" class="flex flex-wrap items-center gap-3">
+            <button v-if="canPlayAll" class="flex items-center gap-1.5 px-7 py-2.5 bg-primary text-white rounded-[var(--radius-lg)] text-sm font-semibold transition-transform hover:scale-[1.04] active:scale-[0.96]" @click="playAll">
+              <Icon icon="mdi:play" />
+              播放全部
+            </button>
+            <button
+              v-if="canAddQueue"
+              class="flex items-center gap-1.5 px-5 py-2.5 rounded-[var(--radius-lg)] border border-border-color text-sm font-semibold transition-colors hover:bg-interactive-hover disabled:opacity-60"
+              :disabled="addingQueue"
+              @click="addAllToQueue"
+            >
+              <Icon :icon="addingQueue ? 'mdi:loading' : 'mdi:playlist-plus'" :class="{ 'animate-spin': addingQueue }" />
+              加入队列
+            </button>
+          </div>
         </div>
       </div>
 
@@ -62,6 +73,7 @@ import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
+import { useToast } from '../composables/useToast';
 import CoverArt from '../components/CoverArt.vue';
 import SongCard from '../components/SongCard.vue';
 import PlaylistFavoriteButton from '../components/PlaylistFavoriteButton.vue';
@@ -69,9 +81,28 @@ import PlaylistFavoriteButton from '../components/PlaylistFavoriteButton.vue';
 const store = usePlayerStore();
 const auth = useAuthStore();
 const route = useRoute();
+const toast = useToast();
 
 // 播放全部需 player.control 或游客 playCollection（对齐后端 play-playlist/play-album 授权）
 const canPlayAll = computed(() => auth.can('player.control') || auth.guestCan('playCollection'));
+// 整歌单加入队列走 /player/:id/playlist（player.queue + 游客 addToQueue，与 SongGridCard.showAdd 同口径）
+const canAddQueue = computed(() => auth.can('player.queue') || auth.guestCan('addToQueue'));
+const addingQueue = ref(false);
+
+async function addAllToQueue() {
+  if (addingQueue.value) return;
+  const id = route.params.id as string;
+  const platform = (route.query.platform as string) || 'netease';
+  addingQueue.value = true;
+  try {
+    await http.post(`/api/player/${store.activeBotId}/playlist`, { playlistId: id, platform });
+    toast.success('已加入队列');
+  } catch {
+    // 错误信息由 http 拦截器统一 toast
+  } finally {
+    addingQueue.value = false;
+  }
+}
 
 import { Song } from '../stores/player';
 

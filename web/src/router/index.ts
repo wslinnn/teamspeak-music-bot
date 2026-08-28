@@ -34,11 +34,9 @@ const router = createRouter({
       meta: { hideNavbar: true },
     },
     {
+      // 已并入「我的」页子 Tab；redirect 保留既有 query（?bot= 专属链接等）
       path: '/history',
-      name: 'history',
-      component: () => import('../views/History.vue'),
-      // 播放历史含点歌人用户名，与 Library/Favorites 一致不对 guest 开放
-      meta: { blockGuest: true },
+      redirect: (to) => ({ path: '/library', query: { ...to.query, tab: 'history' } }),
     },
     {
       path: '/library',
@@ -47,10 +45,9 @@ const router = createRouter({
       meta: { blockGuest: true },
     },
     {
+      // 已并入「我的」页子 Tab
       path: '/favorites',
-      name: 'favorites',
-      component: () => import('../views/Favorites.vue'),
-      meta: { blockGuest: true },
+      redirect: (to) => ({ path: '/library', query: { ...to.query, tab: 'favorites' } }),
     },
     {
       path: '/settings',

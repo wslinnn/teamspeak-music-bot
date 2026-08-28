@@ -22,13 +22,12 @@ import { useAuthStore } from '../stores/auth';
 const route = useRoute();
 const auth = useAuthStore();
 
-// 播放历史/音乐库/收藏/设置均为 blockGuest 路由，游客不渲染入口（D14 渲染层门控）
+// 播放历史/收藏并入「我的」（/library 子 Tab）；设置同为 blockGuest 路由，
+// 游客不渲染入口（D14 渲染层门控）
 const tabs = computed(() => [
   { to: '/', label: '发现', icon: 'mdi:home' },
   { to: '/search', label: '搜索', icon: 'mdi:magnify' },
-  ...(!auth.isGuest ? [{ to: '/library', label: '音乐库', icon: 'mdi:music-box-multiple' }] : []),
-  ...(!auth.isGuest ? [{ to: '/history', label: '播放历史', icon: 'mdi:history' }] : []),
-  ...(!auth.isGuest ? [{ to: '/favorites', label: '收藏', icon: 'mdi:heart' }] : []),
+  ...(!auth.isGuest ? [{ to: '/library', label: '我的', icon: 'mdi:music-box-multiple' }] : []),
   ...(!auth.isGuest ? [{ to: '/settings', label: '设置', icon: 'mdi:cog' }] : []),
 ]);
 

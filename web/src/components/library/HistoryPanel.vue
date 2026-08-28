@@ -1,15 +1,13 @@
 <template>
   <div>
-    <h1 class="text-[28px] font-extrabold mb-6">播放历史</h1>
-
-    <!-- Search -->
-    <div class="mb-4">
+    <!-- Search：仅在有记录时渲染（空态下无内容可筛） -->
+    <div v-if="!loading && history.length > 0" class="mb-4">
       <div class="flex items-center rounded-[var(--radius-md)] bg-surface-card px-5 py-3.5">
         <Icon icon="mdi:magnify" class="mr-3 text-[22px] opacity-40" />
         <input
           v-model="query"
           class="flex-1 border-none bg-transparent text-base text-foreground outline-none placeholder:text-foreground-subtle"
-          placeholder="搜索歌曲、歌手..."
+          placeholder="在历史记录中筛选歌曲、歌手..."
         />
       </div>
     </div>
@@ -22,7 +20,7 @@
       暂无播放记录
     </div>
 
-    <EmptyState v-else-if="filteredHistory.length === 0" message="无搜索结果" icon="mdi:music-note-off" />
+    <EmptyState v-else-if="filteredHistory.length === 0" message="无筛选结果" icon="mdi:music-note-off" />
 
     <div v-else class="flex flex-col gap-0.5">
       <SongCard
@@ -48,12 +46,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
-import { http } from '../utils/http';
-import { usePlayerStore, type Song } from '../stores/player.js';
-import SongCard from '../components/SongCard.vue';
-import SkeletonLoader from '../components/common/SkeletonLoader.vue';
-import EmptyState from '../components/common/EmptyState.vue';
-import BaseButton from '../components/common/BaseButton.vue';
+import { http } from '../../utils/http';
+import { usePlayerStore, type Song } from '../../stores/player';
+import SongCard from '../SongCard.vue';
+import SkeletonLoader from '../common/SkeletonLoader.vue';
+import EmptyState from '../common/EmptyState.vue';
+import BaseButton from '../common/BaseButton.vue';
 
 const store = usePlayerStore();
 
@@ -134,6 +132,7 @@ async function loadMore() {
 
 watch(() => store.activeBotId, loadHistory);
 
+// 面板随 Tab 激活才挂载，挂载即拉取
 onMounted(async () => {
   if (!store.activeBotId) {
     await store.fetchBots();

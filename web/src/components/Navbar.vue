@@ -1,5 +1,7 @@
 <template>
-  <nav class="fixed top-0 left-0 right-0 h-[var(--navbar-height)] flex items-center px-[10vw] z-[var(--z-navbar)] frosted-glass max-[1336px]:px-[5vw]">
+  <nav class="fixed top-0 left-0 right-0 h-[var(--navbar-height)] z-[var(--z-navbar)] frosted-glass">
+    <!-- 内层容器与 .main-content 的 max-w/边距对齐，保证导航与内容左缘同线 -->
+    <div class="mx-auto flex h-full w-full max-w-[1280px] items-center px-[18px] md:px-8">
     <RouterLink to="/" class="text-lg font-bold text-primary mr-4 md:mr-10 max-[380px]:text-base">TSMusicBot</RouterLink>
 
     <!-- Desktop nav links -->
@@ -151,6 +153,7 @@
         </div>
       </div>
     </div>
+    </div>
   </nav>
 
   <ServerTreeDrawer v-model="serverTreeOpen" />
@@ -185,13 +188,11 @@ const activeBot = computed(() => store.activeBot);
 // bot 快捷操作（停止/播放/下一首）需 player.control（与 Player 底栏同口径）
 const canControl = computed(() => authStore.can('player.control'));
 
-// 桌面/移动端导航数据化：游客不可见 音乐库/收藏（与路由 blockGuest 对应）
+// 桌面导航数据化：播放历史/收藏并入「我的」（/library 子 Tab）；游客不可见（与路由 blockGuest 对应）
 const desktopLinks = computed(() => [
   { to: '/', label: '发现' },
   { to: '/search', label: '搜索' },
-  ...(!authStore.isGuest ? [{ to: '/library', label: '音乐库' }] : []),
-  { to: '/history', label: '播放历史' },
-  ...(!authStore.isGuest ? [{ to: '/favorites', label: '收藏' }] : []),
+  ...(!authStore.isGuest ? [{ to: '/library', label: '我的' }] : []),
 ]);
 
 

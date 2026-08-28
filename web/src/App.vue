@@ -147,13 +147,11 @@ onUnmounted(() => {
 }
 
 .main-content {
-  padding: 80px 10vw 80px;
-}
-
-@media (max-width: 1336px) {
-  .main-content {
-    padding: 80px 5vw 80px;
-  }
+  /* 宽屏内容居中收窄，避免列表/网格在超宽屏被拉满全屏；
+     歌词页为 position:fixed 全屏布局，不受此约束 */
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 80px 32px 80px;
 }
 
 /* 移动端：导航交给底部 TabBar，底部预留 TabBar + 胶囊高度 + 安全区 */
