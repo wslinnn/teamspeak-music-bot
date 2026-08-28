@@ -64,6 +64,16 @@
           <Icon :icon="modeIcon" />
           <span class="text-[11px] font-medium">{{ modeLabel }}</span>
         </button>
+        <!-- FM 徽标：运行中可点击退出（保留队列按顺序播完） -->
+        <button
+          v-if="canModeCtl && activeBot?.fmPlatform"
+          class="hidden sm:flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/15 text-primary transition-colors hover:bg-primary/25"
+          title="私人FM运行中，点击退出（保留队列按顺序播完）"
+          @click="store.stopFm()"
+        >
+          <Icon icon="mdi:radio" class="text-[13px]" />
+          FM
+        </button>
         <span class="text-[11px] text-text-tertiary tabular-nums min-w-[36px] text-left hidden sm:inline">{{ formatTime(activeDuration) }}</span>
       </div>
 

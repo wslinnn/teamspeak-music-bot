@@ -50,6 +50,15 @@
           <button v-if="canModeCtl" :aria-label="`播放模式: ${modeLabel}`" :title="modeLabel" class="mini-ctrl-btn text-[19px]" :class="currentMode !== 'seq' ? 'text-primary' : 'opacity-80'" @click="cycleMode">
             <Icon :icon="modeIcon" />
           </button>
+          <!-- FM 徽标：运行中可点击退出（保留队列按顺序播完） -->
+          <button
+            v-if="canModeCtl && activeBot?.fmPlatform"
+            class="h-6 shrink-0 px-1.5 rounded-full bg-primary/15 text-primary text-[10px] font-bold active:scale-95 transition-transform"
+            title="私人FM运行中，点击退出"
+            @click="store.stopFm()"
+          >
+            FM
+          </button>
           <button aria-label="播放队列" class="mini-ctrl-btn text-[19px] opacity-80" :class="{ 'text-primary': queueOpen }" @click="toggleQueue">
             <Icon icon="mdi:playlist-music" />
           </button>

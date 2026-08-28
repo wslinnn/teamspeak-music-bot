@@ -27,6 +27,8 @@ export interface BotStatus {
   elapsed?: number;
   /** 试听曲的实际可播时长（秒）；进度条分母与总时长优先用它（B1） */
   effectiveDuration?: number;
+  /** 私人 FM 运行中时为 FM 音源标识，否则为空串 */
+  fmPlatform?: string;
 }
 
 export interface PlaylistItem {
@@ -720,6 +722,18 @@ export const usePlayerStore = defineStore('player', {
       } catch {
         toast.error('切换播放模式失败');
       }
+    },
+
+    /** 退出私人 FM：停止自动续播，队列按顺序继续（状态由 WS 推送更新） */
+    async stopFm() {
+      if (!this.activeBotId) return;
+      await http.post(`/api/player/${this.activeBotId}/fm/stop`);
+    },
+
+    /** 清空即将播放的歌曲，播完当前为止（与 stop/clear 的全停语义相区分） */
+    async clearUpcoming() {
+      if (!this.activeBotId) return;
+      await http.post(`/api/player/${this.activeBotId}/queue/clear-upcoming`);
     },
 
     async fetchHomeData() {

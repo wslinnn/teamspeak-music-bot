@@ -37,8 +37,16 @@
           <button
             v-if="botQueue.length > 0 && canClear"
             class="text-lg opacity-60 transition-opacity hover:opacity-100"
+            @click="clearUpcoming"
+            title="清空队列，播完当前为止"
+          >
+            <Icon icon="mdi:playlist-remove" />
+          </button>
+          <button
+            v-if="botQueue.length > 0 && canClear"
+            class="text-lg opacity-60 transition-opacity hover:opacity-100"
             @click="clearAndStop"
-            title="清空队列并停止播放"
+            title="停止播放并清空队列"
           >
             <Icon icon="mdi:stop-circle-outline" />
           </button>
@@ -254,6 +262,16 @@ async function clearAndStop() {
     await store.fetchQueue();
   } catch {
     // Ignore
+  }
+}
+
+async function clearUpcoming() {
+  try {
+    await store.clearUpcoming();
+    await store.fetchQueue();
+    toast.success('已清空即将播放的歌曲，播完当前为止');
+  } catch {
+    // 错误信息由 http 拦截器统一 toast
   }
 }
 
