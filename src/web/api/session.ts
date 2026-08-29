@@ -6,7 +6,7 @@ import type { UserStore } from "../../data/users.js";
 import type { SessionStore } from "../../data/sessions.js";
 import type { AuditStore } from "../../data/audit.js";
 import { resolvePermissionContext, type PermissionStore } from "../../data/permissions.js";
-import { SESSION_TTL_MS, GUEST_SESSION_TTL_MS } from "../../data/sessions.js";
+import { SESSION_TTL_MS, GUEST_SESSION_TTL_MS, hashToken } from "../../data/sessions.js";
 import { GUEST_USER_ID, GUEST_USERNAME } from "../../data/users.js";
 import type { GuestModeConfig } from "../../data/config.js";
 import { SESSION_COOKIE_NAME, validateSessionFromHeaders, extractSessionToken } from "../auth/validateSession.js";
@@ -77,7 +77,10 @@ export function createSessionRouter(
   audit: AuditStore,
   logger: Logger,
   permissions: PermissionStore,
-  getGuestConfig: () => GuestModeConfig
+  getGuestConfig: () => GuestModeConfig,
+  // Audit SEC-08: lets the router ask the WS hub to close sockets whose
+  // session was just revoked (logout / password change).
+  onSessionsRevoked?: (userId: string, exceptTokenHash?: string) => void
 ): Router {
   const router = Router();
 
@@ -150,6 +153,17 @@ export function createSessionRouter(
     const ok = await users.verifyPassword(password, user ? user.passwordHash : DUMMY_HASH);
     if (!user || !ok) {
       await delay(FAILED_LOGIN_DELAY_MS);
+      // Audit SEC-12: record failed attempts so brute-forcing is visible in
+      // the audit trail (actor fields stay null — no verified identity yet).
+      try {
+        audit.record({
+          actorId: null, actorUsername: null,
+          targetUserId: null, targetUsername: username,
+          action: "login.failed",
+        });
+      } catch (auditErr) {
+        logger.warn({ err: auditErr, action: "login.failed" }, "audit insert failed");
+      }
       res.status(401).json({ error: "invalid credentials" });
       return;
     }
@@ -181,7 +195,10 @@ export function createSessionRouter(
   router.post("/logout", (req, res) => {
     const token = parseTokenFromCookie(req.headers.cookie);
     if (token) {
+      // Audit SEC-08: close the WS socket belonging to this very session.
+      const revoked = sessions.validateAndTouch(token);
       sessions.deleteSession(token);
+      if (revoked) onSessionsRevoked?.(revoked.userId, hashToken(token));
     }
     clearSessionCookie(res);
     res.status(204).end();
@@ -229,6 +246,9 @@ export function createSessionRouter(
     await users.changePassword(u.id, newPassword);
     const currentToken = parseTokenFromCookie(req.headers.cookie);
     sessions.deleteAllForUser(u.id, currentToken ?? undefined);
+    // Audit SEC-08: kill this user's other live WS sockets (current session
+    // survives, and so does its socket).
+    onSessionsRevoked?.(u.id, currentToken ? hashToken(currentToken) : undefined);
     try {
       audit.record({
         actorId: u.id, actorUsername: u.username,

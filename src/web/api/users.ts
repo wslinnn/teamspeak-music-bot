@@ -3,6 +3,7 @@ import type { Logger } from "../../logger.js";
 import type { UserStore } from "../../data/users.js";
 import { UsernameTakenError, GUEST_USER_ID } from "../../data/users.js";
 import type { SessionStore } from "../../data/sessions.js";
+import { hashToken } from "../../data/sessions.js";
 import type { AuditStore } from "../../data/audit.js";
 import { isCapability, BASIC_TIER_CAPABILITIES, type PermissionStore } from "../../data/permissions.js";
 import { extractSessionToken } from "../auth/validateSession.js";
@@ -20,7 +21,9 @@ export function createUsersRouter(
   sessions: SessionStore,
   audit: AuditStore,
   logger: Logger,
-  permissions: PermissionStore
+  permissions: PermissionStore,
+  // Audit SEC-08: close the target user's live WS sockets after revocation.
+  onSessionsRevoked?: (userId: string, exceptTokenHash?: string) => void
 ): Router {
   const router = Router();
 
@@ -85,6 +88,7 @@ export function createUsersRouter(
     }
     // FK CASCADE removes sessions; explicit call is belt-and-suspenders
     sessions.deleteAllForUser(targetId);
+    onSessionsRevoked?.(targetId);
     try {
       audit.record({
         actorId: req.user!.id, actorUsername: req.user!.username,
@@ -117,6 +121,7 @@ export function createUsersRouter(
       ? (extractSessionToken(req.headers.cookie) ?? undefined)
       : undefined;
     sessions.deleteAllForUser(targetId, exceptToken);
+    onSessionsRevoked?.(targetId, exceptToken ? hashToken(exceptToken) : undefined);
     try {
       audit.record({
         actorId: req.user!.id, actorUsername: req.user!.username,

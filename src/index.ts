@@ -148,6 +148,7 @@ async function main() {
 
   const webServer = createWebServer({
     port: config.webPort,
+    host: config.webHost,
     botManager,
     neteaseProvider,
     qqProvider,

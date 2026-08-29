@@ -16,6 +16,14 @@ export interface WebSocketController {
    * each guest socket is live re-scoped so out-of-scope bots stop streaming.
    */
   refreshGuestPolicy: (cfg: { enabled: boolean; bots: "all" | string[] }) => void;
+  /**
+   * Audit SEC-08: close a user's open sockets when their sessions are revoked
+   * (logout / password change / admin reset). Previously sockets survived
+   * revocation and kept streaming. `exceptTokenHash` spares the socket that
+   * belongs to the still-valid session (e.g. the actor changing their own
+   * password). 4001 = auth-failure close code (B3 contract).
+   */
+  closeUserSessions: (userId: string, opts?: { exceptTokenHash?: string }) => void;
 }
 
 export function setupWebSocket(
@@ -26,13 +34,15 @@ export function setupWebSocket(
   const clients = new Set<WebSocket>();
 
   /**
-   * Whether a given bot is visible to a WebSocket client. Member/admin clients
-   * (non-guest) and guests with full scope see everything; scoped guests only
-   * see bots in their allowed set.
+   * Whether a given bot is visible to a WebSocket client. server.ts stamps
+   * `botScope` at upgrade from the same permission context the HTTP
+   * middlewares use, so BOTH scoped guests and members restricted via
+   * user_bot_access only see their allowed bots; admins/unrestricted
+   * clients get "all".
    */
   function visibleToClient(ws: WebSocket, botId: string): boolean {
-    const w = ws as unknown as { isGuest?: boolean; botScope?: "all" | Set<string> };
-    if (!w.isGuest || w.botScope === "all" || !w.botScope) return true;
+    const w = ws as unknown as { botScope?: "all" | Set<string> };
+    if (!w.botScope || w.botScope === "all") return true;
     return w.botScope.has(botId);
   }
 
@@ -43,6 +53,22 @@ export function setupWebSocket(
     connected: () => void;
     disconnected: () => void;
   }>();
+
+  /**
+   * Audit PERF-03: stateChange fires ~30× per song (transport, volume,
+   * occupancy…), and re-sending the whole queue each time serializes a
+   * 1000-song array into every socket. Track a per-bot queue signature and
+   * omit `queue` from the payload while it is unchanged — clients keep
+   * their local copy (queueUnchanged flag, contract honoured by
+   * web/src/composables/useWebSocket.ts). Exact id comparison: a missed
+   * update here would silently stale the UI, so no lossy hashing.
+   */
+  const lastQueueSig = new Map<string, string>();
+
+  function queueSignature(bot: BotInstance): string {
+    const songs = bot.getQueue();
+    return `${songs.length}:${songs.map((s) => s.id).join(",")}`;
+  }
 
   wss.on("connection", (ws) => {
     clients.add(ws);
@@ -85,6 +111,7 @@ export function setupWebSocket(
     existing.bot.removeListener("connected", existing.connected);
     existing.bot.removeListener("disconnected", existing.disconnected);
     attachedBots.delete(id);
+    lastQueueSig.delete(id);
   }
 
   function attachBotListener(bot: BotInstance): void {
@@ -96,12 +123,15 @@ export function setupWebSocket(
     }
 
     const onStateChange = () => {
-      broadcast({
-        type: "stateChange",
-        botId: bot.id,
-        status: bot.getStatus(),
-        queue: bot.getQueue(),
-      }, bot.id);
+      const sig = queueSignature(bot);
+      const queueUnchanged = lastQueueSig.get(bot.id) === sig;
+      lastQueueSig.set(bot.id, sig);
+      broadcast(
+        queueUnchanged
+          ? { type: "stateChange", botId: bot.id, status: bot.getStatus(), queueUnchanged: true }
+          : { type: "stateChange", botId: bot.id, status: bot.getStatus(), queue: bot.getQueue() },
+        bot.id,
+      );
     };
 
     const onConnected = () => {
@@ -196,5 +226,18 @@ export function setupWebSocket(
     }
   };
 
-  return { cleanup, refreshGuestPolicy, broadcast };
+  const closeUserSessions = (userId: string, opts?: { exceptTokenHash?: string }): void => {
+    for (const ws of clients) {
+      const w = ws as unknown as { userId?: string; tokenHash?: string };
+      if (w.userId !== userId) continue;
+      if (opts?.exceptTokenHash && w.tokenHash === opts.exceptTokenHash) continue;
+      try {
+        ws.close(4001, "session revoked");
+      } catch {
+        // socket may already be closing; ignore
+      }
+    }
+  };
+
+  return { cleanup, refreshGuestPolicy, broadcast, closeUserSessions };
 }

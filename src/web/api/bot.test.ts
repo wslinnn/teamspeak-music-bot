@@ -642,7 +642,7 @@ describe("bot router /settings guest-mode gating + persistence", () => {
     expect(res.body.guestMode.enabled).toBe(true);
     expect(res.body.guestMode.bots).toEqual(["bot1"]);
     expect(res.body.guestMode.permissions.playNext).toBe(true);
-    expect(res.body.guestMode.permissions.addToQueue).toBe(true); // untouched default
+    expect(res.body.guestMode.permissions.addToQueue).toBe(false); // untouched default (audit SEC-06)
   });
 
   it("POST /settings spotify write is 403 for a member lacking bot.manage", async () => {

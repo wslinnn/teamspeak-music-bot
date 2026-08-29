@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 
 export type AuditAction =
+  | "login.failed"
   | "admin.first_created"
   | "user.created"
   | "user.deleted"

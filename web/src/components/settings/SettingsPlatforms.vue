@@ -192,9 +192,18 @@ async function connectSpotify() {
   connecting.value = true;
   try {
     const res = await http.get('/api/spotify/login');
-    if (res.data.url) {
-      window.location.href = res.data.url as string;
-      return;
+    const url = res.data.url as string | undefined;
+    // 纵深防御（审计 S1）：只跟随 accounts.spotify.com 的授权跳转，
+    // 后端异常/被劫持时不得把管理员导航到任意域。
+    if (url) {
+      try {
+        if (new URL(url).hostname === 'accounts.spotify.com') {
+          window.location.href = url;
+          return;
+        }
+      } catch {
+        // fall through to the error below
+      }
     }
     toast.error('获取授权链接失败');
   } catch {

@@ -109,6 +109,10 @@ export function defaultPlatform(config: BotConfig): GateableProvider {
 
 export interface BotConfig {
   webPort: number;
+  /** Audit DEP-05: bind address for the Web server. "0.0.0.0" (default) keeps
+   *  historical behavior; set "127.0.0.1" when only local/reverse-proxy
+   *  access is wanted. See README deployment notes. */
+  webHost: string;
   locale: "zh" | "en";
   theme: "dark" | "light";
   commandPrefix: string;
@@ -171,6 +175,7 @@ export interface BotConfig {
 export function getDefaultConfig(): BotConfig {
   return {
     webPort: 3000,
+    webHost: "0.0.0.0",
     locale: "zh",
     theme: "dark",
     commandPrefix: "!",
@@ -198,7 +203,10 @@ export function getDefaultConfig(): BotConfig {
       enabled: false,
       bots: "all",
       permissions: {
-        addToQueue: true,
+        // Default OFF (security audit SEC-06): with it on, anonymous guests
+        // could spam 500MB uploads and hog the process-wide upload gate.
+        // Admins who want guest requests can still flip it in settings.
+        addToQueue: false,
         playNext: false,
         playNow: false,
         skip: false,
@@ -465,7 +473,11 @@ export function loadConfig(path: string): BotConfig {
 
 export function saveConfig(path: string, config: BotConfig): void {
   mkdirSync(dirname(path), { recursive: true });
-  const json = JSON.stringify(config, null, 2);
+  // Audit SEC-11: adminPassword is a dead legacy credential (WebUI auth moved
+  // to the database user system, see README) — stop persisting it so the
+  // plaintext secret disappears from every config.json on the next save.
+  const { adminPassword: _legacyAdminPassword, ...persistent } = config;
+  const json = JSON.stringify(persistent, null, 2);
 
   // Atomic write: serialize to a sibling temp file in the SAME directory, then
   // rename it onto the final path. rename is an atomic replace on POSIX and modern

@@ -1,6 +1,7 @@
-import express, { Router, type Response } from "express";
+import express, { Router, type Request, type Response } from "express";
+import { respondError } from "./respond.js";
 import type { MusicProvider, Song, Album } from "../../music/provider.js";
-import { YouTubeProvider } from "../../music/youtube.js";
+import { YouTubeProvider, UnsupportedPlaylistUrlError } from "../../music/youtube.js";
 import type { Logger } from "../../logger.js";
 import { isProviderEnabled, defaultPlatform, saveConfig, type BotConfig } from "../../data/config.js";
 import { requirePermission } from "../middleware/requirePermission.js";
@@ -76,6 +77,36 @@ const localUploadGate: express.RequestHandler = (_req, res, next) => {
   next();
 };
 
+/**
+ * Audit PERF-06: tiny TTL + capacity-bounded cache for expensive upstream
+ * calls (multi-request provider searches, Jellyfin cover bytes). Entries
+ * expire quickly and the oldest entry is evicted at capacity, so this is a
+ * latency/bandwidth optimization — never correctness-critical state.
+ */
+class TtlCache<V> {
+  private map = new Map<string, { value: V; expiresAt: number }>();
+  constructor(private ttlMs: number, private capacity: number) {}
+  get(key: string): V | undefined {
+    const hit = this.map.get(key);
+    if (!hit) return undefined;
+    if (Date.now() > hit.expiresAt) {
+      this.map.delete(key);
+      return undefined;
+    }
+    return hit.value;
+  }
+  set(key: string, value: V): void {
+    if (this.map.size >= this.capacity) {
+      const oldest = this.map.keys().next().value;
+      if (oldest !== undefined) this.map.delete(oldest);
+    }
+    this.map.set(key, { value, expiresAt: Date.now() + this.ttlMs });
+  }
+  get size(): number {
+    return this.map.size;
+  }
+}
+
 export function createMusicRouter(
   neteaseProvider: MusicProvider,
   qqProvider: MusicProvider,
@@ -92,6 +123,14 @@ export function createMusicRouter(
 ): Router {
   const router = Router();
   const youtubeProvider: MusicProvider = new YouTubeProvider();
+
+  // Audit PERF-06: repeat searches (several users typing the same keyword,
+  // pagination re-visits) used to hit the upstreams every time — risking
+  // rate-limit/风控 on the logged-in accounts. 30s TTL, 200 entries.
+  const searchCache = new TtlCache<unknown>(30_000, 200);
+  // Jellyfin covers: homepage sections pull 12+ full images per view; without
+  // a server-side cache every cache-missed browser re-downloaded them all.
+  const jellyfinCoverCache = new TtlCache<{ data: Buffer; contentType: string }>(10 * 60_000, 200);
 
   function isLocalAudioEnabled(): boolean {
     return config?.localAudioEnabled !== false;
@@ -189,15 +228,22 @@ export function createMusicRouter(
       // Server-side pagination: offset lets the web load past the first page.
       // Clamp to >= 0 so a bad/negative value falls back to the first page.
       const parsedOffset = Math.max(0, parseInt(offset as string) || 0);
+      const cacheKey = `${typeof platform === "string" ? platform : ""}|${parsedOffset}|${parseInt(limit as string) || 20}|${q}`;
+      const cached = searchCache.get(cacheKey);
+      if (cached) {
+        res.json(cached);
+        return;
+      }
       const result = await provider.search(
         q as string,
         parseInt(limit as string) || 20,
         parsedOffset
       );
+      searchCache.set(cacheKey, result);
       res.json(result);
     } catch (err) {
       logger.error({ err }, "Search failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -254,7 +300,7 @@ export function createMusicRouter(
       res.json({ songs, albums, playlists });
     } catch (err) {
       logger.error({ err }, "Unified search failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -273,18 +319,24 @@ export function createMusicRouter(
       }
       res.json(song);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
-  router.get("/playlist/:id", async (req, res) => {
+  // Rate-limited: the id/URL is fetched server-side (yt-dlp for youtube), so
+  // a tight loop would hammer upstreams / probe arbitrary hosts.
+  router.get("/playlist/:id", createRateLimit({ capacity: 10, refillPerSec: 0.5 }), async (req: Request<{ id: string }>, res: Response) => {
     try {
       const provider = resolveProvider(req.query.platform, res);
       if (!provider) return;
       const songs = await provider.getPlaylistSongs(req.params.id);
       res.json({ songs });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      if (err instanceof UnsupportedPlaylistUrlError) {
+        res.status(400).json({ error: (err as Error).message });
+        return;
+      }
+      respondError(logger, req, res, err);
     }
   });
 
@@ -295,7 +347,7 @@ export function createMusicRouter(
       const playlists = await provider.getRecommendPlaylists();
       res.json({ playlists });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -306,7 +358,7 @@ export function createMusicRouter(
       const songs = await provider.getAlbumSongs(req.params.id);
       res.json({ songs });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -317,7 +369,7 @@ export function createMusicRouter(
       const lyrics = await provider.getLyrics(req.params.id);
       res.json({ lyrics });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -333,7 +385,7 @@ export function createMusicRouter(
       res.json({ songs });
     } catch (err) {
       logger.error({ err }, "Get daily recommend songs failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -349,7 +401,7 @@ export function createMusicRouter(
       res.json({ songs });
     } catch (err) {
       logger.error({ err }, "Get personal FM failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -365,7 +417,7 @@ export function createMusicRouter(
       res.json({ playlists });
     } catch (err) {
       logger.error({ err }, "Get user playlists failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -385,7 +437,7 @@ export function createMusicRouter(
       res.json({ playlist: detail });
     } catch (err) {
       logger.error({ err }, "Get playlist detail failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -402,7 +454,7 @@ export function createMusicRouter(
       }
     } catch (err) {
       logger.error({ err }, "Get bilibili popular failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -462,7 +514,7 @@ export function createMusicRouter(
       res.json({ albums: (await p.getLatestAlbums?.(limit)) ?? [] });
     } catch (err) {
       logger.error({ err }, "Jellyfin latest albums failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -474,7 +526,7 @@ export function createMusicRouter(
       res.json({ songs: (await p.getMostPlayed?.(limit)) ?? [] });
     } catch (err) {
       logger.error({ err }, "Jellyfin most played failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -488,7 +540,7 @@ export function createMusicRouter(
       res.json({ songs: (await p.getFavoriteSongs?.(limit)) ?? [] });
     } catch (err) {
       logger.error({ err }, "Jellyfin favorites failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -500,7 +552,7 @@ export function createMusicRouter(
       res.json({ genres: (await p.getGenres?.(limit)) ?? [] });
     } catch (err) {
       logger.error({ err }, "Jellyfin genres failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -512,7 +564,7 @@ export function createMusicRouter(
       res.json({ songs: (await p.getGenreSongs?.(req.params.id, limit)) ?? [] });
     } catch (err) {
       logger.error({ err }, "Jellyfin genre songs failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -528,10 +580,15 @@ export function createMusicRouter(
         res.status(501).json({ error: "Jellyfin cover proxy not available" });
         return;
       }
-      const img = await p.getCoverImage(req.params.itemId);
+      let img = jellyfinCoverCache.get(req.params.itemId);
       if (!img) {
-        res.status(404).end();
-        return;
+        const fetched = await p.getCoverImage(req.params.itemId);
+        if (!fetched) {
+          res.status(404).end();
+          return;
+        }
+        img = { data: fetched.data, contentType: fetched.contentType };
+        jellyfinCoverCache.set(req.params.itemId, img);
       }
       res.set("Content-Type", img.contentType);
       // Bytes are keyed by itemId; `private` because the route is session-gated.

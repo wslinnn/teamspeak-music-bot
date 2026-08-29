@@ -39,12 +39,16 @@ import { requireAdmin } from "./middleware/requireAdmin.js";
 import { requireNotGuest } from "./middleware/requireNotGuest.js";
 import { csrfOriginCheck } from "./middleware/csrf.js";
 import { createRateLimit } from "./middleware/rateLimit.js";
-import { validateSessionFromHeaders } from "./auth/validateSession.js";
+import { validateSessionFromHeaders, extractSessionToken } from "./auth/validateSession.js";
+import { resolvePermissionContext } from "../data/permissions.js";
+import { hashToken } from "../data/sessions.js";
 
 const SESSION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 export interface WebServerOptions {
   port: number;
+  /** Bind address; defaults to all interfaces when omitted. */
+  host?: string;
   botManager: BotManager;
   neteaseProvider: MusicProvider;
   qqProvider: MusicProvider;
@@ -88,10 +92,18 @@ export function createWebServer(options: WebServerOptions): WebServer {
   //    (issue #128: searching "TsmusicBot" surfaced strangers' WebUI URLs).
   //    Set on EVERY response so JSON/API responses and the SPA shell are all
   //    covered; complements /robots.txt and the <meta name="robots"> tag.
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    // Audit SEC-09: harden the remaining baseline headers. HSTS only makes
+    // sense once the request is actually TLS (behind a proxy with
+    // trustProxy or terminated locally); harmless to omit otherwise.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "same-origin");
+    if (req.secure) {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
     next();
   });
 
@@ -112,7 +124,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
   });
 
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", version: "0.1.0" });
+    // Audit SEC-11: version number omitted — this endpoint is unauthenticated
+    // and version disclosure helps attackers target known issues.
+    res.json({ status: "ok" });
   });
 
   app.get("/api/config/public-url", (_req, res) => {
@@ -123,12 +137,34 @@ export function createWebServer(options: WebServerOptions): WebServer {
   // Anti-DoS: throttle expensive (bcrypt) auth endpoints.
   // 5 req per minute per IP for /login (capacity 5, refill 5/60 = ~0.083/sec).
   // 3 req per minute per IP for /setup (more limited; first-run is rare).
-  const loginLimit = createRateLimit({ capacity: 5, refillPerSec: 5 / 60 });
+  // Login additionally keys on the submitted username so a distributed /
+  // XFF-rotating attack still trips a bucket per targeted account instead of
+  // getting a fresh IP-keyed bucket per request.
+  const loginLimit = createRateLimit({
+    capacity: 5,
+    refillPerSec: 5 / 60,
+    keyFn: (req) => {
+      const body = (req.body ?? {}) as { username?: unknown };
+      const username = typeof body.username === "string" ? body.username.toLowerCase() : "";
+      return `${req.ip ?? "unknown"}|${username}`;
+    },
+  });
   const setupLimit = createRateLimit({ capacity: 3, refillPerSec: 3 / 60 });
   app.use("/api/session/login", loginLimit);
   app.use("/api/session/setup", setupLimit);
+  // Guest sessions are anonymous and uncounted — without a limiter an attacker
+  // can mint 1-day session rows at line speed and bloat the sessions table.
+  const guestLimit = createRateLimit({ capacity: 10, refillPerSec: 10 / 60 });
+  app.use("/api/session/guest", guestLimit);
 
-  app.use("/api/session", createSessionRouter(users, sessions, audit, logger, permissions, () => options.config.guestMode));
+  app.use(
+    "/api/session",
+    createSessionRouter(
+      users, sessions, audit, logger, permissions,
+      () => options.config.guestMode,
+      (userId, exceptHash) => onSessionsRevoked(userId, exceptHash)
+    )
+  );
 
   // ─── Gates for everything else under /api ───────────────────────────────
   const requireAuth = createRequireAuth(sessions, permissions, () => options.config.guestMode);
@@ -141,6 +177,10 @@ export function createWebServer(options: WebServerOptions): WebServer {
   // controller. Bridge the two with a mutable indirection that starts as a
   // no-op and is wired to the real refreshGuestPolicy once the WS is set up.
   let onGuestPolicyChanged: (cfg: GuestModeConfig) => void = () => {};
+  // Mutable indirection (same bridge pattern as onGuestPolicyChanged): the
+  // session/users routers are mounted before the WS hub exists, so the hook
+  // starts as a no-op and is wired to closeUserSessions once setupWebSocket ran.
+  let onSessionsRevoked: (userId: string, exceptTokenHash?: string) => void = () => {};
   app.use(
     "/api/bot",
     createBotRouter(
@@ -210,7 +250,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   app.use(
     "/api/song-favorites",
     requireNotGuest,
-    createSongFavoritesRouter(options.database, (data) => broadcastToClients(data))
+    createSongFavoritesRouter(options.database, (data) => broadcastToClients(data), logger)
   );
   // Saved queues (Feature 1, #119). Members + admins only (requireNotGuest);
   // the router itself 403s every route unless savedQueuesEnabled is on.
@@ -226,7 +266,13 @@ export function createWebServer(options: WebServerOptions): WebServer {
   );
 
   // admin-only routes
-  app.use("/api/users", requireAdmin, createUsersRouter(users, sessions, audit, logger, permissions));
+  app.use(
+    "/api/users",
+    requireAdmin,
+    createUsersRouter(users, sessions, audit, logger, permissions, (userId, exceptHash) =>
+      onSessionsRevoked(userId, exceptHash)
+    )
+  );
   app.use("/api/audit", requireAdmin, createAuditRouter(audit));
 
   // ─── Static SPA (public) ────────────────────────────────────────────────
@@ -261,7 +307,9 @@ export function createWebServer(options: WebServerOptions): WebServer {
     alive.add(ws);
     ws.on("pong", () => alive.add(ws));
   });
-  setInterval(() => {
+  // Keep the handle so stop() can clear it (audit PERF-09) — an uncleared
+  // interval kept breaking hot restarts in tests.
+  const heartbeatTimer = setInterval(() => {
     for (const ws of wss.clients) {
       if (!alive.has(ws)) {
         ws.terminate();
@@ -304,22 +352,35 @@ export function createWebServer(options: WebServerOptions): WebServer {
       wss.handleUpgrade(req, socket, head, (ws) => ws.close(4001, "guest mode disabled"));
       return;
     }
-    const guestBots = options.config.guestMode.bots;
-    const botScope: "all" | Set<string> =
-      result.role === "guest"
-        ? guestBots === "all" ? "all" : new Set(guestBots)
-        : "all";
+    // Resolve the bot scope through the same permission context the HTTP
+    // middlewares use, so members restricted via user_bot_access are ALSO
+    // scoped here — previously members always got "all" and kept receiving
+    // every bot's status/queue broadcasts over WS.
+    const guestCfg = options.config.guestMode;
+    const permCtx = resolvePermissionContext(
+      result.role,
+      result.userId,
+      permissions,
+      result.role === "guest" ? { bots: guestCfg.bots, permissions: guestCfg.permissions } : undefined
+    );
+    const botScope: "all" | Set<string> = permCtx.bots ?? "all";
     wss.handleUpgrade(req, socket, head, (ws) => {
-      const w = ws as unknown as { userId: string; isGuest: boolean; botScope: "all" | Set<string> };
+      const w = ws as unknown as { userId: string; isGuest: boolean; botScope: "all" | Set<string>; tokenHash?: string };
       w.userId = result.userId;
       w.isGuest = result.role === "guest";
       w.botScope = botScope;
+      // Audit SEC-08: remember which session this socket belongs to so a
+      // later logout/revocation can close exactly it (and spare other
+      // devices' still-valid sessions).
+      const upgradeToken = extractSessionToken(req.headers.cookie as string | undefined);
+      if (upgradeToken) w.tokenHash = hashToken(upgradeToken);
       wss.emit("connection", ws, req);
     });
   });
   const controller = setupWebSocket(wss, options.botManager, logger);
   onGuestPolicyChanged = controller.refreshGuestPolicy;
   broadcastToClients = (data) => controller.broadcast(data);
+  onSessionsRevoked = (userId, exceptHash) => controller.closeUserSessions(userId, { exceptTokenHash: exceptHash });
 
   // ─── Session cleanup interval ──────────────────────────────────────────
   let cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -327,8 +388,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
   return {
     async start(): Promise<void> {
       return new Promise((resolve) => {
-        server.listen(options.port, () => {
-          logger.info({ port: options.port }, "Web server started");
+        server.listen(options.port, options.host ?? "0.0.0.0", () => {
+          logger.info({ port: options.port, host: options.host ?? "0.0.0.0" }, "Web server started");
           cleanupTimer = setInterval(() => {
             try {
               sessions.cleanupExpired();
@@ -345,6 +406,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
         clearInterval(cleanupTimer);
         cleanupTimer = null;
       }
+      clearInterval(heartbeatTimer);
       controller.cleanup();
       wss.close();
       server.close();

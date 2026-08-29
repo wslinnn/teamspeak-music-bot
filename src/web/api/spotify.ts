@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { respondError } from "./respond.js";
 import type { Logger } from "pino";
 import { requirePermission } from "../middleware/requirePermission.js";
 import { requireNotGuest } from "../middleware/requireNotGuest.js";
@@ -39,7 +40,7 @@ export function createSpotifyRouter(opts: SpotifyRouterOptions): Router {
       res.json({ url });
     } catch (err) {
       logger.error({ err }, "Spotify authorize URL build failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, _req, res, err);
     }
   });
 

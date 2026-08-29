@@ -30,6 +30,32 @@ vi.mock("@sansenjian/qq-music-api", () => {
   return { default: app };
 });
 
+// Record every serveNcmApi() option so we can assert the NetEase sidecar is
+// always handed an explicit loopback host.
+const ncmState = vi.hoisted(() => ({
+  serveCalls: [] as Array<{ port: number; host?: string }>,
+}));
+
+vi.mock("NeteaseCloudMusicApi", () => {
+  return {
+    server: {
+      serveNcmApi(options: { port: number; host?: string }) {
+        ncmState.serveCalls.push(options);
+        return Promise.resolve({
+          address: () => ({
+            port: options.port,
+            address: options.host ?? "0.0.0.0",
+            family: "IPv4" as const,
+          }),
+          close(done?: () => void) {
+            done?.();
+          },
+        });
+      },
+    },
+  };
+});
+
 describe("describeQqApiStartupError", () => {
   it("flags ERR_REQUIRE_ESM by error code with version-pin guidance", () => {
     const hint = describeQqApiStartupError({ code: "ERR_REQUIRE_ESM", message: "..." });
@@ -128,6 +154,37 @@ describe("createApiServerManager — QQ sidecar port binding", () => {
       manager.stop();
       if (previous === undefined) delete process.env.PORT;
       else process.env.PORT = previous;
+    }
+  });
+});
+
+// Regression (security audit SEC-01): the NetEase sidecar proxies our
+// logged-in NetEase cookies, so it must be handed an explicit loopback host —
+// serveNcmApi silently binds all interfaces (0.0.0.0) when host is omitted,
+// which would expose the whole API to the LAN.
+describe("createApiServerManager — NetEase sidecar loopback binding", () => {
+  const noopLogger = {
+    info() {},
+    warn() {},
+    error() {},
+    debug() {},
+    trace() {},
+    fatal() {},
+  } as unknown as Logger;
+
+  it("passes host 127.0.0.1 to serveNcmApi and exposes the configured port", async () => {
+    const port = 39231;
+    ncmState.serveCalls = [];
+    const manager = createApiServerManager(
+      { neteasePort: port, qqMusicPort: 39232, qqEnabled: false },
+      noopLogger
+    );
+    try {
+      await manager.start();
+      expect(ncmState.serveCalls).toEqual([{ port, host: "127.0.0.1" }]);
+      expect(manager.getNeteaseBaseUrl()).toBe(`http://127.0.0.1:${port}`);
+    } finally {
+      manager.stop();
     }
   });
 });

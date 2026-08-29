@@ -117,6 +117,153 @@ describe("WebSocket guest bot scope", () => {
   });
 });
 
+// Regression (security audit SEC-04): member sockets stamped with a bot scope
+// (user_bot_access) must be filtered exactly like scoped guests — both in the
+// init snapshot and in per-bot broadcasts.
+describe("WebSocket member bot scope", () => {
+  function makeHarness() {
+    const fakeWss: any = {
+      on: (ev: string, cb: any) => {
+        if (ev === "connection") fakeWss._conn = cb;
+      },
+    };
+    const botManager: any = {
+      getAllBots: () => [],
+      on: () => {},
+      off: () => {},
+      removeListener: () => {},
+    };
+    const logger = { debug() {}, error() {}, info() {}, warn() {} } as any;
+    const controller = setupWebSocket(fakeWss, botManager, logger);
+    const connect = (ws: any) => fakeWss._conn(ws);
+    return { controller, connect };
+  }
+
+  function makeMemberWs(botScope: "all" | Set<string>, seen: any[]) {
+    return {
+      readyState: 1,
+      isGuest: false,
+      botScope,
+      send: (m: string) => seen.push(JSON.parse(m)),
+      on: () => {},
+      close: () => {},
+    };
+  }
+
+  it("member init snapshot is filtered to the member bot scope", () => {
+    const seen: any[] = [];
+    const fakeWss: any = {
+      on: (ev: string, cb: any) => {
+        if (ev === "connection") fakeWss._conn = cb;
+      },
+    };
+    const makeBot = (id: string) => ({
+      id,
+      getStatus: () => ({ id }),
+      getQueue: () => [],
+      on: () => {},
+      removeListener: () => {},
+    });
+    const botManager: any = {
+      getAllBots: () => [makeBot("bot1"), makeBot("bot2")],
+      on: () => {},
+      off: () => {},
+      removeListener: () => {},
+    };
+    const controller = setupWebSocket(fakeWss, botManager, {
+      debug() {},
+      error() {},
+      info() {},
+      warn() {},
+    } as any);
+    fakeWss._conn(makeMemberWs(new Set(["bot1"]), seen));
+    const init = seen.find((m) => m.type === "init");
+    expect(init.bots.map((b: any) => b.id)).toEqual(["bot1"]);
+    controller.cleanup();
+  });
+
+  it("scoped member does not receive out-of-scope bot broadcasts", () => {
+    const { controller, connect } = makeHarness();
+    const scopedSeen: any[] = [];
+    const fullSeen: any[] = [];
+    connect(makeMemberWs(new Set(["bot1"]), scopedSeen));
+    connect(makeMemberWs("all", fullSeen));
+
+    controller.broadcast({ type: "stateChange", botId: "bot2" }, "bot2");
+    controller.broadcast({ type: "stateChange", botId: "bot1" }, "bot1");
+
+    const states = (seen: any[]) => seen.filter((m) => m.type === "stateChange");
+    expect(states(scopedSeen).map((m) => m.botId)).toEqual(["bot1"]);
+    expect(states(fullSeen).map((m) => m.botId)).toEqual(["bot2", "bot1"]);
+    controller.cleanup();
+  });
+});
+
+// Regression (security audit SEC-08): session revocation must close the
+// revoked user's sockets, sparing the excepted (still-valid) session.
+describe("WebSocket closeUserSessions", () => {
+  function makeHarness() {
+    const fakeWss: any = {
+      on: (ev: string, cb: any) => {
+        if (ev === "connection") fakeWss._conn = cb;
+      },
+    };
+    const botManager: any = {
+      getAllBots: () => [],
+      on: () => {},
+      off: () => {},
+      removeListener: () => {},
+    };
+    const controller = setupWebSocket(fakeWss, botManager, { debug() {}, error() {}, info() {}, warn() {} } as any);
+    return { controller, fakeWss };
+  }
+
+  function makeUserWs(userId: string, tokenHash?: string) {
+    const closeCalls: Array<{ code?: number; reason?: string }> = [];
+    const ws: any = {
+      readyState: 1,
+      userId,
+      tokenHash,
+      send: () => {},
+      on: () => {},
+      close: (code?: number, reason?: string) => closeCalls.push({ code, reason }),
+    };
+    return { ws, closeCalls };
+  }
+
+  function connect(fakeWss: any, ws: any) {
+    fakeWss._conn(ws);
+  }
+
+  it("closes only the revoked user's sockets, honouring exceptTokenHash", () => {
+    const fakeWss: any = {
+      on: (ev: string, cb: any) => {
+        if (ev === "connection") fakeWss._conn = cb;
+      },
+    };
+    const { controller, fakeWss: harnessWss } = makeHarness();
+    const alice1 = makeUserWs("alice", "hash-1");
+    const alice2 = makeUserWs("alice", "hash-2");
+    const bob = makeUserWs("bob", "hash-3");
+    connect(harnessWss, alice1.ws);
+    connect(harnessWss, alice2.ws);
+    connect(harnessWss, bob.ws);
+
+    // Revoke all alice sessions except hash-1 (e.g. she changed her password
+    // from the alice-1 client).
+    controller.closeUserSessions("alice", { exceptTokenHash: "hash-1" });
+
+    expect(alice1.closeCalls.length).toBe(0);
+    expect(alice2.closeCalls).toEqual([{ code: 4001, reason: "session revoked" }]);
+    expect(bob.closeCalls.length).toBe(0);
+
+    // Full revocation takes both alice sockets.
+    controller.closeUserSessions("alice");
+    expect(alice1.closeCalls).toEqual([{ code: 4001, reason: "session revoked" }]);
+    controller.cleanup();
+  });
+});
+
 describe("WebSocket refreshGuestPolicy", () => {
   function makeHarness() {
     const clients: any[] = [];

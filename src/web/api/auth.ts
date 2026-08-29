@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { respondError } from "./respond.js";
 import type { MusicProvider } from "../../music/provider.js";
 import { YouTubeProvider } from "../../music/youtube.js";
 import type { CookieStore } from "../../music/auth.js";
@@ -41,7 +42,7 @@ export function createAuthRouter(
       res.json({ platform: provider.platform, ...status });
     } catch (err) {
       logger.error({ err }, "Auth status check failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -50,11 +51,11 @@ export function createAuthRouter(
       const { platform } = req.body;
       const provider = getProvider(platform);
       const qr = await provider.getQrCode();
-      logger.info({ platform, key: qr.key }, "QR code generated");
+      logger.info({ platform }, "QR code generated"); // key omitted (audit SEC-11)
       res.json(qr);
     } catch (err) {
       logger.error({ err }, "QR code generation failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -67,7 +68,7 @@ export function createAuthRouter(
       }
       const provider = getProvider(platform as string);
       const status = await provider.checkQrCodeStatus(key as string);
-      logger.info({ platform, status, key }, "QR status check");
+      logger.info({ platform, status }, "QR status check"); // key omitted (audit SEC-11)
 
       // When confirmed, persist cookie
       if (status === "confirmed") {
@@ -84,7 +85,7 @@ export function createAuthRouter(
       res.json({ status });
     } catch (err) {
       logger.error({ err }, "QR status check failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -123,7 +124,7 @@ export function createAuthRouter(
       res.json(await testable.testConnection(candidate));
     } catch (err) {
       logger.error({ err }, "Jellyfin test connection failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -143,7 +144,7 @@ export function createAuthRouter(
       const success = await neteaseProvider.sendSmsCode(phone);
       res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -164,7 +165,7 @@ export function createAuthRouter(
       }
       res.json({ success });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 

@@ -3,6 +3,7 @@ import type { BotDatabase } from "../../data/database.js";
 import { SHARED_QUEUE_OWNER } from "../../data/database.js";
 import type { BotManager } from "../../bot/manager.js";
 import type { Logger } from "../../logger.js";
+import { canAccessBot } from "../middleware/requirePermission.js";
 
 /**
  * The /api/saved-queues router (Feature 1, #119). Named save/load of queues,
@@ -64,6 +65,13 @@ export function createSavedQueuesRouter(
       res.status(400).json({ error: "botId and name are required" });
       return;
     }
+    // botId comes from the body (not a URL param), so requireBotAccess
+    // middleware can't apply — enforce the same bot access scope inline,
+    // BEFORE the existence check to avoid leaking which bot IDs are real.
+    if (!canAccessBot(req.user, botId)) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
     const bot = botManager.getBot(botId);
     if (!bot) {
       res.status(404).json({ error: "bot not found" });
@@ -99,6 +107,11 @@ export function createSavedQueuesRouter(
     const { botId, mode } = req.body ?? {};
     if (Number.isNaN(id) || typeof botId !== "string" || !botId) {
       res.status(400).json({ error: "invalid id/botId" });
+      return;
+    }
+    // Same inline bot-scope check as POST / (body-based botId).
+    if (!canAccessBot(req.user, botId)) {
+      res.status(403).json({ error: "forbidden" });
       return;
     }
     const sq = database.getSavedQueue(id);

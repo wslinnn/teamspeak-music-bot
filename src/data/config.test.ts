@@ -362,7 +362,7 @@ describe("guestMode config", () => {
     expect(c.guestMode.enabled).toBe(false);
     expect(c.guestMode.bots).toBe("all");
     expect(c.guestMode.permissions).toEqual({
-      addToQueue: true, playNext: false, playNow: false,
+      addToQueue: false, playNext: false, playNow: false,
       skip: false, transport: false, removeClear: false, playMode: false,
       playCollection: false,
     });
@@ -376,7 +376,7 @@ describe("guestMode config", () => {
     expect(c.guestMode.enabled).toBe(true);
     expect(c.guestMode.bots).toBe("all"); // back-filled
     expect(c.guestMode.permissions.playNext).toBe(true);
-    expect(c.guestMode.permissions.addToQueue).toBe(true); // back-filled default
+    expect(c.guestMode.permissions.addToQueue).toBe(false); // back-filled default
     expect(c.guestMode.permissions.skip).toBe(false); // back-filled default
     rmSync(dir, { recursive: true, force: true });
   });
@@ -419,7 +419,7 @@ describe("guestMode config", () => {
       const gm = loadGuestMode({ guestMode: { permissions: "hacked" } });
       // all known flags present at their defaults
       expect(gm.permissions).toEqual({
-        addToQueue: true, playNext: false, playNow: false,
+        addToQueue: false, playNext: false, playNow: false,
         skip: false, transport: false, removeClear: false, playMode: false,
         playCollection: false,
       });
@@ -533,13 +533,21 @@ describe("saveConfig atomic write", () => {
   it("round-trips (save then load equals) and leaves NO .tmp file behind", () => {
     const dir = makeTmpDir();
     const path = join(dir, "config.json");
-    const config = { ...getDefaultConfig(), webPort: 4567, adminPassword: "pw" };
+    const config = { ...getDefaultConfig(), webPort: 4567 };
 
     saveConfig(path, config);
 
     expect(loadConfig(path)).toEqual(config);
     // No temp remnants in the target directory.
     expect(readdirSync(dir).filter((f) => f.includes(".tmp"))).toEqual([]);
+  });
+
+  it("stops persisting the legacy plaintext adminPassword (audit SEC-11)", () => {
+    const dir = makeTmpDir();
+    const path = join(dir, "config.json");
+    saveConfig(path, { ...getDefaultConfig(), adminPassword: "legacy-secret" });
+    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+    expect(onDisk.adminPassword).toBeUndefined();
   });
 
   it("writes via a same-dir temp file then renameSync onto the final path", () => {
@@ -558,13 +566,13 @@ describe("saveConfig atomic write", () => {
   it("does not corrupt a pre-existing valid config when saving over it", () => {
     const dir = makeTmpDir();
     const path = join(dir, "config.json");
-    saveConfig(path, { ...getDefaultConfig(), adminPassword: "first", webPort: 1234 });
+    saveConfig(path, { ...getDefaultConfig(), commandPrefix: "&", webPort: 1234 });
 
     // Overwrite with a different, fully-formed config.
-    saveConfig(path, { ...getDefaultConfig(), adminPassword: "second", webPort: 9999 });
+    saveConfig(path, { ...getDefaultConfig(), commandPrefix: "@", webPort: 9999 });
 
     const loaded = loadConfig(path);
-    expect(loaded.adminPassword).toBe("second");
+    expect(loaded.commandPrefix).toBe("@");
     expect(loaded.webPort).toBe(9999);
     // The on-disk file is a single complete JSON document (no partial/truncated write).
     expect(() => JSON.parse(readFileSync(path, "utf-8"))).not.toThrow();
@@ -611,7 +619,7 @@ describe("loadConfig error handling", () => {
     const path = join(dir, "config.json");
     // A REAL config exists on disk; a transient lock must NOT collapse to defaults
     // (the caller would otherwise overwrite this real config with defaults).
-    saveConfig(path, { ...getDefaultConfig(), adminPassword: "keep-me" });
+    saveConfig(path, { ...getDefaultConfig(), commandPrefix: "&" });
     vi.mocked(readFileSync).mockImplementationOnce(() => {
       const err = new Error("EBUSY: resource busy or locked") as NodeJS.ErrnoException;
       err.code = "EBUSY";
@@ -620,7 +628,7 @@ describe("loadConfig error handling", () => {
 
     expect(() => loadConfig(path)).toThrow(/EBUSY/);
     // The on-disk config is untouched and still readable once the lock clears.
-    expect(loadConfig(path).adminPassword).toBe("keep-me");
+    expect(loadConfig(path).commandPrefix).toBe("&");
   });
 
   it("(c) corrupt JSON returns defaults AND backs up the original to *.corrupt-*", () => {

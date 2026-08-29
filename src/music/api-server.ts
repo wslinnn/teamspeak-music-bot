@@ -89,7 +89,13 @@ export function createApiServerManager(
           } else {
             const ncmModule = await import("NeteaseCloudMusicApi") as any;
             const serverObj = ncmModule.server ?? ncmModule.default?.server;
-            const app = await serverObj.serveNcmApi({ port: options.neteasePort });
+            // Bind loopback explicitly: the sidecar proxies our logged-in
+            // NetEase cookies, so it must never be reachable from the LAN
+            // (serveNcmApi defaults to all interfaces when host is omitted).
+            const app = await serverObj.serveNcmApi({
+              port: options.neteasePort,
+              host: "127.0.0.1",
+            });
             neteaseServer = app;
             logger.info(
               { port: options.neteasePort },

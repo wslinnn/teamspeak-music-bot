@@ -146,7 +146,7 @@ function formatTime(seconds: number): string {
 const bgStyle = computed(() => {
   if (currentSong.value?.coverUrl) {
     return {
-      backgroundImage: `url(${currentSong.value.coverUrl})`,
+      backgroundImage: `url("${encodeURI(currentSong.value.coverUrl)}")`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
     };

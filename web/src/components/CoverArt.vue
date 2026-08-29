@@ -32,7 +32,7 @@
       v-if="showShadow && url && !errored"
       class="cover-shadow"
       :style="{
-        backgroundImage: `url(${url})`,
+        backgroundImage: `url('${encodeURI(url)}')`,
         borderRadius: radius + 'px',
       }"
     />

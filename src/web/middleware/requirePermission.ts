@@ -16,9 +16,19 @@ export function requirePermission<P = Record<string, string>>(capability: string
 export function requireBotAccess<P = Record<string, string>>(paramName = "botId"): RequestHandler<P> {
   return (req: Request<P>, res: Response, next: NextFunction) => {
     if (!req.user) { res.status(401).json({ error: "unauthenticated" }); return; }
-    if (req.user.role === "admin" || req.user.bots === "all") { next(); return; }
     const botId = (req.params as Record<string, string | undefined>)[paramName];
-    if (typeof botId === "string" && req.user.bots instanceof Set && req.user.bots.has(botId)) { next(); return; }
+    if (typeof botId === "string" && canAccessBot(req.user, botId)) { next(); return; }
     res.status(403).json({ error: "forbidden" });
   };
+}
+
+/** Body-based counterpart of requireBotAccess for routes whose botId comes
+ *  from the request body rather than a URL param (e.g. saved-queues). */
+export function canAccessBot(
+  user: { role: "admin" | "member" | "guest"; bots?: "all" | Set<string> } | undefined,
+  botId: string,
+): boolean {
+  if (!user) return false;
+  if (user.role === "admin" || user.bots === "all") return true;
+  return user.bots instanceof Set && user.bots.has(botId);
 }

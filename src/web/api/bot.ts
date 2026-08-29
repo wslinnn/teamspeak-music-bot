@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { respondError } from "./respond.js";
 import type { BotManager } from "../../bot/manager.js";
 import type { BotConfig, GuestModeConfig, SpotifyConfig, JellyfinConfig, GateableProvider } from "../../data/config.js";
 import { saveConfig, GATEABLE_PROVIDERS } from "../../data/config.js";
@@ -338,7 +339,7 @@ export function createBotRouter(
       res.json(tree);
     } catch (err) {
       logger.error({ err }, "Failed to get server tree");
-      res.status(500).json({ success: false, error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -367,7 +368,7 @@ export function createBotRouter(
         res.json({ success: true, message: "Joined channel" });
       } catch (err) {
         logger.error({ err }, "Failed to join channel");
-        res.status(500).json({ success: false, error: (err as Error).message });
+        respondError(logger, req, res, err);
       }
     }
   );
@@ -494,7 +495,7 @@ export function createBotRouter(
       res.status(201).json(bot.getStatus());
     } catch (err) {
       logger.error({ err }, "Failed to create bot");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -520,7 +521,7 @@ export function createBotRouter(
       res.json({ success: true });
     } catch (err) {
       logger.error({ err }, "Failed to update bot");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -529,7 +530,7 @@ export function createBotRouter(
       await botManager.removeBot(req.params.id);
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -538,7 +539,7 @@ export function createBotRouter(
       await botManager.startBot(req.params.id);
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -547,7 +548,7 @@ export function createBotRouter(
       botManager.stopBot(req.params.id);
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 

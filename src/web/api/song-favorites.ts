@@ -1,4 +1,6 @@
 import { Router } from "express";
+import type { Logger } from "../../logger.js";
+import { respondError } from "./respond.js";
 import type { BotDatabase } from "../../data/database.js";
 import { sanitizeJellyfinCoverUrl } from "../../music/jellyfin.js";
 
@@ -17,7 +19,8 @@ function sanitizeList<T extends { coverUrl?: string }>(favorites: T[]): T[] {
  */
 export function createSongFavoritesRouter(
   database: BotDatabase,
-  broadcast: (data: object) => void
+  broadcast: (data: object) => void,
+  logger: Logger
 ): Router {
   const router = Router();
 
@@ -26,7 +29,7 @@ export function createSongFavoritesRouter(
       const favorites = sanitizeList(database.getSongFavorites(req.user!.id));
       res.json({ favorites });
     } catch (err) {
-      res.status(500).json({ success: false, error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -60,7 +63,7 @@ export function createSongFavoritesRouter(
       broadcast({ type: "favoritesChanged" });
       res.json({ success: true, favorites: sanitizeList(database.getSongFavorites(userId)) });
     } catch (err) {
-      res.status(500).json({ success: false, error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -79,7 +82,7 @@ export function createSongFavoritesRouter(
       broadcast({ type: "favoritesChanged" });
       res.json({ success: true, favorites: sanitizeList(database.getSongFavorites(req.user!.id)) });
     } catch (err) {
-      res.status(500).json({ success: false, error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 

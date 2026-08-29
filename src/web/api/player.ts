@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { respondError } from "./respond.js";
 import type { BotManager } from "../../bot/manager.js";
 import type { BotDatabase } from "../../data/database.js";
 import type { MusicProvider } from "../../music/provider.js";
@@ -80,7 +81,7 @@ export function createPlayerRouter(
       const response = await bot.executeCommand(cmd, undefined, requesterName(req));
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -96,7 +97,7 @@ export function createPlayerRouter(
       const response = await bot.executeCommand(cmd, undefined, requesterName(req));
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -107,7 +108,7 @@ export function createPlayerRouter(
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   };
 
@@ -142,7 +143,7 @@ export function createPlayerRouter(
         message,
       });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -153,7 +154,7 @@ export function createPlayerRouter(
       bot.stopFm(); // 同步操作，无需独占
       res.json({ ok: true });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -179,7 +180,7 @@ export function createPlayerRouter(
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -199,7 +200,7 @@ export function createPlayerRouter(
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -237,7 +238,7 @@ export function createPlayerRouter(
       bot.seek(position);
       res.json({ message: `Seeked to ${Math.floor(position)}s`, seekOffset: position });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -262,7 +263,7 @@ export function createPlayerRouter(
       const response = await bot.executeCommand(cmd);
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -293,7 +294,7 @@ export function createPlayerRouter(
         }
         res.json({ message: response, queue: bot.getQueue() });
       } catch (err) {
-        res.status(500).json({ error: (err as Error).message });
+        respondError(logger, req, res, err);
       }
     }
   );
@@ -336,7 +337,7 @@ export function createPlayerRouter(
       }
       res.json(result.body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -363,7 +364,7 @@ export function createPlayerRouter(
       const response = await bot.executeCommand(cmd, undefined, requesterName(req));
       res.json({ message: response });
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -466,7 +467,7 @@ export function createPlayerRouter(
       res.json(result.body);
     } catch (err) {
       logger.error({ err }, "Play playlist failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -549,7 +550,7 @@ export function createPlayerRouter(
       res.json(result.body);
     } catch (err) {
       logger.error({ err }, "play-album failed");
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -581,7 +582,7 @@ export function createPlayerRouter(
       });
       res.json(body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -628,7 +629,7 @@ export function createPlayerRouter(
       });
       res.json(body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -664,7 +665,7 @@ export function createPlayerRouter(
       });
       res.json(body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -699,7 +700,7 @@ export function createPlayerRouter(
       });
       res.json(body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -742,7 +743,7 @@ export function createPlayerRouter(
       });
       res.status(body.status).json(body.body);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 
@@ -763,7 +764,7 @@ export function createPlayerRouter(
       }
       res.json(pm.getConfig());
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      respondError(logger, req, res, err);
     }
   });
 

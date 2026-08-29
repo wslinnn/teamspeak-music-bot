@@ -20,6 +20,48 @@ const execFileAsync = promisify(execFile);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/** Thrown when a caller-supplied playlist URL points outside YouTube. */
+export class UnsupportedPlaylistUrlError extends Error {
+  constructor() {
+    super("仅支持 YouTube 歌单链接");
+    this.name = "UnsupportedPlaylistUrlError";
+  }
+}
+
+/**
+ * Hosts a caller-supplied playlist URL may point at. yt-dlp fetches whatever
+ * URL it is given from this server, so an arbitrary http(s) URL here would be
+ * an SSRF primitive (intranet probing with title-level read-back).
+ */
+const PLAYLIST_URL_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "youtu.be",
+]);
+
+/**
+ * Map a playlist id or URL to the URL yt-dlp should fetch. Bare ids become a
+ * youtube.com playlist URL; URLs must point at a YouTube host or the request
+ * is rejected (security audit SEC-02).
+ */
+export function resolvePlaylistUrl(playlistId: string): string {
+  if (!/^https?:\/\//i.test(playlistId)) {
+    return `https://www.youtube.com/playlist?list=${playlistId}`;
+  }
+  let host = "";
+  try {
+    host = new URL(playlistId).hostname.toLowerCase();
+  } catch {
+    // fall through to the rejection below
+  }
+  if (!PLAYLIST_URL_HOSTS.has(host)) {
+    throw new UnsupportedPlaylistUrlError();
+  }
+  return playlistId;
+}
+
 /** Resolve the yt-dlp binary path. Checks the project bin/ dir first, then PATH. */
 function findYtDlp(): string {
   const exe = process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp";
@@ -179,12 +221,10 @@ export class YouTubeProvider implements MusicProvider {
   }
 
   async getPlaylistSongs(playlistId: string): Promise<Song[]> {
+    // Resolved OUTSIDE the try/catch: a non-YouTube URL must fail loudly
+    // (route answers 400) instead of being silently swallowed into [].
+    const url = resolvePlaylistUrl(playlistId);
     try {
-      // Only http(s) URLs pass through verbatim (startsWith("http") would also
-      // admit strings like "httpx://…"); anything else is treated as a list id.
-      const url = /^https?:\/\//i.test(playlistId)
-        ? playlistId
-        : `https://www.youtube.com/playlist?list=${playlistId}`;
       const raw = await runYtDlp([
         url,
         "--dump-json",

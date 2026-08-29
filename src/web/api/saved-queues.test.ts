@@ -16,7 +16,10 @@ const song = (id: string) => ({
   duration: 1,
 });
 
-function mount(enabled: boolean, opts: { queue?: unknown[] } = {}) {
+function mount(
+  enabled: boolean,
+  opts: { queue?: unknown[]; user?: Record<string, unknown> } = {},
+) {
   const db = createDatabase(":memory:");
   const loads: Array<{ songs: unknown[]; mode: string; by?: string }> = [];
   const bot = {
@@ -31,7 +34,8 @@ function mount(enabled: boolean, opts: { queue?: unknown[] } = {}) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as unknown as { user: unknown }).user = { id: "u1", username: "alice", role: "member" };
+    (req as unknown as { user: unknown }).user =
+      opts.user ?? { id: "u1", username: "alice", role: "member", bots: "all" };
     next();
   });
   app.use(
@@ -108,6 +112,19 @@ describe("saved-queues router", () => {
     const other = db.listSavedQueues("someoneElse", false)[0];
     const load = await request(app).post(`/api/saved-queues/${other.id}/load`).send({ botId: "b", mode: "replace" });
     expect(load.status).toBe(404);
+  });
+
+  it("403s save/load for a member scoped away from the target bot", async () => {
+    const scoped = { id: "u1", username: "alice", role: "member", bots: new Set(["other-bot"]) };
+    const { app } = mount(true, { user: scoped });
+    expect((await request(app).post("/api/saved-queues").send({ botId: "b", name: "x" })).status).toBe(403);
+    expect((await request(app).post("/api/saved-queues/1/load").send({ botId: "b" })).status).toBe(403);
+  });
+
+  it("allows a scoped member for a bot inside their allow-list", async () => {
+    const scoped = { id: "u1", username: "alice", role: "member", bots: new Set(["b"]) };
+    const { app } = mount(true, { user: scoped });
+    expect((await request(app).post("/api/saved-queues").send({ botId: "b", name: "x" })).status).toBe(200);
   });
 
   it("deletes an own queue but 404s another user's private one", async () => {

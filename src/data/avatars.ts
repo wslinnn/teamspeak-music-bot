@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 
 const MIME_TO_EXT: Record<string, string> = {
   "image/png": "png",
@@ -30,11 +30,16 @@ export function createAvatarStore(dir: string): AvatarStore {
     },
     read(relPath) {
       const full = join(dir, relPath);
+      // Audit SEC-12 (defense in depth): relPath is DB-sourced today, but a
+      // future import/restore must not be able to point it outside dir.
+      if (resolve(full) !== resolve(dir) && !resolve(full).startsWith(resolve(dir) + sep)) return null;
       if (!existsSync(full)) return null;
       return readFileSync(full);
     },
     remove(relPath) {
-      rmSync(join(dir, relPath), { force: true });
+      const full = join(dir, relPath);
+      if (resolve(full) !== resolve(dir) && !resolve(full).startsWith(resolve(dir) + sep)) return;
+      rmSync(full, { force: true });
     },
     getDir() {
       return dir;
