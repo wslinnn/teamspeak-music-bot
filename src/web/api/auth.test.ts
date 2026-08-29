@@ -72,3 +72,50 @@ describe("auth router POST /jellyfin/test", () => {
     expect(testConnection).not.toHaveBeenCalled();
   });
 });
+
+describe("auth router GET /qrcode/status TTL (bug: poll keeps hitting upstream)", () => {
+  function mount(checkQrCodeStatus: ReturnType<typeof vi.fn>) {
+    const netease = { platform: "netease", checkQrCodeStatus } as unknown as MusicProvider;
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => { (req as { user?: unknown }).user = { role: "member" }; next(); });
+    app.use(
+      "/api/auth",
+      createAuthRouter(
+        netease, fakeProvider("qq"), fakeProvider("bilibili"),
+        pino({ level: "silent" }),
+      ),
+    );
+    return app;
+  }
+
+  it("returns upstream status within the TTL window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const check = vi.fn().mockResolvedValue("waiting");
+    const app = mount(check);
+    const res = await request(app).get("/api/auth/qrcode/status").query({ key: "k1", platform: "netease" });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("waiting");
+    expect(check).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("short-circuits to expired once the key exceeds the TTL without hitting upstream", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const check = vi.fn().mockResolvedValue("waiting");
+    const app = mount(check);
+
+    await request(app).get("/api/auth/qrcode/status").query({ key: "k2", platform: "netease" });
+    expect(check).toHaveBeenCalledTimes(1);
+
+    // 6 分钟后：同一个 key 应被服务端 TTL 拦下，不再转发上游
+    vi.setSystemTime(new Date("2026-01-01T00:06:00Z"));
+    const res = await request(app).get("/api/auth/qrcode/status").query({ key: "k2", platform: "netease" });
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("expired");
+    expect(check).toHaveBeenCalledTimes(1); // 未再调用上游
+    vi.useRealTimers();
+  });
+});

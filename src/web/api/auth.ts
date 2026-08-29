@@ -59,6 +59,26 @@ export function createAuthRouter(
     }
   });
 
+  // QR 轮询服务端 TTL：一个 key 首次被查询后超过 QR_POLL_TTL_MS 就直接回
+  // expired，不再转发上游——前端 Bug 2（离开页面/二维码未扫成）会让 2s 一次的
+  // 轮询打满上游整个有效期。Map 容量有界（超限清扫过期项）。
+  const QR_POLL_TTL_MS = 5 * 60_000;
+  const qrPollFirstSeen = new Map<string, number>();
+  function trackQrKeyTtl(key: string): boolean {
+    const now = Date.now();
+    const first = qrPollFirstSeen.get(key);
+    if (first === undefined) {
+      if (qrPollFirstSeen.size >= 500) {
+        for (const [k, t] of qrPollFirstSeen) {
+          if (now - t > QR_POLL_TTL_MS) qrPollFirstSeen.delete(k);
+        }
+      }
+      qrPollFirstSeen.set(key, now);
+      return true;
+    }
+    return now - first < QR_POLL_TTL_MS;
+  }
+
   router.get("/qrcode/status", requireNotGuest, async (req, res) => {
     try {
       const { key, platform } = req.query;
@@ -66,9 +86,15 @@ export function createAuthRouter(
         res.status(400).json({ error: "key is required" });
         return;
       }
+      // TTL 已过：不再转发上游，直接判过期（前端会据此停止轮询）。
+      if (!trackQrKeyTtl(key as string)) {
+        logger.debug({ platform }, "QR status check short-circuited (TTL expired)");
+        res.json({ status: "expired" });
+        return;
+      }
       const provider = getProvider(platform as string);
       const status = await provider.checkQrCodeStatus(key as string);
-      logger.info({ platform, status }, "QR status check"); // key omitted (audit SEC-11)
+      logger.debug({ platform, status }, "QR status check"); // key omitted (audit SEC-11)
 
       // When confirmed, persist cookie
       if (status === "confirmed") {
