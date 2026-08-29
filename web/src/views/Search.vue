@@ -179,7 +179,7 @@
     <!-- Empty -->
     <EmptyState
       v-else-if="searched"
-      message="未找到相关结果"
+      :message="emptyHint"
       icon="mdi:music-note-off"
     />
   </div>
@@ -264,6 +264,13 @@ const categories = computed(() => [
   { key: 'playlists' as const, label: '歌单', count: playlists.value.length },
   { key: 'albums' as const, label: '专辑', count: albums.value.length },
 ]);
+
+// 本地列表态没有"关键词没搜到"的语义，空库提示上传入口
+const emptyHint = computed(() =>
+  activePlatform.value === 'local' && !query.value.trim()
+    ? '还没有本地歌曲，可在上方拖入文件上传'
+    : '未找到相关结果'
+);
 
 // 音源标签动态化（B2/D4）：消费 /api/music/providers 的 enabled 列表，
 // 与后端启用状态联动——禁用的源不再显示（此前硬编码含 youtube 等固定 5 项，
@@ -375,9 +382,41 @@ async function loadMore() {
   }
 }
 
-// Re-search when platform filter changes and we already have a query
-watch(activePlatform, () => {
-  if (query.value.trim() && searched.value) {
+/** 本地源无关键词：直接列出全部本地歌曲（后端对空 q 仅开放 local） */
+async function loadLocalAll() {
+  loading.value = true;
+  searched.value = true;
+  errorMsg.value = '';
+  activeCategory.value = 'songs';
+  try {
+    const res = await http.get('/api/music/search', {
+      params: { q: '', platform: 'local', limit: SEARCH_PAGE },
+    });
+    applyResult(res.data);
+  } catch {
+    errorMsg.value = '本地歌曲加载失败，请稍后重试';
+    results.value = [];
+    playlists.value = [];
+    albums.value = [];
+    hasMoreMap.value = {};
+  } finally {
+    loading.value = false;
+  }
+}
+
+// 切换音源：有关键词则重搜；无关键词时本地页签列出全部本地歌曲，
+// 离开本地页签则回到未搜索的初始视图
+watch(activePlatform, (v) => {
+  if (v === 'local' && !query.value.trim()) {
+    loadLocalAll();
+  } else if (!query.value.trim()) {
+    searched.value = false;
+    errorMsg.value = '';
+    results.value = [];
+    playlists.value = [];
+    albums.value = [];
+    hasMoreMap.value = {};
+  } else if (searched.value) {
     doSearch();
   }
 });
@@ -462,6 +501,8 @@ async function uploadFile(file: File) {
 onMounted(async () => {
   searchInput.value?.focus();
   if (query.value) doSearch();
+  // 本地源被记忆为当前页签（刷新/回访）：无关键词也直接列出全部本地歌曲
+  else if (activePlatform.value === 'local') loadLocalAll();
   // 拉取启用音源驱动标签；失败（旧后端/网络）退回主流四源，不阻塞搜索
   try {
     // 审计 PERF-10：改走 store 的共享缓存，不再每次进入页面重复拉取

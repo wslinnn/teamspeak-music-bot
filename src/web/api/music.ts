@@ -215,7 +215,9 @@ export function createMusicRouter(
   router.get("/search", async (req, res) => {
     try {
       const { q, platform, limit, offset } = req.query;
-      if (!q) {
+      // 空 q 仅对 local 放行（local provider 空关键词 = 列出全部本地歌曲）；
+      // 其余音源的关键词搜索仍要求 q
+      if (!q && platform !== "local") {
         res.status(400).json({ error: "q (query) is required" });
         return;
       }

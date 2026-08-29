@@ -60,6 +60,32 @@ describe("music router GET /search offset pagination", () => {
   });
 });
 
+describe("music router GET /search empty q — local list-all", () => {
+  it("lets an empty q through for the local provider, still 400 for others", async () => {
+    const local = fakeProvider("local");
+    const netease = fakeProvider("netease");
+    const router = createMusicRouter(
+      netease,
+      fakeProvider("qq"),
+      fakeProvider("bilibili"),
+      pino({ level: "silent" }),
+      local
+    );
+    const app = express();
+    app.use("/api/music", router);
+
+    // 空关键词 + local：列出全部本地歌曲（搜索页「本地」页签直接展示）
+    const ok = await request(app).get("/api/music/search?platform=local&q=");
+    expect(ok.status).toBe(200);
+    expect(local.search).toHaveBeenCalledWith("", 20, 0);
+
+    // 其余音源仍要求关键词
+    const denied = await request(app).get("/api/music/search?q=");
+    expect(denied.status).toBe(400);
+    expect(netease.search).not.toHaveBeenCalled();
+  });
+});
+
 describe("music router provider gating (enabledProviders) + jellyfin endpoints", () => {
   function jellyfinFake(): MusicProvider {
     return {
