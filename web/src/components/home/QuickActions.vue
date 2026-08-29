@@ -41,7 +41,6 @@
 import { computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { useRouter } from 'vue-router';
-import { http } from '../../utils/http';
 import { usePlayerStore } from '../../stores/player';
 import { useAuthStore } from '../../stores/auth';
 import { useToast } from '../../composables/useToast';
@@ -79,16 +78,8 @@ async function playFm(platform: string) {
     toast.error('暂无可用的机器人');
     return;
   }
-  // 唤醒后端 POST /api/player/:id/fm：由服务端接管 FM 模式（自动拉歌/续播）
-  try {
-    const res = await http.post(`/api/player/${store.activeBotId}/fm`, { platform });
-    if (res.data.ok) {
-      toast.success('私人FM已开启');
-    } else {
-      toast.error(res.data.message || '开启私人FM失败');
-    }
-  } catch {
-    toast.error('开启私人FM失败');
-  }
+  // 唤醒后端 POST /api/player/:id/fm：由服务端接管 FM 模式（自动拉歌/续播）。
+  // 审计 C5：走 store action，补进度归零/500ms 补同步/队列刷新三步收尾。
+  await store.startFm(platform);
 }
 </script>

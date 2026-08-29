@@ -25,6 +25,18 @@ const selfHandled401 = new Set([
   '/api/session/change-password',
 ]);
 
+// 审计 C7：预期内的失败不弹全局 toast——这些是只读装饰性数据，未登录/
+// 未启用属于正常态，由视图展示空态（上游本就由视图自行决定是否提示）。
+const expectedFailurePatterns: RegExp[] = [
+  /\/api\/player\/[^/]+\/history$/,      // 游客 403 = 正常态
+  /\/api\/music\/user\/playlists(\?|$)/, // 未登录音源
+  /\/api\/auth\/status(\?|$)/,           // 未配置平台
+];
+
+function isExpectedFailure(url: string): boolean {
+  return expectedFailurePatterns.some((re) => re.test(url));
+}
+
 http.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -35,14 +47,16 @@ http.interceptors.response.use(
       const authStore = useAuthStore();
       authStore.clearSession();
       if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+        // 审计 B5：携带回跳参数，登录后回到原页面（Login.vue 已有防开放重定向校验）
+        const next = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = `/login?redirect=${next}`;
       }
       return Promise.reject(error);
     }
 
     const toastStore = useToastStore();
     const message = error.response?.data?.error ?? error.message ?? '请求失败';
-    if (!error.config?.skipErrorToast) {
+    if (!error.config?.skipErrorToast && !isExpectedFailure(error.config?.url ?? '')) {
       toastStore.add(message, 'error', 4000);
     }
 

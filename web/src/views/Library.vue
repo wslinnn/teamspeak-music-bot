@@ -137,6 +137,15 @@ watch(activeSource, loadPlaylists, { immediate: false });
 
 async function loadPlaylists() {
   if (!activeSource.value) return;
+  // 审计 C8：QQ/酷狗未登录时该请求必然失败/为空——先查登录态再拉，
+  // 避免每次进页面的无效请求（对齐上游 fetchHomeData 的预检）。
+  if (activeSource.value === 'qq' || activeSource.value === 'kugou') {
+    await store.fetchAuthStatus();
+    if (!store.authStatus[activeSource.value]?.loggedIn) {
+      playlists.value = [];
+      return;
+    }
+  }
   playlistsLoading.value = true;
   try {
     const res = await http.get('/api/music/user/playlists', { params: { platform: activeSource.value } });

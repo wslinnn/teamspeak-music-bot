@@ -61,6 +61,10 @@
           <input v-model="form.defaultChannel" class="input" placeholder="音乐频道" />
         </div>
         <div class="sm:col-span-1">
+          <label class="block text-xs font-semibold opacity-70 mb-1">频道 ID（可选，与名称二选一）</label>
+          <input v-model="form.channelId" class="input" placeholder="数字 ID，精确入频道" />
+        </div>
+        <div class="sm:col-span-1">
           <label class="block text-xs font-semibold opacity-70 mb-1">频道密码（可选）</label>
           <input v-model="form.channelPassword" type="password" class="input" />
         </div>
@@ -89,7 +93,7 @@ const emit = defineEmits<{
   (e: 'toggleBot', botId: string, connected: boolean): void;
   (e: 'editBot', bot: BotStatus): void;
   (e: 'deleteBot', botId: string, botName: string): void;
-  (e: 'createBot', form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; channelPassword: string; serverPassword: string; autoStart: boolean }): void;
+  (e: 'createBot', form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; channelId: string; channelPassword: string; serverPassword: string; autoStart: boolean }): void;
 }>();
 
 const defaultForm = {
@@ -98,6 +102,7 @@ const defaultForm = {
   serverPort: 9987,
   nickname: 'MusicBot',
   defaultChannel: '',
+  channelId: '',
   channelPassword: '',
   serverPassword: '',
   autoStart: false,

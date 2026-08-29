@@ -36,7 +36,7 @@
         @click="fileInput?.click()"
       >
         <Icon :icon="uploading ? 'mdi:loading' : 'mdi:upload'" :class="{ 'animate-spin': uploading }" />
-        {{ uploading ? '上传中…' : '选择文件' }}
+        {{ uploading ? (uploadPercent !== null && uploadPercent > 0 ? `上传中 ${uploadPercent}%` : '上传中…') : '选择文件' }}
       </button>
       <input
         ref="fileInput"
@@ -276,7 +276,8 @@ const platformTabs = computed(() => [
     label: getProviderLabel(p),
   })),
 ]);
-const activePlatform = ref('all');
+// 审计 C9：音源选择 localStorage 记忆（上游 SOURCE_STORAGE_KEY 同语义）
+const activePlatform = ref(localStorage.getItem('search-source') ?? 'all');
 // 当前源在运行中被禁用（标签消失）时回退"全部"
 watch(platformTabs, (tabs) => {
   if (!tabs.some((t) => t.key === activePlatform.value)) activePlatform.value = 'all';
@@ -319,6 +320,11 @@ async function doSearch() {
       });
     }
     applyResult(res.data);
+    // 审计 C9：关键词落 URL——刷新不丢、可分享（上游 router.replace 行为）
+    if (route.query.q !== query.value) {
+      router.replace({ query: { ...route.query, q: query.value } });
+    }
+    localStorage.setItem('search-source', activePlatform.value);
   } catch (err: unknown) {
     console.error('Search failed:', err);
     errorMsg.value = '搜索失败，请稍后重试';
@@ -386,13 +392,35 @@ async function onFilePicked(e: Event) {
 
 function onDrop(e: DragEvent) {
   dragOver.value = false;
-  const file = e.dataTransfer?.files?.[0];
-  if (file) uploadFile(file);
+  // 审计 C1：多文件全部入队（原只取第一个）
+  const files = Array.from(e.dataTransfer?.files ?? []);
+  (async () => { for (const f of files) await uploadFile(f); })();
 }
+
+// 审计 C1a：客户端媒体扩展名过滤——避免把不支持的文件白传给后端
+const UPLOAD_EXTS = ['mp3', 'flac', 'wav', 'm4a', 'ogg', 'opus', 'aac', 'webm', 'mp4', 'mov', 'avi', 'mkv', 'flv', 'wmv'];
+function isMediaFile(file: File): boolean {
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  return UPLOAD_EXTS.includes(ext);
+}
+
+// 审计 C1a：与后端 LOCAL_UPLOAD_LIMIT 对齐的 500MB 预检，避免白传才吃 413
+const UPLOAD_MAX_BYTES = 500 * 1024 * 1024;
+
+const uploadPercent = ref<number | null>(null);
 
 async function uploadFile(file: File) {
   if (uploading.value) return;
+  if (!isMediaFile(file)) {
+    toast.error(`不支持的文件类型：${file.name}`);
+    return;
+  }
+  if (file.size > UPLOAD_MAX_BYTES) {
+    toast.error(`文件超过 500MB 上限：${file.name}`);
+    return;
+  }
   uploading.value = true;
+  uploadPercent.value = 0;
   try {
     const res = await http.post('/api/music/local/upload', file, {
       headers: {
@@ -400,6 +428,9 @@ async function uploadFile(file: File) {
         'x-filename': encodeURIComponent(file.name),
       },
       timeout: 0,
+      onUploadProgress: (e) => {
+        if (e.total) uploadPercent.value = Math.round((e.loaded / e.total) * 100);
+      },
     });
     const song = res.data.song as Song | undefined;
     if (song) {
@@ -407,6 +438,8 @@ async function uploadFile(file: File) {
       activeCategory.value = 'songs';
       results.value = [song, ...results.value];
       searched.value = true;
+      // 审计 C1a：上传成功切到「本地」源（启用时），用户能重访刚传的文件
+      if (enabledProviders.value.includes('local')) activePlatform.value = 'local';
       toast.success(`已上传：${song.name}`);
     }
   } catch (err: unknown) {
@@ -418,6 +451,7 @@ async function uploadFile(file: File) {
     // 其余错误信息由 http 拦截器统一 toast
   } finally {
     uploading.value = false;
+    uploadPercent.value = null;
   }
 }
 

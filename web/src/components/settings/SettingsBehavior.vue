@@ -115,6 +115,7 @@ import { reactive, ref, watch, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { http } from '../../utils/http';
 import { useToast } from '../../composables/useToast';
+import { usePlayerStore } from '../../stores/player';
 import BaseToggle from '../common/BaseToggle.vue';
 import SkeletonLoader from '../common/SkeletonLoader.vue';
 
@@ -201,6 +202,9 @@ async function persist() {
         volumePercent: Math.min(100, Math.max(0, form.voiceDuckingVolume || 0)),
       },
     });
+    // 审计 B4：队列抽屉的「已存清单」入口直接读 store——保存后立即同步，
+    // 否则要刷新页面才生效。
+    usePlayerStore().savedQueuesEnabled = form.savedQueuesEnabled;
     lastSaved = snapshot();
   } catch {
     toast.error('保存失败，已还原为上次保存的值');

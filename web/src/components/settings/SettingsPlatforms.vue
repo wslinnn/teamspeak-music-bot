@@ -43,6 +43,12 @@
             <Icon :icon="qrStatusIcon(qrStates[platform.key].status)" />
             <span>{{ qrStatusText(platform.key, qrStates[platform.key].status) }}</span>
           </div>
+          <!-- 审计 C11：过期后一键重开（上游有） -->
+          <button
+            v-if="qrStates[platform.key].status === 'expired'"
+            class="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors"
+            @click="$emit('startQr', platform.key)"
+          >重新生成二维码</button>
         </div>
       </div>
 

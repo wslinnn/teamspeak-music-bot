@@ -29,7 +29,7 @@
         游客模式
       </div>
       <p class="text-xs text-foreground-subtle mb-3">
-        允许访客无需账号密码进入 WebUI 点歌；作用域为全部机器人。开启后登录页出现「以游客身份进入」
+        允许访客无需账号密码进入 WebUI 点歌。开启后登录页出现「以游客身份进入」
       </p>
       <div v-if="loaded" class="space-y-0.5">
         <BaseToggle
@@ -39,6 +39,17 @@
         />
         <div class="pt-2 pb-1 pl-1 text-xs font-semibold text-foreground-muted">游客可执行的操作（默认仅第一项开启）</div>
         <BaseToggle v-for="f in guestFlags" :key="f.key" v-model="guestPerms[f.key]" :label="f.label" :hint="f.hint" />
+
+        <!-- 审计 B3：游客可控机器人白名单（上游有；成员侧权限编辑器已有同款交互） -->
+        <div class="pt-2 pb-1 pl-1 text-xs font-semibold text-foreground-muted">游客可见的机器人</div>
+        <BaseToggle v-model="guestBotsAll" label="全部机器人" />
+        <div v-if="!guestBotsAll" class="flex flex-col gap-1.5 mt-1 ml-4">
+          <label v-for="bot in playerStore.bots" :key="bot.id" class="flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-sm)] hover:bg-hover-bg cursor-pointer">
+            <input v-model="guestSelectedBots" type="checkbox" :value="bot.id" class="accent-[var(--color-primary)]" />
+            <span class="text-sm">{{ bot.name }}</span>
+          </label>
+          <p v-if="playerStore.bots.length === 0" class="text-xs text-text-tertiary px-3">还没有机器人</p>
+        </div>
       </div>
       <SkeletonLoader v-else v-for="n in 3" :key="n" height="48px" class="mb-2" />
 
@@ -54,6 +65,7 @@ import { reactive, ref, onMounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { http } from '../../utils/http';
 import { useToast } from '../../composables/useToast';
+import { usePlayerStore } from '../../stores/player';
 import BaseButton from '../common/BaseButton.vue';
 import BaseToggle from '../common/BaseToggle.vue';
 import SkeletonLoader from '../common/SkeletonLoader.vue';
@@ -63,8 +75,11 @@ const loaded = ref(false);
 const saving = ref(false);
 
 const adminGroupsInput = ref('');
+const playerStore = usePlayerStore();
 const guestEnabled = ref(false);
 const guestPerms = reactive<Record<string, boolean>>({});
+const guestBotsAll = ref(true);
+const guestSelectedBots = ref<string[]>([]);
 
 const guestFlags = [
   { key: 'addToQueue', label: '添加到队列末尾', hint: '搜索后加入播放队列' },
@@ -85,6 +100,14 @@ onMounted(async () => {
     const perms = res.data.guestMode?.permissions ?? {};
     for (const f of guestFlags) {
       guestPerms[f.key] = perms[f.key] === true;
+    }
+    const bots = res.data.guestMode?.bots;
+    if (bots === 'all' || bots === undefined) {
+      guestBotsAll.value = true;
+      guestSelectedBots.value = [];
+    } else if (Array.isArray(bots)) {
+      guestBotsAll.value = false;
+      guestSelectedBots.value = bots.filter((b): b is string => typeof b === 'string');
     }
     loaded.value = true;
   } catch {
@@ -125,7 +148,7 @@ async function saveGuestMode() {
     await http.post('/api/bot/settings', {
       guestMode: {
         enabled: guestEnabled.value,
-        bots: 'all',
+        bots: guestBotsAll.value ? 'all' : [...guestSelectedBots.value],
         permissions: { ...guestPerms },
       },
     });

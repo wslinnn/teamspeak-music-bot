@@ -323,6 +323,8 @@ async function createUser() {
 }
 
 async function setRole(u: UserRow, role: 'admin' | 'member') {
+  // 审计 C11：角色切换二次确认（上游有；误降级影响面大）
+  if (!window.confirm(`确认将 ${u.username} ${role === 'admin' ? '提升为管理员' : '降为成员'}？`)) return;
   try {
     await http.patch(`/api/users/${u.id}/role`, { role });
     toast.success(`${u.username} 已${role === 'admin' ? '提升为管理员' : '降为成员'}`);

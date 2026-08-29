@@ -242,6 +242,8 @@ watch(() => props.open, (isOpen) => {
 });
 
 async function playAtIndex(index: number) {
+  // 审计 C6：/play-at 仅 player.control；无权限点击不再发请求吃 403 噪音
+  if (!auth.can('player.control')) return;
   await store.playAtIndex(index);
   await store.fetchQueue();
 }

@@ -47,7 +47,7 @@
         </button>
         <div v-if="dropdownOpen" class="absolute top-[calc(100%+6px)] right-0 w-[calc(100vw-32px)] max-w-[260px] min-w-[200px] bg-bg-secondary rounded-[var(--radius-md)] p-1 shadow-[0_8px_30px_rgba(0,0,0,0.3)] max-md:fixed max-md:top-[calc(var(--navbar-height)+4px)] max-md:left-3 max-md:right-3 max-md:w-auto max-md:min-w-0 max-md:max-w-none">
           <div
-            v-for="bot in store.bots"
+            v-for="bot in controllableBots"
             :key="bot.id"
             class="flex items-center gap-0.5"
           >
@@ -182,7 +182,10 @@ import BaseModal from './common/BaseModal.vue';
 import BaseButton from './common/BaseButton.vue';
 
 const store = usePlayerStore();
+// 审计 C11：接入 canControlBot（原为死代码）——按用户 bot 白名单过滤下拉项，
+// 后端已兜底，此处保持 UI 与授权一致（对齐上游）。
 const authStore = useAuthStore();
+const controllableBots = computed(() => store.bots.filter((b) => authStore.canControlBot(b.id)));
 const router = useRouter();
 const activeBot = computed(() => store.activeBot);
 // bot 快捷操作（停止/播放/下一首）需 player.control（与 Player 底栏同口径）

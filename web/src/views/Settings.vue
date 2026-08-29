@@ -21,7 +21,7 @@
 
         <SettingsPlatforms
           v-if="activeTab === 'platforms'"
-          :auth-states="{ netease: neteaseAuth, qq: qqAuth, bilibili: bilibiliAuth, kugou: kugouAuth }"
+          :auth-states="{ netease: neteaseAuth, qq: qqAuth, bilibili: bilibiliAuth, kugou: kugouAuth, jellyfin: jellyfinAuth }"
           :qr-states="{ netease: neteaseQr, qq: qqQr, bilibili: bilibiliQr, kugou: kugouQr }"
           @start-qr="startQrLogin"
           @stop-qr="stopQrPolling"
@@ -30,7 +30,10 @@
 
         <SettingsBehavior v-if="activeTab === 'behavior'" />
 
-        <SettingsSources v-if="activeTab === 'sources'" />
+        <SettingsSources
+          v-if="activeTab === 'sources'"
+          :auth-states="{ jellyfin: jellyfinAuth }"
+        />
 
         <SettingsPermissions v-if="activeTab === 'permissions'" />
 
@@ -73,6 +76,7 @@
         <div>
           <label class="block text-xs font-semibold opacity-70 mb-1">默认频道（可选）</label>
           <input v-model="editForm.defaultChannel" class="input" placeholder="音乐频道" />
+          <input v-model="editForm.channelId" class="input mt-2" placeholder="频道 ID（可选，数字，精确入频道）" />
         </div>
         <div>
           <label class="block text-xs font-semibold opacity-70 mb-1">频道密码（可选）</label>
@@ -113,7 +117,7 @@
                 type="button"
                 class="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors"
                 @click="avatarInput?.click()"
-              >上传图片（png/jpg/webp，≤300KB）</button>
+              >上传图片（png/jpg/webp，≤200KB）</button>
               <button
                 v-if="customAvatarSrc"
                 type="button"
@@ -254,7 +258,7 @@ watch(activeTab, (k) => {
 const editModalOpen = ref(false);
 const editForm = reactive({
   name: '', serverAddress: '', serverPort: 9987, nickname: '',
-  defaultChannel: '', channelPassword: '', serverPassword: '',
+  defaultChannel: '', channelId: '', channelPassword: '', serverPassword: '',
   autoStart: false,
 });
 // 密码只写不读：这里只记录“是否已设置”，用于输入框占位提示
@@ -306,8 +310,9 @@ function onAvatarPicked(e: Event) {
     toast.error('仅支持 png / jpg / webp 图片');
     return;
   }
-  if (file.size > 300 * 1024) {
-    toast.error('图片不能超过 300KB');
+  // 审计 C10：后端上限是 200KB（bot.ts 413），前端阈值必须一致
+  if (file.size > 200 * 1024) {
+    toast.error('图片不能超过 200KB');
     return;
   }
   const reader = new FileReader();
@@ -340,6 +345,7 @@ const neteaseAuth = reactive({ loggedIn: false, nickname: '' });
 const qqAuth = reactive({ loggedIn: false, nickname: '' });
 const bilibiliAuth = reactive({ loggedIn: false, nickname: '' });
 const kugouAuth = reactive({ loggedIn: false, nickname: '' });
+const jellyfinAuth = reactive({ loggedIn: false, nickname: '' });
 
 interface QrState {
   loading: boolean;
@@ -381,6 +387,7 @@ async function openEditBot(bot: BotStatus) {
     editForm.serverPort = res.data.serverPort ?? 9987;
     editForm.nickname = res.data.nickname ?? '';
     editForm.defaultChannel = res.data.defaultChannel ?? '';
+    editForm.channelId = res.data.channelId ?? '';
     // 密码只写不读：留空 = 保持已存值（后端将空串归一为“不变”）
     editForm.channelPassword = '';
     editForm.serverPassword = '';
@@ -392,6 +399,7 @@ async function openEditBot(bot: BotStatus) {
     editForm.serverPort = 9987;
     editForm.nickname = bot.name;
     editForm.defaultChannel = '';
+    editForm.channelId = '';
     editForm.channelPassword = '';
     editForm.serverPassword = '';
     editPw.channel = false;
@@ -456,7 +464,7 @@ async function confirmDeleteBot() {
   }
 }
 
-async function createBot(form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; channelPassword: string; serverPassword: string; autoStart: boolean }) {
+async function createBot(form: { name: string; serverAddress: string; serverPort: number; nickname: string; defaultChannel: string; channelId: string; channelPassword: string; serverPassword: string; autoStart: boolean }) {
   if (!form.name || !form.serverAddress) return;
   try {
     await http.post('/api/bot', {
@@ -465,6 +473,7 @@ async function createBot(form: { name: string; serverAddress: string; serverPort
       serverPort: form.serverPort || 9987,
       nickname: form.nickname || form.name,
       defaultChannel: form.defaultChannel || undefined,
+      channelId: form.channelId || undefined,
       channelPassword: form.channelPassword || undefined,
       serverPassword: form.serverPassword || undefined,
       autoStart: form.autoStart === true,
@@ -479,16 +488,19 @@ async function createBot(form: { name: string; serverAddress: string; serverPort
 // ── Platform handlers ──
 async function checkAuthStatus() {
   try {
-    const [nRes, qRes, bRes, kRes] = await Promise.all([
+    const [nRes, qRes, bRes, kRes, jfRes] = await Promise.allSettled([
       http.get('/api/auth/status', { params: { platform: 'netease' } }),
       http.get('/api/auth/status', { params: { platform: 'qq' } }),
       http.get('/api/auth/status', { params: { platform: 'bilibili' } }),
       http.get('/api/auth/status', { params: { platform: 'kugou' } }),
+      http.get('/api/auth/status', { params: { platform: 'jellyfin' } }),
     ]);
-    Object.assign(neteaseAuth, nRes.data);
-    Object.assign(qqAuth, qRes.data);
-    Object.assign(bilibiliAuth, bRes.data);
-    Object.assign(kugouAuth, kRes.data);
+    // 审计 C3：allSettled——一个慢/未配置平台不得遮蔽其他平台状态（对齐上游）
+    Object.assign(neteaseAuth, nRes.status === 'fulfilled' ? nRes.value.data : {});
+    Object.assign(qqAuth, qRes.status === 'fulfilled' ? qRes.value.data : {});
+    Object.assign(bilibiliAuth, bRes.status === 'fulfilled' ? bRes.value.data : {});
+    Object.assign(kugouAuth, kRes.status === 'fulfilled' ? kRes.value.data : {});
+    Object.assign(jellyfinAuth, jfRes.status === 'fulfilled' ? jfRes.value.data : {});
   } catch (err) {
     console.debug('checkAuthStatus failed:', err);
   }

@@ -43,6 +43,14 @@
       <div class="flex items-center gap-2 mb-3 text-sm font-medium">
         <Icon icon="mdi:jellyfish" class="text-lg opacity-60" />
         Jellyfin 音乐库
+        <!-- 审计 C3：Jellyfin 连接态展示（上游有，重写时丢失） -->
+        <span
+          v-if="authStates?.jellyfin"
+          class="text-xs font-normal"
+          :class="authStates.jellyfin.loggedIn ? 'text-success' : 'text-foreground-subtle'"
+        >
+          {{ authStates.jellyfin.loggedIn ? `已连接: ${authStates.jellyfin.nickname ?? ''}` : '未连接' }}
+        </span>
       </div>
       <div v-if="loaded" class="space-y-3">
         <input v-model="form.jellyfin.serverUrl" class="input" placeholder="服务器地址，如 https://jellyfin.example.com" />
@@ -88,6 +96,13 @@
         Spotify 连接
       </div>
       <div v-if="loaded" class="space-y-3">
+        <!-- 审计 A2：spotify.enabled 不在 enabledProviders 六开关内，后端据此
+             决定是否挂载 Spotify provider——没有这个开关整个 Spotify 播放不可达 -->
+        <BaseToggle
+          :model-value="form.spotify.enabled"
+          label="启用 Spotify 播放"
+          @update:model-value="form.spotify.enabled = Boolean($event)"
+        />
         <input v-model="form.spotify.clientId" class="input" placeholder="Client ID" />
         <input
           v-model="form.spotify.clientSecret"
@@ -125,9 +140,14 @@ import { Icon } from '@iconify/vue';
 import { http } from '../../utils/http';
 import { useToast } from '../../composables/useToast';
 import { getProviderLabel } from '../../utils/platform';
+import { usePlayerStore } from '../../stores/player';
 import BaseToggle from '../common/BaseToggle.vue';
 import BaseButton from '../common/BaseButton.vue';
 import SkeletonLoader from '../common/SkeletonLoader.vue';
+
+defineProps<{
+  authStates?: Record<string, { loggedIn: boolean; nickname?: string }>;
+}>();
 
 // 可由 enabledProviders 直接管控的在线音源（local/spotify 走各自专属开关）
 const GATEABLE_PROVIDERS = ['netease', 'qq', 'bilibili', 'youtube', 'kugou', 'jellyfin'] as const;
@@ -153,6 +173,7 @@ const form = reactive({
     userId: '',
   },
   spotify: {
+    enabled: false,
     clientId: '',
     clientSecret: '',
     deviceName: '',
@@ -188,6 +209,7 @@ onMounted(async () => {
     jfHasPassword.value = res.data.jellyfin?.hasPassword === true;
     jfHasApiKey.value = res.data.jellyfin?.hasApiKey === true;
     Object.assign(form.spotify, {
+      enabled: res.data.spotify?.enabled === true,
       clientId: res.data.spotify?.clientId ?? '',
       deviceName: res.data.spotify?.deviceName ?? '',
       bitrate: res.data.spotify?.bitrate ?? 320,
@@ -223,6 +245,8 @@ async function save() {
       jellyfin: { ...form.jellyfin },
       spotify: { ...form.spotify },
     });
+    // 审计 B4：保存即生效——失效 providers 共享缓存并重拉（搜索页签/首页区块立即感知）
+    await usePlayerStore().invalidateEnabledProviders();
     toast.success('音源设置已保存');
   } catch {
     toast.error('保存音源设置失败（需要管理员权限）');
