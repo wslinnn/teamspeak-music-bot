@@ -6,8 +6,7 @@
     <div class="h-[var(--player-height)] flex items-center px-6 relative">
       <!-- Progress bar -->
       <div
-        class="absolute -top-1.5 left-0 right-0 h-3 z-[101] flex items-center px-0"
-        :class="canTransport ? 'cursor-pointer' : ''"
+        class="absolute -top-1.5 left-0 right-0 h-3 z-[101] flex items-center px-0 cursor-pointer"
         ref="progressBarRef"
         @click="onProgressClick"
         @mousemove="onProgressHover"
@@ -110,6 +109,7 @@ import { Icon } from '@iconify/vue';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
+import { useToast } from '../composables/useToast';
 import { useDecoupledSlider } from '../composables/useDecoupledSlider.js';
 import CoverArt from './CoverArt.vue';
 import Queue from './Queue.vue';
@@ -128,6 +128,7 @@ function openServerTree() {
 
 const store = usePlayerStore();
 const auth = useAuthStore();
+const toast = useToast();
 const activeBot = computed(() => store.activeBot);
 const currentSong = computed(() => store.currentSong);
 // 按钮显隐门控（D14）：member 走 capabilities，游客走 guestMode 逐项开关
@@ -205,7 +206,10 @@ function onVisibilityChange() {
 }
 
 async function onProgressClick(e: MouseEvent) {
-  if (!canTransport.value) return;
+  if (!canTransport.value) {
+    toast.warning('暂无播放控制权限');
+    return;
+  }
   const bar = progressBarRef.value;
   if (!bar) return;
   const rect = bar.getBoundingClientRect();

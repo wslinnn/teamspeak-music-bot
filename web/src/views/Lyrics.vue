@@ -46,10 +46,10 @@
               </div>
             </div>
             <!-- 位置指示层：仅手动浏览时显示（自二开版复刻）。停在视口中央指向最近的
-                 行，胶囊可点击 seek，无 transport 权限时置灰 -->
+                 行，胶囊可点击 seek，无 transport 权限时点击给出提示 -->
             <div v-if="browsing" class="lyrics-position-overlay">
               <div class="lyrics-position-dash" />
-              <button class="lyrics-position-play" :disabled="!canTransport" @click="seekToPositionLine">
+              <button class="lyrics-position-play" @click="seekToPositionLine">
                 <Icon icon="mdi:play" class="text-[11px]" /> {{ positionTime }}
               </button>
             </div>
@@ -67,20 +67,22 @@
 <script setup lang="ts">
 // 结构自上游 Lyrics.vue 移植，滚动架构改为对手二开的纯原生滚动单轴：
 // 自动跟随与用户手动滚动共用容器 scrollTop（transform 双轴会让上方歌词
-// 滚不回去）。同步源用 liveElapsed()（#107）；点击歌词行/位置胶囊在有
-// transport 权限时执行真实 seek。
+// 滚不回去）。同步源用 liveElapsed()（#107）；点击歌词行/位置胶囊执行
+// seek，无 transport 权限时点击给出提示（歌词本身所有人可看）。
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { http } from '../utils/http';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
+import { useToast } from '../composables/useToast';
 import { useLyricsFontScale } from '../composables/useLyricsFontScale';
 import CoverArt from '../components/CoverArt.vue';
 
 const router = useRouter();
 const store = usePlayerStore();
 const auth = useAuthStore();
+const toast = useToast();
 const currentSong = computed(() => store.currentSong);
 const canTransport = computed(() => auth.can('player.control') || auth.guestCan('transport'));
 
@@ -237,10 +239,14 @@ let seekInFlight = false;
 let lyricsRequestId = 0;
 
 async function seekToLine(index: number) {
+  if (!canTransport.value) {
+    toast.warning('暂无播放控制权限');
+    return;
+  }
   resetBrowsing();
   activeLine.value = index;
   scrollToActiveLine(index);
-  if (!canTransport.value || seekInFlight) return;
+  if (seekInFlight) return;
   const time = lines.value[index]?.time;
   if (time === undefined) return;
   seekInFlight = true;
@@ -325,10 +331,14 @@ function resumeFollow() {
 }
 
 async function seekToPositionLine() {
+  if (!canTransport.value) {
+    toast.warning('暂无播放控制权限');
+    return;
+  }
   const line = lines.value[browsing.value ? manualLine.value : activeLine.value];
   if (!line) return;
   resetBrowsing();
-  if (!canTransport.value || seekInFlight) return;
+  if (seekInFlight) return;
   seekInFlight = true;
   try {
     await store.seek(line.time);
@@ -573,10 +583,6 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   pointer-events: auto;
   cursor: pointer;
-}
-.lyrics-position-play:disabled {
-  opacity: 0.45;
-  cursor: default;
 }
 
 .lyrics-text {

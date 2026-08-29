@@ -100,6 +100,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../stores/player.js';
 import { useAuthStore } from '../stores/auth';
+import { useToast } from '../composables/useToast';
 import { useDecoupledSlider } from '../composables/useDecoupledSlider.js';
 import { haptic } from '../utils/haptic';
 import CoverArt from './CoverArt.vue';
@@ -111,6 +112,7 @@ const router = useRouter();
 
 const store = usePlayerStore();
 const auth = useAuthStore();
+const toast = useToast();
 const activeBot = computed(() => store.activeBot);
 const currentSong = computed(() => store.currentSong);
 
@@ -276,7 +278,15 @@ function endSeekGesture() {
 }
 
 function onSeekDown(e: PointerEvent) {
-  if (!canSeek.value) return;
+  if (!canSeek.value) {
+    // 无 transport 权限：提示一次，并吞掉随行的 click（防止冒泡又跳进歌词页）；
+    // 时长未知（直播/未知曲长）保持静默
+    if (!canTransport.value) {
+      toast.warning('暂无播放控制权限');
+      seekEndedAt = Date.now();
+    }
+    return;
+  }
   // 单手势：第二根手指落下会抢走 seekPointerId，导致第一根永久捕获
   if (seekPointerId !== null) return;
   const ratio = seekRatio(e);
