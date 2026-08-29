@@ -10,7 +10,7 @@
         <BaseToggle
           v-model="form.autoPauseOnEmpty"
           label="频道无人时自动暂停"
-          hint="机器人所在频道没有其他人时自动暂停，有人加入后自动恢复"
+          hint="机器人所在频道没有其他人时自动暂停，有人回到频道后自动恢复播放（手动暂停不受影响）"
         />
         <BaseToggle
           v-model="form.savedQueuesEnabled"

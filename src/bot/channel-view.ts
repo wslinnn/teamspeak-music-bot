@@ -111,4 +111,19 @@ export class ChannelView {
     }
     return { count, known: this.established || count > 0 };
   }
+
+  /** 诊断快照（日志用）：视图播种状态与成员数。 */
+  snapshot(): {
+    selfId: number | null;
+    selfChannel: string | null;
+    established: boolean;
+    members: number;
+  } {
+    return {
+      selfId: this.selfId,
+      selfChannel: this.selfChannel === null ? null : this.selfChannel.toString(),
+      established: this.established,
+      members: this.members.size,
+    };
+  }
 }

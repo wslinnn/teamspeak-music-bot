@@ -273,8 +273,14 @@ export class AudioPlayer extends EventEmitter {
 
     this.ffmpeg.on("exit", (code, signal) => {
       if (currentPid) globalActivePids.delete(currentPid);
-      this.logger.info({ pid: currentPid, code, signal }, "FFmpeg exited");
-      
+      // 会话已被新播放/seek 接管 → 本次退出是主动 SIGTERM 替换，降为 debug；
+      // 同会话退出（自然播完/崩溃）才是需要关注的信号
+      if (this.sessionId !== currentSessionId) {
+        this.logger.debug({ pid: currentPid, code, signal }, "FFmpeg exited (superseded by new session)");
+      } else {
+        this.logger.info({ pid: currentPid, code, signal }, "FFmpeg exited");
+      }
+
       // 只有当前会话的进程结束才置空变量
       if (this.sessionId === currentSessionId) {
         this.ffmpeg = null;
@@ -398,7 +404,11 @@ export class AudioPlayer extends EventEmitter {
 
     this.ffmpeg.on("exit", (code, signal) => {
       if (currentPid) globalActivePids.delete(currentPid);
-      this.logger.info({ pid: currentPid, code, signal }, "FFmpeg exited");
+      if (this.sessionId !== sessionId) {
+        this.logger.debug({ pid: currentPid, code, signal }, "FFmpeg exited (superseded by new session)");
+      } else {
+        this.logger.info({ pid: currentPid, code, signal }, "FFmpeg exited");
+      }
       if (this.sessionId === sessionId) {
         this.ffmpeg = null;
         if (this.currentTempDir === tempDirToCleanup) this.currentTempDir = null;
@@ -848,7 +858,22 @@ export class AudioPlayer extends EventEmitter {
     }
   }
   pause(): void { if (this.state === "playing") this.state = "paused"; }
-  resume(): void { if (this.state === "paused") { this.state = "playing"; this.nextFrameTime = performance.now(); } }
+
+  resume(): void {
+    if (this.state !== "paused") return;
+    // 长暂停期间 CDN 可能已掐断阻塞中的连接：ffmpeg 已死（或已卸载）时，
+    // 残余缓冲只够几秒，播完就会触发断流切歌、丢掉没听完的部分——改为
+    // 以暂停位置为偏移重启当前曲（Spotify 走 sidecar，不适用）。
+    if (!this.externalMode && !this.ffmpeg && this.currentUrl) {
+      const offset = this.getElapsed();
+      this.logger.info({ offset: Math.round(offset) }, "Resuming with pipeline restart at pause position");
+      this.play(this.currentUrl, offset, this.currentSongDuration);
+      return;
+    }
+    this.state = "playing";
+    this.nextFrameTime = performance.now();
+  }
+
   resetFailures(): void { this.consecutiveFailures = 0; }
   setVolume(vol: number): void { this.volume = Math.max(0, Math.min(100, vol)); }
   getVolume(): number { return this.volume; }

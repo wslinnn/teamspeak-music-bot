@@ -108,6 +108,13 @@ export class TS3Client extends EventEmitter {
   private identity: Identity;
   private readonly clientUid: string;
   private clientId = 0;
+  /**
+   * 自机频道号（显式解析）。库的内部 client 映射只从 enterview 通知填充，
+   * 而服务器不会给 bot 自己发 enterview、clientmoved 又只更新"已在表里"
+   * 的客户端——所以库的 channelID() 从连接起恒为 0n，占用判定/频道内
+   * 客户端过滤会全部失灵。这里在连接/入频道后用 clientinfo 显式解析并缓存。
+   */
+  private resolvedChannelId: bigint | null = null;
   private readonly visibleClientUids = new Map<number, string>();
   private readonly visibleClientUidReleaseTimers = new Map<
     number,
@@ -155,6 +162,7 @@ export class TS3Client extends EventEmitter {
       }
       this.client = null;
       this.clientId = 0;
+      this.resolvedChannelId = null;
     }
 
     const addr = `${this.options.host}:${this.options.port}`;
@@ -274,6 +282,7 @@ export class TS3Client extends EventEmitter {
     this.client.on("disconnected", (err) => {
       this.logger.warn({ err: err?.message }, "Connection closed");
       this.clientId = 0;
+      this.resolvedChannelId = null;
       this.clearVisibleClientUids();
       this.emit("disconnected");
     });
@@ -311,10 +320,6 @@ export class TS3Client extends EventEmitter {
     await this.client.waitConnected();
     this.clientId = this.client.clientID();
     this.voiceFramesSent = 0;
-    this.logger.info(
-      { clientId: this.clientId, protocol: this.detectedProtocol },
-      `Logged in (visible client, ${this.detectedProtocol.toUpperCase()} server)`,
-    );
 
     // Join channel by numeric ID (takes precedence) or by name
     if (this.options.channelId) {
@@ -326,7 +331,28 @@ export class TS3Client extends EventEmitter {
       );
     }
 
+    // 入频道后再解析一次，拿到最终频道号；失败不阻塞连接
+    // （占用视图播种会降级并打 warn，30s 对账兜底）
+    await this.resolveSelfChannel();
+    this.logger.info(
+      { clientId: this.clientId, channelId: this.resolvedChannelId?.toString() ?? null },
+      `Logged in (visible client, ${this.detectedProtocol.toUpperCase()} server)`,
+    );
+
     this.emit("connected");
+  }
+
+  /** 用 clientinfo 显式解析自机频道号（绕开库 channelID() 恒为 0n 的缺陷）。 */
+  private async resolveSelfChannel(): Promise<void> {
+    this.resolvedChannelId = null;
+    if (!this.client || this.clientId <= 0) return;
+    try {
+      const info = await getClientInfo(this.client, this.clientId);
+      const cid = BigInt(info.cid ?? "0");
+      if (cid > 0n) this.resolvedChannelId = cid;
+    } catch (err) {
+      this.logger.warn({ err }, "Failed to resolve self channel via clientinfo");
+    }
   }
 
   async joinChannel(channelName: string, password?: string): Promise<void> {
@@ -336,6 +362,7 @@ export class TS3Client extends EventEmitter {
     if (isNumeric) {
       try {
         await clientMove(this.client, this.clientId, BigInt(channelName), password);
+        this.resolvedChannelId = BigInt(channelName);
         this.logger.info({ channelName }, "Joined channel");
       } catch (err) {
         this.logger.error({ err, channelName }, "Failed to join channel");
@@ -353,6 +380,7 @@ export class TS3Client extends EventEmitter {
       }
 
       await clientMove(this.client, this.clientId, channel.id, password);
+      this.resolvedChannelId = channel.id;
       this.logger.info(
         { channelName, cid: channel.id.toString() },
         "Joined channel"
@@ -376,7 +404,9 @@ export class TS3Client extends EventEmitter {
     if (!this.client) return [];
     try {
       const allClients = await listClients(this.client);
-      const myChannelId = this.client.channelID();
+      // 用显式解析的频道号：库的 channelID() 恒为 0n，会让过滤结果永远为空
+      const myChannelId = this.getChannelId();
+      if (myChannelId === 0n) return [];
       return allClients.filter((c) => c.channelID === myChannelId);
     } catch {
       return [];
@@ -449,6 +479,8 @@ export class TS3Client extends EventEmitter {
 
   /** The current channel ID of this client. */
   getChannelId(): bigint {
+    // 显式解析值优先：库的 channelID() 因自机不在其映射表里恒为 0n
+    if (this.resolvedChannelId !== null) return this.resolvedChannelId;
     if (!this.client) return 0n;
     return this.client.channelID();
   }
@@ -477,6 +509,7 @@ export class TS3Client extends EventEmitter {
   async joinChannelById(channelId: bigint, password?: string): Promise<void> {
     if (!this.client) throw new Error("Not connected");
     await clientMove(this.client, this.clientId, channelId, password);
+    this.resolvedChannelId = channelId;
     this.logger.info({ channelId: channelId.toString() }, "Moved to channel by ID");
   }
 
@@ -563,6 +596,7 @@ export class TS3Client extends EventEmitter {
       });
     }
     this.clientId = 0;
+    this.resolvedChannelId = null;
     this.clearVisibleClientUids();
     this.httpQuery = null;
     this.detectedProtocol = "unknown";

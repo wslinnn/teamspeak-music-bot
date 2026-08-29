@@ -182,6 +182,8 @@ export class BotInstance extends EventEmitter {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private channelUserCount = 0;
   private autoPaused = false;
+  /** 本次自动暂停的开始时刻（恢复日志里报告暂停持续时长用） */
+  private autoPausedAt: number | null = null;
   /** 事件源的"我的频道里有谁"视图：自动暂停/闲置判定的唯一权威（fork） */
   private readonly channelView = new ChannelView();
   /** True while the audible track is served by the Spotify sidecar (external
@@ -418,6 +420,10 @@ export class BotInstance extends EventEmitter {
       this.sweepLocalAudio("disconnected");
       // A lifecycle change must not leave a stale auto-resume armed.
       this.autoPaused = false;
+      // 上一条连接的陈旧成员必须清掉：下次 connect 的视图完全由该连接的
+      // enterview 回放重建（reset 放在断连而非连接时刻——连接前到达的回放
+      // 成员是本连接的合法种子，连接时再 reset 会把它们误清掉）。
+      this.channelView.reset();
       // Only emit externally once per lifecycle so clients don't see a
       // duplicate "disconnected" after an explicit disconnect() call.
       if (this.disconnectEmitted) return;
@@ -428,13 +434,24 @@ export class BotInstance extends EventEmitter {
     this.tsClient.on("connected", () => {
       // Fresh connection — clear any stale auto-pause flag from a prior session.
       this.autoPaused = false;
-      // 事件源频道视图重置 + 播种：自机 enterview 已在握手期送达（库靠它定位
-      // clid），视图即已建立；clientlist 对账仅为修正兜底（≥2 客户端时会超时，
-      // 失败即放弃，不承担决策）。
-      this.channelView.reset();
+      // 事件源频道视图播种（reset 已移至 disconnected）：连接握手期送达的
+      // 自机/既有成员 enterview 回放此时已在视图里，这里只补 self 身份并
+      // 标记 established；clientlist 对账仅为修正兜底（失败即放弃，不承担
+      // 决策）。
       const selfId = this.tsClient.getClientId();
       const selfChannel = this.tsClient.getChannelId();
-      if (selfId && selfChannel) this.channelView.onSelfKnown(selfId, selfChannel);
+      if (selfId && selfChannel) {
+        this.channelView.onSelfKnown(selfId, selfChannel);
+        this.logger.info(
+          this.channelView.snapshot(),
+          "Occupancy view seeded at connect",
+        );
+      } else {
+        this.logger.warn(
+          { selfId, selfChannel: selfChannel ? selfChannel.toString() : null },
+          "Occupancy view seeding skipped: self ids unavailable",
+        );
+      }
       void this.reconcileChannelView();
       this.applyChannelView();
       this._startIdlePoller();
@@ -449,6 +466,9 @@ export class BotInstance extends EventEmitter {
       ) {
         return;
       }
+      // Fork：自动暂停期间收到语音包 = 有听众回到了频道。语音走 UDP，与
+      // 可能丢失的 enter 事件通知（TCP）完全独立，是恢复的秒级触发器。
+      this._resumeIfReturning("voiceActivity");
       this.voiceDucking.handleVoiceActivity(activity.clientId);
     });
 
@@ -457,13 +477,11 @@ export class BotInstance extends EventEmitter {
     // (auto-pause / idle-disconnect) read the view — the flaky full-server
     // clientlist query is demoted to a periodic reconcile, never load-bearing.
     //
-    // clientEnter additionally arms auto-RESUME directly from the event,
-    // because the occupancy query (clientlist) times out whenever another
-    // client is present — i.e. exactly when a listener returns. See
-    // _resumeIfReturning().
+    // Fork：clientEnter 是自动恢复的快路径（部分环境 observe 到 leave 推送
+    // 可达而 enter 不可达——不可达时由 voiceActivity 与 5s 加速对账兜底）。
     this.tsClient.on("clientEnter", (info: { id: number; channelID: bigint }) => {
       this.channelView.onEnter(info);
-      this._resumeIfReturning();
+      this._resumeIfReturning("clientEnter");
       this.applyChannelView();
     });
     this.tsClient.on("clientLeave", (event: { id: number }) => {
@@ -527,8 +545,7 @@ export class BotInstance extends EventEmitter {
   }
 
   /**
-   * Resume playback when a listener returns after an auto-pause, driven by the
-   * clientEnter push event rather than a (timing-out) occupancy query.
+   * Resume playback when a listener returns after an auto-pause.
    *
    * We only auto-pause while alone on the server, so `autoPaused` is a reliable
    * "paused because empty" flag; any client appearing while it's set means a
@@ -536,12 +553,14 @@ export class BotInstance extends EventEmitter {
    * decideOccupancyAction (resume iff autoPaused && paused) and also cancels the
    * idle-disconnect timer. This path NEVER pauses — userCount is always > 0 —
    * so a spurious or unrelated enter can only (harmlessly) resume, never stop
-   * playback. Pause remains exclusively on the authoritative clientlist path.
+   * playback.
    */
-  private _resumeIfReturning(): void {
+  private _resumeIfReturning(
+    source: "clientEnter" | "voiceActivity" = "clientEnter",
+  ): void {
     if (!this.connected) return;
     if (shouldResumeOnReturn(this.autoPaused, this.player.getState())) {
-      this.handleOccupancy(1);
+      this.handleOccupancy(1, source);
     }
   }
 
@@ -633,8 +652,9 @@ export class BotInstance extends EventEmitter {
   }
 
   private _startIdlePoller(): void {
-    // 每 30 秒做一次对账：占用判定已由事件源的 channelView 承担，这里仅在
-    // clientlist 查询能成功时（基本只剩独处场景）提供一次权威快照修正。
+    // 每 30 秒做一次对账：与 WebUI 频道树同源的查询，作为推送事件之外
+    // 的权威快照修正。自动恢复主要由 enter 事件与语音活动秒级触发，
+    // 对账只作兜底（静默进入频道的听众最多延迟一个周期被恢复）。
     const poll = async () => {
       if (!this.connected) return;
       await this.reconcileChannelView();
@@ -643,16 +663,36 @@ export class BotInstance extends EventEmitter {
     setTimeout(poll, 30_000);
   }
 
-  /** 用一次 clientlist 快照对账频道视图。查询失败（≥2 客户端时超时）即放弃——
-   *  它从不承担决策，只做修正。成功返回得包含 bot 自身（≥1），空数组视为失败。 */
+  /** 用一次 clientlist 快照对账频道视图——与 WebUI 频道树（getServerTree）
+   *  同源同一查询，频道树能用此路径就能用。自机频道优先取快照里 bot 自己
+   *  所在频道（自愈播种：即使 connect 时 seeding 失败，30s 内也会被纠正），
+   *  其次才是 getChannelId() 的显式解析值。查询失败即放弃——它不承担决策，
+   *  只做修正；成功返回必须包含 bot 自身，空数组视为失败。 */
+  private reconcileFailures = 0;
+
   private async reconcileChannelView(): Promise<void> {
     if (!this.connected) return;
     try {
-      const clients = await this.tsClient.getClientsInChannel();
-      if (clients.length === 0) return; // query failed → occupancy stays event-sourced
+      const clients = await this.tsClient.getClientList();
+      if (clients.length === 0) {
+        this.noteReconcileFailure();
+        return;
+      }
       const selfId = this.tsClient.getClientId();
-      const selfChannel = this.tsClient.getChannelId();
-      if (!selfId || !selfChannel) return;
+      const selfChannel =
+        clients.find((c) => c.id === selfId)?.channelID ??
+        this.tsClient.getChannelId();
+      if (!selfId || !selfChannel) {
+        this.noteReconcileFailure();
+        return;
+      }
+      if (this.reconcileFailures > 0) {
+        this.logger.info(
+          { clients: clients.length },
+          "Occupancy reconcile recovered via clientlist",
+        );
+      }
+      this.reconcileFailures = 0;
       this.channelView.reconcileAll(
         clients.map((c) => ({ id: c.id, channelID: c.channelID })),
         selfId,
@@ -660,18 +700,54 @@ export class BotInstance extends EventEmitter {
       );
       this.applyChannelView();
     } catch {
-      // ignore — events remain the source of truth
+      this.noteReconcileFailure();
     }
   }
+
+  /** 连续失败只记一条，恢复时再记一条——避免 30s 轮询刷屏。 */
+  private noteReconcileFailure(): void {
+    this.reconcileFailures += 1;
+    if (this.reconcileFailures === 1) {
+      this.logger.info(
+        "Occupancy reconcile failed (clientlist unavailable); relying on push events only",
+      );
+    }
+  }
+
+  /** 上一次写入日志的占用计数；null = unknown（未知态只记一条，恢复已知再记） */
+  private lastLoggedOccupancy: number | null = null;
 
   /** 把频道视图的占用结论交给自动暂停/闲置判定；未知（known=false）一律不动作 */
   private applyChannelView(): void {
     if (!this.connected) return;
     const occ = this.channelView.occupancy();
-    if (occ.known) this.handleOccupancy(occ.count);
+    if (!occ.known) {
+      if (this.lastLoggedOccupancy !== null) {
+        this.logger.info(
+          "Occupancy unknown (view not established); auto-pause holding off",
+        );
+        this.lastLoggedOccupancy = null;
+      }
+      return;
+    }
+    // 只在计数变化时记一条（enter/leave 频率低，不会刷屏）：
+    // 定位自动暂停问题看这条即可——count 归零却没有 pause，就是判定层问题
+    if (occ.count !== this.lastLoggedOccupancy) {
+      this.logger.info(
+        {
+          count: occ.count,
+          playing: this.player.getState(),
+          autoPaused: this.autoPaused,
+          autoPauseOnEmpty: this.config.autoPauseOnEmpty,
+        },
+        "Channel occupancy changed",
+      );
+      this.lastLoggedOccupancy = occ.count;
+    }
+    this.handleOccupancy(occ.count);
   }
 
-  private handleOccupancy(userCount: number): void {
+  private handleOccupancy(userCount: number, source = "reconcile"): void {
     // idle-disconnect (unchanged behavior)
     if (userCount <= 0) this._scheduleIdleCheck();
     else this._cancelIdleTimer();
@@ -692,6 +768,7 @@ export class BotInstance extends EventEmitter {
           this.logger.warn({ err }, "Spotify pause failed (occupancy)"));
       }
       this.autoPaused = true;
+      this.autoPausedAt = Date.now();
       this.emit("stateChange");
     } else if (action === "resume") {
       this.player.resume();
@@ -699,7 +776,13 @@ export class BotInstance extends EventEmitter {
         this.spotifyController.resume().catch((err) =>
           this.logger.warn({ err }, "Spotify resume failed (occupancy)"));
       }
+      const pausedForMs = this.autoPausedAt !== null ? Date.now() - this.autoPausedAt : null;
+      this.logger.info(
+        { source, pausedForMs },
+        "Auto-resumed playback: listener returned to the channel",
+      );
       this.autoPaused = false;
+      this.autoPausedAt = null;
       this.emit("stateChange");
     }
   }

@@ -253,6 +253,9 @@ describe("BotInstance voice-ducking lifecycle integration", () => {
       connected: true,
       managedVoiceClients,
       voiceServerScope,
+      autoPaused: false,
+      player: { getState: () => "idle" },
+      _resumeIfReturning: vi.fn(),
       voiceDucking: {
         handleVoiceActivity,
         removeSpeaker: vi.fn(),
@@ -954,7 +957,8 @@ describe("BotInstance.handleOccupancy — spotify auto-pause delegation (C4)", (
       queue: { current: vi.fn(() => ({ platform: currentPlatform })) },
       config: { autoPauseOnEmpty: true },
       autoPaused: false,
-      logger: { warn: vi.fn() },
+      autoPausedAt: null,
+      logger: { info: vi.fn(), warn: vi.fn() },
       emit: vi.fn(),
       _scheduleIdleCheck: vi.fn(),
       _cancelIdleTimer: vi.fn(),
@@ -976,6 +980,15 @@ describe("BotInstance.handleOccupancy — spotify auto-pause delegation (C4)", (
     expect(ctx.player.resume).toHaveBeenCalledTimes(1);
     expect(ctx.spotifyController.resume).toHaveBeenCalledTimes(1);
     expect(ctx.autoPaused).toBe(false);
+  });
+
+  it("does NOT resume a manually paused bot when a listener returns (autoPaused gate)", () => {
+    const ctx = makeOccupancyCtx("spotify", "paused");
+    ctx.autoPaused = false; // cmdPause（用户手动暂停）已清掉该标志
+    handleOccupancy.call(ctx, 1);
+    expect(ctx.player.resume).not.toHaveBeenCalled();
+    expect(ctx.spotifyController.resume).not.toHaveBeenCalled();
+    expect(ctx.emit).not.toHaveBeenCalled();
   });
 
   it("does NOT touch the controller when auto-pausing a non-spotify track", () => {
