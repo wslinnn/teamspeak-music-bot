@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { http } from '../utils/http';
 import { useToast } from '../composables/useToast';
+import { useAuthStore } from './auth';
 
 export interface Song {
   id: string;
@@ -331,6 +332,13 @@ export const usePlayerStore = defineStore('player', {
       return this.enabledProviders;
     },
 
+    /** 审计 B4：音源设置保存后调用——立即失效共享缓存并重拉，保存即生效
+     *  （否则搜索页签/首页区块最长 60s 才感知）。 */
+    async invalidateEnabledProviders() {
+      providersCache = null;
+      await this.fetchEnabledProviders();
+    },
+
     /** 平台登录态（netease/qq/kugou）；游客无权访问，保持空 */
     async fetchAuthStatus() {
       const platforms = ['netease', 'qq', 'kugou'];
@@ -375,7 +383,13 @@ export const usePlayerStore = defineStore('player', {
         await http.delete(`/api/favorites/${favId}`);
         await this.fetchFavoritedPlaylists();
         toast.success('已取消收藏');
-      } catch {
+      } catch (err: unknown) {
+        // 审计 C11：404 = 收藏已被别端删除，静默重拉收敛即可，不弹错
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 404) {
+          await this.fetchFavoritedPlaylists();
+          return;
+        }
         toast.error('取消收藏失败');
       }
     },
@@ -565,9 +579,18 @@ export const usePlayerStore = defineStore('player', {
       if (!this.activeBotId) return;
       const toast = useToast();
       try {
-      await http.post(`/api/player/${this.activeBotId}/play-song`, { song });
-      this._optimisticPlay();
-      this._setTiming(this.activeBotId, { serverElapsed: 0 });
+        // 回归修复（审计 A1/B1）：游客走非破坏性的 play-now-song（插入下一首
+        // + 跳转，不清他人队列）；/play-song 无 guestFlag，游客必 403。
+        const endpoint = useAuthStore().isGuest ? 'play-now-song' : 'play-song';
+        const res = await http.post(`/api/player/${this.activeBotId}/${endpoint}`, { song });
+        // 后端以 200 + {ok:false, message} 表达业务失败（区域/版权限制等）：
+        // 提示真实原因，并且不能做乐观更新（否则错误重置进度锚点）。
+        if (res.data?.ok === false) {
+          toast.error(res.data.message || `无法播放: ${song.name}`);
+          return;
+        }
+        this._optimisticPlay();
+        this._setTiming(this.activeBotId, { serverElapsed: 0 });
         this._syncAfterAction();
         toast.success(`开始播放: ${song.name}`);
       } catch {
@@ -616,7 +639,11 @@ export const usePlayerStore = defineStore('player', {
       if (!this.activeBotId) return;
       const toast = useToast();
       try {
-        await http.post(`/api/player/${this.activeBotId}/play-next-song`, { song });
+        const res = await http.post(`/api/player/${this.activeBotId}/play-next-song`, { song });
+        if (res.data?.ok === false) {
+          toast.error(res.data.message || `无法播放: ${song.name}`);
+          return;
+        }
         await this.fetchQueue();
         toast.success(`下一首播放: ${song.name}`);
       } catch {
@@ -628,11 +655,24 @@ export const usePlayerStore = defineStore('player', {
       if (!this.activeBotId) return;
       const toast = useToast();
       try {
-      await http.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
+        const res = await http.post(`/api/player/${this.activeBotId}/play-playlist`, { playlistId, platform });
+        // 审计 B1：后端 200+ok:false 表达「整单无版权」等失败；message 可能是
+        // 「已加载 x/y 首（其余区域/版权限制）」的部分成功，分色提示。
+        if (res.data?.ok === false) {
+          this._syncAfterAction();
+          toast.error(res.data.message || '播放歌单失败');
+          return;
+        }
+        // 成功时后端 message 携带「已加载 x/y 首，正在播放：xx」的部分加载
+        // 信息（上游语义：ok 为 true 时按 info 提示）
+        if (res.data?.message) {
+          toast.info(res.data.message);
+        } else {
+          toast.success('开始播放歌单');
+        }
       this._optimisticPlay();
       this._setTiming(this.activeBotId, { serverElapsed: 0 });
         this._syncAfterAction();
-        toast.success('开始播放歌单');
       } catch {
         toast.error('播放歌单失败');
       }
@@ -642,11 +682,20 @@ export const usePlayerStore = defineStore('player', {
       if (!this.activeBotId) return;
       const toast = useToast();
       try {
-        await http.post(`/api/player/${this.activeBotId}/play-album`, { albumId, platform });
+        const res = await http.post(`/api/player/${this.activeBotId}/play-album`, { albumId, platform });
+        if (res.data?.ok === false) {
+          this._syncAfterAction();
+          toast.error(res.data.message || '播放专辑失败');
+          return;
+        }
+        if (res.data?.message) {
+          toast.info(res.data.message);
+        } else {
+          toast.success('开始播放专辑');
+        }
         this._optimisticPlay();
         this._setTiming(this.activeBotId, { serverElapsed: 0 });
         this._syncAfterAction();
-        toast.success('开始播放专辑');
       } catch {
         toast.error('播放专辑失败');
       }
@@ -660,9 +709,11 @@ export const usePlayerStore = defineStore('player', {
         bot.playing = false;
         bot.paused = true;
       }
-      // Freeze elapsed at current interpolated value
+      // Freeze elapsed at the current LIVE interpolated value. The cached
+      // `elapsed` getter can be seconds stale → pause would rewind the bar.
+      // （审计 C4：上游 #107 同款修复，重写时遗失）
       this._setTiming(this.activeBotId, {
-        serverElapsed: this.elapsed,
+        serverElapsed: this.liveElapsed(),
         wasPlaying: false,
       });
       await http.post(`/api/player/${this.activeBotId}/pause`);
@@ -757,6 +808,26 @@ export const usePlayerStore = defineStore('player', {
     },
 
     /** 退出私人 FM：停止自动续播，队列按顺序继续（状态由 WS 推送更新） */
+    /** 开启私人 FM（审计 C5：恢复上游三步收尾——进度归零、500ms 补同步、
+     *  主动刷新队列；WS 断线期间首页不会停滞）。 */
+    async startFm(platform: string) {
+      if (!this.activeBotId) return;
+      const toast = useToast();
+      try {
+        const res = await http.post(`/api/player/${this.activeBotId}/fm`, { platform });
+        if (res.data?.ok === false) {
+          toast.error(res.data.message || '开启私人FM失败');
+          return;
+        }
+        toast.success(res.data.message || '私人FM已开启');
+        this._setTiming(this.activeBotId, { serverElapsed: 0 });
+        this._syncAfterAction();
+        this.fetchQueue();
+      } catch {
+        toast.error('开启私人FM失败');
+      }
+    },
+
     async stopFm() {
       if (!this.activeBotId) return;
       await http.post(`/api/player/${this.activeBotId}/fm/stop`);
