@@ -55,7 +55,11 @@ http.interceptors.response.use(
     }
 
     const toastStore = useToastStore();
-    const message = error.response?.data?.error ?? error.message ?? '请求失败';
+    let message = error.response?.data?.error ?? error.message ?? '请求失败';
+    // 兜底：后端错误文案已统一中文；历史/遗漏的英文裸文案不再直出
+    if (error.response?.status === 403 && (!message || message === 'forbidden')) {
+      message = '没有权限执行此操作，请联系管理员';
+    }
     if (!error.config?.skipErrorToast && !isExpectedFailure(error.config?.url ?? '')) {
       toastStore.add(message, 'error', 4000);
     }

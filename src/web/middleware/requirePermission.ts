@@ -7,18 +7,18 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 // `string | string[]` param overload on every route they guard.
 export function requirePermission<P = Record<string, string>>(capability: string): RequestHandler<P> {
   return (req: Request<P>, res: Response, next: NextFunction) => {
-    if (!req.user) { res.status(401).json({ error: "unauthenticated" }); return; }
+    if (!req.user) { res.status(401).json({ error: "请先登录" }); return; }
     if (req.user.role === "admin" || req.user.capabilities?.has(capability)) { next(); return; }
-    res.status(403).json({ error: "forbidden" });
+    res.status(403).json({ error: "权限不足：没有执行此操作的权限，请联系管理员" });
   };
 }
 
 export function requireBotAccess<P = Record<string, string>>(paramName = "botId"): RequestHandler<P> {
   return (req: Request<P>, res: Response, next: NextFunction) => {
-    if (!req.user) { res.status(401).json({ error: "unauthenticated" }); return; }
+    if (!req.user) { res.status(401).json({ error: "请先登录" }); return; }
     const botId = (req.params as Record<string, string | undefined>)[paramName];
     if (typeof botId === "string" && canAccessBot(req.user, botId)) { next(); return; }
-    res.status(403).json({ error: "forbidden" });
+    res.status(403).json({ error: "权限不足：你没有访问该机器人的权限，请联系管理员" });
   };
 }
 

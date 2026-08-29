@@ -19,7 +19,7 @@ describe("createRateLimit", () => {
     expect((await request(app).get("/")).status).toBe(200);
     const denied = await request(app).get("/");
     expect(denied.status).toBe(429);
-    expect(denied.body).toEqual({ error: "rate limit exceeded" });
+    expect(denied.body).toEqual({ error: "请求过于频繁，请稍后再试" });
     expect(denied.headers["retry-after"]).toBeDefined();
   });
 

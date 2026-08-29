@@ -844,10 +844,12 @@ export const usePlayerStore = defineStore('player', {
         return;
       }
 
+      // 每日推荐 / 我的歌单挂 requireNotGuest：游客请求必 403，直接跳过不发
+      const guest = useAuthStore().isGuest;
       const [playlistRes, dailyRes, userRes, biliRes] = await Promise.allSettled([
         http.get('/api/music/recommend/playlists'),
-        http.get('/api/music/recommend/songs'),
-        http.get('/api/music/user/playlists'),
+        guest ? Promise.resolve({ data: { songs: [] } }) : http.get('/api/music/recommend/songs'),
+        guest ? Promise.resolve({ data: { playlists: [] } }) : http.get('/api/music/user/playlists'),
         http.get('/api/music/bilibili/popular?limit=12'),
       ]);
 

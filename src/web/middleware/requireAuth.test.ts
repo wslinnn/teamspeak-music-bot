@@ -52,7 +52,7 @@ describe("requireAuth middleware", () => {
   it("rejects requests without a session cookie", async () => {
     const res = await request(app).get("/protected");
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: "unauthenticated" });
+    expect(res.body).toEqual({ error: "登录状态已过期，请重新登录" });
   });
 
   it("rejects requests with an unknown session cookie", async () => {

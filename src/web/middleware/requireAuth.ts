@@ -31,7 +31,7 @@ export function createRequireAuth(
     const result = validateSessionFromHeaders(req.headers.cookie, sessions);
     if (!result) {
       res.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
-      res.status(401).json({ error: "unauthenticated" });
+      res.status(401).json({ error: "登录状态已过期，请重新登录" });
       return;
     }
     // A guest session is only valid while guest mode is enabled. Disabling it
@@ -39,7 +39,7 @@ export function createRequireAuth(
     const guestCfg = getGuestConfig();
     if (result.role === "guest" && !guestCfg.enabled) {
       res.clearCookie(SESSION_COOKIE_NAME, { path: "/" });
-      res.status(401).json({ error: "unauthenticated" });
+      res.status(401).json({ error: "登录状态已过期，请重新登录" });
       return;
     }
     const ctx = resolvePermissionContext(

@@ -16,14 +16,14 @@ export function authorize<P = Record<string, string>>(opts: {
 }): RequestHandler<P> {
   return (req: Request<P>, res: Response, next: NextFunction) => {
     const user = req.user;
-    if (!user) { res.status(401).json({ error: "unauthenticated" }); return; }
+    if (!user) { res.status(401).json({ error: "请先登录" }); return; }
     if (user.role === "admin") { next(); return; }
     if (user.role === "guest") {
       if (opts.guestFlag && user.guest?.[opts.guestFlag] === true) { next(); return; }
-      res.status(403).json({ error: "forbidden" });
+      res.status(403).json({ error: "游客权限不足：该操作未对游客开放，请联系管理员开启" });
       return;
     }
     if (opts.capability && user.capabilities?.has(opts.capability)) { next(); return; }
-    res.status(403).json({ error: "forbidden" });
+    res.status(403).json({ error: "权限不足：没有执行此操作的权限，请联系管理员" });
   };
 }

@@ -54,7 +54,7 @@ export function createRateLimit(options: RateLimitOptions): RequestHandler {
     if (b.tokens < 1) {
       const waitSec = Math.ceil((1 - b.tokens) / options.refillPerSec);
       res.setHeader("Retry-After", String(waitSec));
-      res.status(429).json({ error: "rate limit exceeded" });
+      res.status(429).json({ error: "请求过于频繁，请稍后再试" });
       return;
     }
     b.tokens -= 1;
