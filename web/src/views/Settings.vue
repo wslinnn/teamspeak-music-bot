@@ -24,6 +24,7 @@
           :auth-states="{ netease: neteaseAuth, qq: qqAuth, bilibili: bilibiliAuth, kugou: kugouAuth }"
           :qr-states="{ netease: neteaseQr, qq: qqQr, bilibili: bilibiliQr, kugou: kugouQr }"
           @start-qr="startQrLogin"
+          @stop-qr="stopQrPolling"
           @save-cookie="saveCookie"
         />
 
@@ -178,6 +179,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue';
+import QRCode from 'qrcode';
 import { Icon } from '@iconify/vue';
 import { useRoute, useRouter } from 'vue-router';
 import { http } from '../utils/http';
@@ -345,12 +347,14 @@ interface QrState {
   key: string;
   status: 'waiting' | 'scanned' | 'confirmed' | 'expired';
   pollTimer: ReturnType<typeof setInterval> | null;
+  /** 本轮轮询的开始时间；用于 3 分钟统一 deadline（Bug 2 修复） */
+  startedAt: number;
 }
 
-const neteaseQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null });
-const qqQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null });
-const bilibiliQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null });
-const kugouQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null });
+const neteaseQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null, startedAt: 0 });
+const qqQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null, startedAt: 0 });
+const bilibiliQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null, startedAt: 0 });
+const kugouQr = reactive<QrState>({ loading: false, dataUrl: '', key: '', status: 'waiting', pollTimer: null, startedAt: 0 });
 
 function getQrState(platform: string): QrState {
   if (platform === 'bilibili') return bilibiliQr;
@@ -490,18 +494,45 @@ async function checkAuthStatus() {
   }
 }
 
-async function startQrLogin(platform: string) {
+/** 停掉某个平台的二维码轮询（Bug 2：切走后不再空转打后端） */
+function stopQrPolling(platform: string) {
   const qr = getQrState(platform);
-  if (qr.pollTimer) clearInterval(qr.pollTimer);
+  if (qr.pollTimer) {
+    clearInterval(qr.pollTimer);
+    qr.pollTimer = null;
+  }
+}
+
+async function startQrLogin(platform: string) {
+  // 同一时间只保留一个平台的二维码流程：开启新的先停掉其它平台的轮询
+  for (const p of ['netease', 'qq', 'bilibili', 'kugou']) {
+    if (p !== platform) stopQrPolling(p);
+  }
+  const qr = getQrState(platform);
+  stopQrPolling(platform);
   qr.loading = true;
   qr.dataUrl = '';
   qr.status = 'waiting';
 
   try {
     const res = await http.post('/api/auth/qrcode', { platform });
-    qr.key = res.data.key;
-    qr.dataUrl = res.data.qrImg || '';
+    const { qrUrl, qrImg, key } = res.data;
+    qr.key = key;
+
+    // 后端有现成图（网易/QQ）直接用；B 站/酷狗只返回扫码内容 qrUrl，
+    // 由前端本地生成二维码（上游原逻辑，接管重写时遗失）。
+    // 二维码必须黑码白底：不能跟随深色主题反转配色——酷狗 App 的扫码器
+    // 读不了白码黑底，主题化后在屏幕上看着正常但扫不出来（上游注释原样保留）。
+    qr.dataUrl = qrImg
+      ? qrImg
+      : await QRCode.toDataURL(qrUrl, {
+          width: 200,
+          margin: 2,
+          color: { dark: '#000000', light: '#ffffff' },
+        });
+
     qr.loading = false;
+    qr.startedAt = Date.now();
     qr.pollTimer = setInterval(() => pollQrStatus(platform), 2000);
   } catch {
     qr.loading = false;
@@ -512,6 +543,12 @@ async function startQrLogin(platform: string) {
 async function pollQrStatus(platform: string) {
   const qr = getQrState(platform);
   if (!qr.key) return;
+  // 统一 3 分钟 deadline：不再依赖各上游的过期语义，超时即停。
+  if (qr.startedAt && Date.now() - qr.startedAt > 3 * 60_000) {
+    stopQrPolling(platform);
+    qr.status = 'expired';
+    return;
+  }
   try {
     const res = await http.get('/api/auth/qrcode/status', { params: { key: qr.key, platform } });
     qr.status = res.data.status;
@@ -546,9 +583,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  [neteaseQr, qqQr, bilibiliQr, kugouQr].forEach((qr) => {
-    if (qr.pollTimer) clearInterval(qr.pollTimer);
-  });
+  (['netease', 'qq', 'bilibili', 'kugou'] as const).forEach((p) => stopQrPolling(p));
   setAvatarPreview(null);
 });
 </script>

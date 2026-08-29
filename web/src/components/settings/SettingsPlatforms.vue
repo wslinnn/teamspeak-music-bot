@@ -26,7 +26,7 @@
         <BaseButton
           size="sm"
           :variant="loginModes[platform.key] === 'cookie' ? 'primary' : 'secondary'"
-          @click="loginModes[platform.key] = 'cookie'"
+          @click="loginModes[platform.key] = 'cookie'; $emit('stopQr', platform.key)"
         >
           <Icon icon="mdi:cookie" class="mr-1" /> Cookie登录
         </BaseButton>
@@ -110,6 +110,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'startQr', platform: string): void;
+  (e: 'stopQr', platform: string): void;
   (e: 'saveCookie', platform: string, cookie: string): void;
 }>();
 
