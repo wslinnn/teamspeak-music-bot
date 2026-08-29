@@ -37,7 +37,7 @@
           label="允许游客访问"
           hint="游客共享匿名身份、会话约 1 天；关闭后在线游客立即被断开"
         />
-        <div class="pt-2 pb-1 pl-1 text-xs font-semibold text-foreground-muted">游客可执行的操作（默认仅第一项开启）</div>
+        <div class="pt-2 pb-1 pl-1 text-xs font-semibold text-foreground-muted">游客可执行的操作（默认全部关闭）</div>
         <BaseToggle v-for="f in guestFlags" :key="f.key" v-model="guestPerms[f.key]" :label="f.label" :hint="f.hint" />
 
         <!-- 审计 B3：游客可控机器人白名单（上游有；成员侧权限编辑器已有同款交互） -->

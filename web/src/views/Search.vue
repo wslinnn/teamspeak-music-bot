@@ -282,6 +282,10 @@ const activePlatform = ref(localStorage.getItem('search-source') ?? 'all');
 watch(platformTabs, (tabs) => {
   if (!tabs.some((t) => t.key === activePlatform.value)) activePlatform.value = 'all';
 });
+// 审计 C9：切换页签即时记忆（原仅在搜索成功后写入）
+watch(activePlatform, (v) => {
+  localStorage.setItem('search-source', v);
+});
 
 const SEARCH_PAGE = 30;
 
