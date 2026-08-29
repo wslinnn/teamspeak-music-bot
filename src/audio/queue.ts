@@ -209,6 +209,32 @@ export class PlayQueue {
     return this.songs[0];
   }
 
+  /**
+   * Fork (audit PERF-02): bound queue growth by dropping ALREADY-PLAYED
+   * entries (never the current song) once the queue exceeds maxKeep.
+   * remove() rebases currentIndex/playedIndices/history/forwardStack, so
+   * random-mode shuffle state stays coherent. Long-running FM sessions used
+   * to append forever — next() only advances the cursor — bloating RAM and
+   * making every stateChange snapshot serialize an ever-larger array.
+   * Returns the number of dropped entries.
+   */
+  trimPlayed(maxKeep: number): number {
+    let dropped = 0;
+    while (this.songs.length > maxKeep) {
+      let victim = -1;
+      for (let i = 0; i < this.songs.length; i++) {
+        if (i !== this.currentIndex && this.playedIndices.has(i)) {
+          victim = i;
+          break;
+        }
+      }
+      if (victim < 0) break; // nothing safely droppable
+      this.remove(victim);
+      dropped++;
+    }
+    return dropped;
+  }
+
   playAt(index: number): QueuedSong | null {
     if (index < 0 || index >= this.songs.length) return null;
     this.pushHistory(this.currentIndex);

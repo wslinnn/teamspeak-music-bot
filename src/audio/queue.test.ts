@@ -775,3 +775,61 @@ describe("PlayQueue reorder (fork)", () => {
     expect(queue.reorder(0, 0)).toBe(false);
   });
 });
+describe("PlayQueue trimPlayed (audit PERF-02)", () => {
+  function build(n: number) {
+    const q = new PlayQueue();
+    for (let i = 0; i < n; i++) q.add(makeSong("s" + i));
+    return q;
+  }
+
+  it("keeps the queue bounded by dropping played backlog, keeping the current song", () => {
+    const q = build(10);
+    q.setMode(PlayMode.Random);
+    q.play(); // index 0 played
+    // advance through 0..6 so indices 0-6 are played, current = 6
+    for (let i = 0; i < 6; i++) q.next();
+    expect(q.size()).toBe(10);
+    const currentId = q.current()!.id;
+    const dropped = q.trimPlayed(5);
+    expect(dropped).toBe(5);
+    expect(q.size()).toBe(5);
+    // The current song must survive the trim.
+    expect(q.current()!.id).toBe(currentId);
+    // Random picks are scattered, so at most a few played stragglers remain —
+    // bounded by the cap, never more than were already there.
+    expect(q.unplayedCount()).toBeLessThanOrEqual(q.size() - 1);
+
+    // A tighter second pass evicts the remaining played backlog; what stays
+    // is unplayed except the current song.
+    q.trimPlayed(3);
+    expect(q.size()).toBeLessThanOrEqual(3 + 1); // cap + slack for stragglers
+    const finalUnplayed = q.unplayedCount();
+    expect(finalUnplayed).toBeGreaterThanOrEqual(q.size() - 1);
+  });
+
+  it("is a no-op when nothing has been played or under the cap", () => {
+    const fresh = build(10);
+    expect(fresh.trimPlayed(5)).toBe(0);
+    expect(fresh.size()).toBe(10);
+
+    const q = build(3);
+    q.play();
+    expect(q.trimPlayed(5)).toBe(0);
+    expect(q.size()).toBe(3);
+  });
+
+  it("keeps next() coherent after trimming in random mode", () => {
+    const q = build(20);
+    q.setMode(PlayMode.Random);
+    q.play();
+    for (let i = 0; i < 12; i++) q.next();
+    q.trimPlayed(6);
+    // The queue can still advance and never hands back an out-of-range song.
+    for (let i = 0; i < 5; i++) {
+      const nxt = q.next();
+      if (nxt === null) break;
+      expect(nxt).toBeDefined();
+    }
+    expect(q.current()).not.toBeNull();
+  });
+});

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, promises as fsp } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -327,7 +327,10 @@ export class LocalMusicProvider implements MusicProvider {
     const id = crypto.randomUUID();
     const isVideo = VIDEO_EXTENSIONS.has(ext);
     let filePath = path.join(this.uploadDir, `${id}${ext}`);
-    writeFileSync(filePath, input.buffer);
+    // Async write (audit PERF-04): a 500MB writeFileSync froze the event loop
+    // for seconds on slow disks, stalling the 20ms audio frame loop (audible
+    // stutter on TS) for every player. uploadAudio is already async.
+    await fsp.writeFile(filePath, input.buffer);
 
     let probe: MediaProbe;
     try {

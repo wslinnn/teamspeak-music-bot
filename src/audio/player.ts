@@ -75,6 +75,10 @@ export function cleanupTempDir(dir: string): void {
 
 export function buildFfmpegArgs(url: string, seekSeconds: number): string[] {
   const args: string[] = [];
+  // stderr is piped but only drained into a small tail buffer; without
+  // -nostats ffmpeg would keep emitting progress lines (~200 B/s) and fill the
+  // OS pipe buffer after a few minutes, blocking the whole process mid-track.
+  args.push("-nostats", "-loglevel", "error");
   const isHttp = /^https?:\/\//i.test(url);
 
   if (isHttp && (url.includes("bilivideo") || url.includes("bilibili"))) {
@@ -258,12 +262,19 @@ export class AudioPlayer extends EventEmitter {
       this.logger.debug({ pid: currentPid, sessionId: currentSessionId }, "FFmpeg spawned");
     }
 
+    // Always drain stderr: an unread pipe fills up after a few minutes of
+    // output and blocks ffmpeg mid-track. We keep a small tail for diagnostics.
+    let stderrTail = "";
+    this.ffmpeg.stderr!.on("data", (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-500);
+    });
+
     this.ffmpeg.stdout!.on("data", (chunk: Buffer) => {
       // 2. 严格校验 sessionId，防止老进程的数据混入新播放请求 （
       if (this.sessionId !== currentSessionId) {
         return;
       }
-      
+
       this.pcmBuffer = Buffer.concat([this.pcmBuffer, chunk]);
       if (this.pcmBuffer.length > AudioPlayer.BUFFER_HIGH_WATER && !this.ffmpegPaused && this.ffmpeg?.stdout) {
         this.ffmpeg.stdout.pause();
@@ -277,6 +288,8 @@ export class AudioPlayer extends EventEmitter {
       // 同会话退出（自然播完/崩溃）才是需要关注的信号
       if (this.sessionId !== currentSessionId) {
         this.logger.debug({ pid: currentPid, code, signal }, "FFmpeg exited (superseded by new session)");
+      } else if (code !== 0 && stderrTail) {
+        this.logger.warn({ pid: currentPid, code, signal, stderr: stderrTail }, "FFmpeg exited with an error");
       } else {
         this.logger.info({ pid: currentPid, code, signal }, "FFmpeg exited");
       }
@@ -393,6 +406,13 @@ export class AudioPlayer extends EventEmitter {
     }
     const tempDirToCleanup = this.currentTempDir;
 
+    // Always drain stderr: an unread pipe fills up after a few minutes of
+    // output and blocks ffmpeg mid-track. We keep a small tail for diagnostics.
+    let stderrTail = "";
+    this.ffmpeg.stderr!.on("data", (chunk: Buffer) => {
+      stderrTail = (stderrTail + chunk.toString()).slice(-500);
+    });
+
     this.ffmpeg.stdout!.on("data", (chunk: Buffer) => {
       if (this.sessionId !== sessionId) return;
       this.pcmBuffer = Buffer.concat([this.pcmBuffer, chunk]);
@@ -406,6 +426,8 @@ export class AudioPlayer extends EventEmitter {
       if (currentPid) globalActivePids.delete(currentPid);
       if (this.sessionId !== sessionId) {
         this.logger.debug({ pid: currentPid, code, signal }, "FFmpeg exited (superseded by new session)");
+      } else if (code !== 0 && stderrTail) {
+        this.logger.warn({ pid: currentPid, code, signal, stderr: stderrTail }, "FFmpeg exited with an error");
       } else {
         this.logger.info({ pid: currentPid, code, signal }, "FFmpeg exited");
       }

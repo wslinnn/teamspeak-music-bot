@@ -18,7 +18,14 @@ export const useFavoritesStore = defineStore('favorites', () => {
   const favorites = ref<Favorite[]>([]);
   const loading = ref(false);
 
+  // 审计 PERF-10：本地点收藏后 fetchFavorites() 与后端 favoritesChanged
+  // 广播触发的 handleWsUpdate() 会背靠背各拉一次全量列表。500ms 去重窗口
+  // 把回声折叠掉；窗口内真实变更丢失的风险由下一次任意拉取兜底。
+  let lastFetchAt = 0;
+
   async function fetchFavorites() {
+    if (Date.now() - lastFetchAt < 500) return;
+    lastFetchAt = Date.now();
     loading.value = true;
     try {
       const res = await http.get('/api/song-favorites');

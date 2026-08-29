@@ -426,8 +426,8 @@ onMounted(async () => {
   if (query.value) doSearch();
   // 拉取启用音源驱动标签；失败（旧后端/网络）退回主流四源，不阻塞搜索
   try {
-    const res = await http.get('/api/music/providers');
-    enabledProviders.value = res.data.enabled ?? ['netease', 'qq', 'bilibili', 'youtube'];
+    // 审计 PERF-10：改走 store 的共享缓存，不再每次进入页面重复拉取
+    enabledProviders.value = await store.fetchEnabledProviders();
   } catch {
     enabledProviders.value = ['netease', 'qq', 'bilibili', 'youtube'];
   }

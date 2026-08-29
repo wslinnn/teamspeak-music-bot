@@ -19,8 +19,10 @@ export function createLogger(logDir?: string): Logger {
         level: "info",
       },
       {
-        target: "pino/file",
-        options: { destination: join(logDir, "bot.log"), mkdir: true },
+        // Audit PERF-09: roll by size instead of appending forever — a 24/7
+        // FM instance otherwise grows bot.log unbounded. Keep 1 rotated file.
+        target: "pino-roll",
+        options: { file: join(logDir, "bot.log"), size: "50m", roll: 1, mkdir: true },
         level: "debug",
       },
     ],

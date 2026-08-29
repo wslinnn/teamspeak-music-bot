@@ -116,8 +116,18 @@ async function handleJoinChannel(channelId: string) {
 
 function startPolling() {
   if (pollTimer) return;
+  // 审计 PERF-10：抽屉开着但页面在后台时不再每 5s 全量重建树
+  if (document.hidden) return;
   fetchTree();
   pollTimer = setInterval(fetchTree, 5000);
+}
+
+function onVisibilityChange() {
+  if (document.hidden) {
+    stopPolling();
+  } else if (props.modelValue) {
+    startPolling();
+  }
 }
 
 function stopPolling() {
@@ -137,11 +147,13 @@ watch(() => props.modelValue, (open) => {
 
 onMounted(() => {
   window.addEventListener('resize', updateIsMobile);
+  document.addEventListener('visibilitychange', onVisibilityChange);
 });
 
 onUnmounted(() => {
   stopPolling();
   window.removeEventListener('resize', updateIsMobile);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 </script>
 

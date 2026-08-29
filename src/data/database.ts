@@ -292,6 +292,20 @@ function prunePlayHistory(db: Database.Database): void {
     .run(PLAY_HISTORY_RETENTION_ROWS);
 }
 
+/** 审计日志保留上限（审计 PERF-09）：管理操作频率低但无限增长，
+ *  与 play_history 同样在启动时裁掉最旧的溢出行。 */
+const USER_AUDIT_RETENTION_ROWS = 10_000;
+
+function pruneUserAudit(db: Database.Database): void {
+  db
+    .prepare(
+      `DELETE FROM user_audit WHERE id <= (
+         SELECT id FROM user_audit ORDER BY id DESC LIMIT 1 OFFSET ?
+       )`,
+    )
+    .run(USER_AUDIT_RETENTION_ROWS);
+}
+
 function initTables(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS play_history (
@@ -479,6 +493,7 @@ export function createDatabase(dbPath: string): BotDatabase {
   initTables(db);
   migrateSchema(db);
   prunePlayHistory(db);
+  pruneUserAudit(db);
   backfillMemberPermissions(db);
   ensureGuestUser(db);
 
@@ -837,10 +852,20 @@ export function createDatabase(dbPath: string): BotDatabase {
     },
 
     saveQueueState(state) {
+      // Clamp to MAX_QUEUE_SONGS (audit PERF-02): keep the TAIL — it holds the
+      // current + upcoming songs; the head is played history — and re-base
+      // currentIndex onto the truncated array.
+      let songs = state.songs;
+      let currentIndex = state.currentIndex;
+      if (songs.length > MAX_QUEUE_SONGS) {
+        const cut = songs.length - MAX_QUEUE_SONGS;
+        songs = songs.slice(cut);
+        currentIndex = Math.max(0, currentIndex - cut);
+      }
       upsertQueueState.run({
         botId: state.botId,
-        songs: JSON.stringify(state.songs),
-        currentIndex: state.currentIndex,
+        songs: JSON.stringify(songs),
+        currentIndex,
         mode: state.mode,
         isFmMode: state.isFmMode ? 1 : 0,
         fmPlatform: state.fmPlatform,

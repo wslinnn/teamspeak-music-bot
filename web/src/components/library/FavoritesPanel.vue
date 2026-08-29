@@ -114,13 +114,14 @@ async function addAllToQueue() {
   let ok = 0;
   try {
     for (const item of items) {
-      try {
-        await playerStore.addSong(toSong(item));
+      // PERF-08：静默提交，整批只拉一次队列（原来每首 add + fetchQueue
+      // = 最多 200 个串行请求）
+      if (await playerStore.addSongSilent(toSong(item))) {
         ok += 1;
-      } catch {
-        // 单首失败（下架/版权等）不中断整批
       }
+      // 单首失败（下架/版权等）不中断整批
     }
+    if (ok > 0) await playerStore.fetchQueue();
   } finally {
     bulkAdding.value = false;
   }

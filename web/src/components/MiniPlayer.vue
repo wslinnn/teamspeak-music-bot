@@ -201,7 +201,35 @@ function updateProgress() {
       ? Math.min((mobileElapsed.value / duration) * 100, 100)
       : 0;
   }
-  rafId = requestAnimationFrame(updateProgress);
+  // 审计 PERF-07：与桌面 Player 相同的门控——只在播放中续帧，暂停/无歌
+  // 不再空转 60fps；页面隐藏时降级为 250ms 轮询（onVisibilityChange）。
+  if (store.isPlaying) {
+    rafId = requestAnimationFrame(updateProgress);
+  } else {
+    rafId = null;
+  }
+}
+
+let backupTimer: ReturnType<typeof setInterval> | null = null;
+
+function onVisibilityChange() {
+  if (document.hidden) {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (!backupTimer) {
+      backupTimer = setInterval(updateProgress, 250);
+    }
+  } else {
+    if (backupTimer) {
+      clearInterval(backupTimer);
+      backupTimer = null;
+    }
+    if (store.isPlaying && rafId === null) {
+      rafId = requestAnimationFrame(updateProgress);
+    }
+  }
 }
 
 // ── 点按/拖拽 seek（#143 等价移植）──────────────────────────────────
@@ -316,10 +344,19 @@ watch(currentSong, () => {
 
 onMounted(() => {
   rafId = requestAnimationFrame(updateProgress);
+  document.addEventListener('visibilitychange', onVisibilityChange);
 });
 
 onUnmounted(() => {
   if (rafId !== null) cancelAnimationFrame(rafId);
+  if (backupTimer) clearInterval(backupTimer);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+});
+
+watch(() => store.isPlaying, (playing) => {
+  if (playing && rafId === null && !document.hidden) {
+    rafId = requestAnimationFrame(updateProgress);
+  }
 });
 
 // ── 播放模式（与桌面 Player 同一套序列）────────────────────────────

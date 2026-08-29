@@ -77,6 +77,11 @@ export function interpolateElapsed(
   return Math.min(timing.serverElapsed + (Date.now() - timing.serverSyncTime) / 1000, maxDuration);
 }
 
+/**
+ * 审计 PERF-10：/api/music/providers 的共享缓存（见 fetchEnabledProviders）。
+ */
+let providersCache: { at: number; promise: Promise<string[]> } | null = null;
+
 export const usePlayerStore = defineStore('player', {
   state: () => ({
     bots: [] as BotStatus[],
@@ -303,13 +308,27 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    async fetchEnabledProviders() {
-      try {
-        const res = await http.get('/api/music/providers');
-        this.enabledProviders = res.data.enabled ?? [];
-      } catch {
-        // 保持空：相关区块不展示多源切换
+    /**
+     * 审计 PERF-10：providers 列表低频变化，但 Search/Library/JellyfinSections
+     * 各自挂载时都会拉一份。这里做模块级共享缓存（60s TTL、在途共享、
+     * 失败不缓存），组件统一走本 action 并拿到返回值。
+     */
+    async fetchEnabledProviders(): Promise<string[]> {
+      if (providersCache && Date.now() - providersCache.at < 60_000) {
+        this.enabledProviders = await providersCache.promise;
+        return this.enabledProviders;
       }
+      providersCache = null;
+      const promise = http
+        .get('/api/music/providers')
+        .then((res) => {
+          const enabled: string[] = res.data.enabled ?? [];
+          providersCache = { at: Date.now(), promise: Promise.resolve(enabled) };
+          return enabled;
+        })
+        .catch(() => [] as string[]); // 失败不缓存：下次进入页面重试
+      this.enabledProviders = await promise;
+      return this.enabledProviders;
     },
 
     /** 平台登录态（netease/qq/kugou）；游客无权访问，保持空 */
@@ -374,7 +393,8 @@ export const usePlayerStore = defineStore('player', {
         }
         await this.playSong(songs[0]);
         for (const song of songs.slice(1)) {
-          await this.addSong(song);
+          // PERF-08：静默入队，整批只在最后刷一次队列
+          await this.addSongSilent(song);
         }
         toast.success(`已加入 ${songs.length} 首`);
         this.fetchQueue();
@@ -576,6 +596,18 @@ export const usePlayerStore = defineStore('player', {
         toast.success(`已添加到队列: ${song.name}`);
       } catch {
         toast.error('添加到队列失败');
+      }
+    },
+
+    /** 审计 PERF-08：批量入队用的静默版——不逐首拉队列、不逐首弹 toast，
+     *  由调用方在整批结束后统一 fetchQueue() 一次。返回是否成功。 */
+    async addSongSilent(song: Song): Promise<boolean> {
+      if (!this.activeBotId) return false;
+      try {
+        await http.post(`/api/player/${this.activeBotId}/add-song`, { song });
+        return true;
+      } catch {
+        return false;
       }
     },
 

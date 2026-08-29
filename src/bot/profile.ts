@@ -33,6 +33,10 @@ export class BotProfileManager {
    */
   private currentSong: QueuedSong | null = null;
 
+  /** Audit PERF-05: cover URL whose avatar is currently live on the TS
+   *  server. Same URL → skip the download+upload round-trip entirely. */
+  private lastAvatarUrl: string | null = null;
+
   /** Per-feature permission-denied flags. Reset on reconnect. */
   private permDenied = {
     avatar: false,
@@ -134,6 +138,7 @@ export class BotProfileManager {
   onConnect(): void {
     this.generation++;
     this.currentSong = null;
+    this.lastAvatarUrl = null;
     this.permDenied = {
       avatar: false,
       description: false,
@@ -184,6 +189,10 @@ export class BotProfileManager {
       }
       // Request a thumbnail from the CDN to stay within TS3's avatar size limit.
       const thumbUrl = this.thumbnailUrl(coverUrl);
+      // Audit PERF-05: unchanged cover → the avatar is already on the TS
+      // server; skipping avoids re-downloading AND re-uploading the same
+      // image on every track (single-song / album loops).
+      if (thumbUrl === this.lastAvatarUrl) return;
       const imageBuffer = await this.downloadImage(thumbUrl);
 
       // Check generation after the slow download — bail if superseded.
@@ -202,6 +211,7 @@ export class BotProfileManager {
       // full-client file transfer can silently hang.
       const start = Date.now();
       await this.withTimeout(this.doAvatarUpload(imageBuffer), FILE_TRANSFER_TIMEOUT_MS);
+      this.lastAvatarUrl = thumbUrl;
       this.logger.info(
         { bytes: imageBuffer.length, elapsedMs: Date.now() - start },
         "Avatar updated",
@@ -235,6 +245,7 @@ export class BotProfileManager {
   }
 
   private async clearAvatar(gen: number): Promise<void> {
+    this.lastAvatarUrl = null;
     if (this.customAvatar && this.customAvatar.length > 0) {
       await this.applyIdleAvatar(gen);
       return;

@@ -46,6 +46,9 @@ export const useAuthStore = defineStore('auth', () => {
   function ensurePollStarted(): void {
     if (pollTimer !== null) return;
     pollTimer = setInterval(() => {
+      // 审计 PERF-10：后台标签页跳过刷新（浏览器已把后台定时器钳到
+      // ≥1 次/分，这里显式跳过避免无谓请求）
+      if (document.hidden) return;
       if (user.value !== null) {
         refreshMe().catch(() => {});
       }

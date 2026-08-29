@@ -7,6 +7,7 @@ import {
 } from "../ts-protocol/client.js";
 import { AudioPlayer } from "../audio/player.js";
 import { PlayQueue, PlayMode, type QueuedSong } from "../audio/queue.js";
+import { UserFacingError } from "../errors.js";
 import type { MusicProvider, Platform, Song } from "../music/provider.js";
 import {
   parseCommand,
@@ -57,6 +58,10 @@ const PLAY_MODE_BY_VALUE: Record<string, PlayMode> = {
 // Keep a disconnected bot id classified as managed briefly so UDP packets
 // already in flight cannot make another local bot duck during teardown.
 const MANAGED_VOICE_CLIENT_RELEASE_GRACE_MS = 1_000;
+
+/** Audit PERF-02: FM 队列长度上限。超过后在下一次补给时丢掉已播条目，
+ *  避免 24/7 FM 场景下队列数组无限增长。 */
+const FM_QUEUE_MAX = 500;
 
 /** Fallback message when Spotify audio can't be served (backend unavailable
  *  OR a per-track playTrack failure against a dead/failed sidecar). */
@@ -934,7 +939,7 @@ export class BotInstance extends EventEmitter {
       "artist",
     ]);
     if (!this.connected && AUDIO_COMMANDS.has(cmd.name)) {
-      throw new Error("Bot is not connected to TeamSpeak");
+      throw new UserFacingError("Bot is not connected to TeamSpeak");
     }
     // Commands that mutate the queue or playback run under the same playGate
     // the WebUI's runExclusive routes use — otherwise a chat !play can
@@ -1043,7 +1048,7 @@ export class BotInstance extends EventEmitter {
   /** Friendly gate for user-selected platforms (flags / URLs / REST params). */
   assertProviderEnabled(platform: Platform): void {
     if (!isProviderEnabled(this.config, platform)) {
-      throw new Error(
+      throw new UserFacingError(
         `音源未启用：${platform}（provider disabled — 需在配置 enabledProviders 中开启）`,
       );
     }
@@ -1236,7 +1241,11 @@ export class BotInstance extends EventEmitter {
           requestedBy: song.requestedBy,
           duration: song.duration,
         });
-        await this.syncProfileToSong(song);
+        // Audit PERF-05: fire-and-forget — the profile manager's generation
+        // counter makes concurrent updates safe, and holding the play gate
+        // for avatar download+upload (~14s worst case) stalled every queued
+        // Web command.
+        void this.syncProfileToSong(song);
         this.emit("stateChange");
         return true;
       }
@@ -1271,7 +1280,8 @@ export class BotInstance extends EventEmitter {
         duration: song.duration,
       });
       // Keep TeamSpeak-side profile updates on the same path for play/next/FM.
-      await this.syncProfileToSong(song);
+      // Fire-and-forget (audit PERF-05): do not hold the play gate for it.
+      void this.syncProfileToSong(song);
       this.emit("stateChange");
       return true;
     } catch (err) {
@@ -1881,6 +1891,13 @@ export class BotInstance extends EventEmitter {
       for (const song of songs) {
         this.queue.add(this.withRequester({ ...song, platform: provider.platform }, this.fmRequesterName));
       }
+      // Audit PERF-02: FM appends on every track and next() never removes, so
+      // a 24/7 FM session grew the array unbounded. Drop played backlog once
+      // it passes FM_QUEUE_MAX.
+      const dropped = this.queue.trimPlayed(FM_QUEUE_MAX);
+      if (dropped > 0) {
+        this.logger.debug({ dropped }, "FM queue trimmed");
+      }
       this.logger.debug({ count: songs.length, platform: provider.platform }, "FM queue refilled");
     } catch (err) {
       this.logger.error({ err }, "Failed to refill FM queue");
@@ -2277,7 +2294,7 @@ export class BotInstance extends EventEmitter {
     botClientId: string;
   }> {
     if (!this.connected) {
-      throw new Error("Bot is not connected");
+      throw new UserFacingError("Bot is not connected");
     }
     const [channels, clients] = await Promise.all([
       this.tsClient.getChannelList(),
@@ -2309,8 +2326,8 @@ export class BotInstance extends EventEmitter {
 
   /** Fork: move to a channel by numeric ID (server-tree one-click move). */
   async joinChannelById(channelId: string, password?: string): Promise<void> {
-    if (!this.connected) throw new Error("Bot is not connected");
-    if (!/^\d+$/.test(channelId)) throw new Error("Invalid channel ID");
+    if (!this.connected) throw new UserFacingError("Bot is not connected");
+    if (!/^\d+$/.test(channelId)) throw new UserFacingError("Invalid channel ID");
     await this.tsClient.joinChannelById(BigInt(channelId), password);
   }
 }

@@ -98,6 +98,8 @@ export function useWebSocket() {
             store.updateBotStatus(data.botId, data.status as any);
             if (Array.isArray(data.queue)) {
               store.setQueue(data.botId, data.queue as any);
+            } else if (data.queueUnchanged) {
+              // 后端队列签名未变（审计 PERF-03）：保留本地队列，不重复拉取
             } else {
               store.fetchQueueForBot(data.botId);
             }

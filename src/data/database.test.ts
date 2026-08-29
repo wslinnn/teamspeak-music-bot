@@ -339,6 +339,17 @@ describe("database", () => {
       expect(botDb.getQueueState("b1")).toBeNull();
     });
 
+    it("clamps oversized snapshots to MAX_QUEUE_SONGS keeping the tail (audit PERF-02)", () => {
+      const big = Array.from({ length: 1500 }, (_, i) => sq("s" + i));
+      botDb.saveQueueState({ botId: "b3", songs: big, currentIndex: 1499, mode: "random", isFmMode: true, fmPlatform: "netease", wasPlaying: true });
+      const st = botDb.getQueueState("b3")!;
+      expect(st.songs.length).toBe(1000);
+      // Tail kept: the last song id is preserved.
+      expect(st.songs[999].id).toBe("s1499");
+      // currentIndex re-based onto the truncated array (last song stays last).
+      expect(st.currentIndex).toBe(999);
+    });
+
     it("round-trips FM flags and degrades a corrupt blob", () => {
       botDb.saveQueueState({ botId: "b2", songs: [sq("a")], currentIndex: 0, mode: "random", isFmMode: true, fmPlatform: "qq", wasPlaying: true });
       const st = botDb.getQueueState("b2")!;

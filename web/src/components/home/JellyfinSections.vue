@@ -115,8 +115,8 @@ const genres = ref<GenreItem[]>([]);
 
 onMounted(async () => {
   try {
-    const res = await http.get('/api/music/providers');
-    jellyfinEnabled.value = (res.data.enabled ?? []).includes('jellyfin');
+    // 审计 PERF-10：改走 store 的共享缓存
+    jellyfinEnabled.value = (await store.fetchEnabledProviders()).includes('jellyfin');
   } catch {
     return;
   }

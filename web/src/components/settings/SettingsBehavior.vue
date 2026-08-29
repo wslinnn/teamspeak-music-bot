@@ -111,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch, onMounted } from 'vue';
+import { reactive, ref, watch, onMounted, onUnmounted } from 'vue';
 import { Icon } from '@iconify/vue';
 import { http } from '../../utils/http';
 import { useToast } from '../../composables/useToast';
@@ -167,6 +167,14 @@ watch(form, () => {
   if (!loaded.value) return;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(persist, 500);
+});
+
+// 审计 PERF-10：卸载时丢弃在途的防抖保存，避免离开页面后弹错误 toast
+onUnmounted(() => {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
 });
 
 function snapshot(): string {

@@ -25,7 +25,7 @@
           我的收藏
           <span class="text-sm font-medium text-text-tertiary">{{ store.favoritedPlaylists.length }}</span>
         </h2>
-        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <div class="cv-grid grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           <CoverCard
             v-for="fav in store.favoritedPlaylists"
             :key="fav.id"
@@ -57,7 +57,7 @@
           <div v-for="n in 5" :key="n" class="aspect-square rounded-[10px] bg-surface-card animate-pulse" />
         </div>
         <EmptyState v-else-if="playlists.length === 0" :message="`未获取到${getProviderLabel(activeSource)}歌单（可能需要先在设置里登录账号）`" icon="mdi:playlist-music-outline" />
-        <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <div v-else class="cv-grid grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           <CoverCard
             v-for="pl in playlists"
             :key="pl.id"
@@ -151,11 +151,20 @@ async function loadPlaylists() {
 onMounted(async () => {
   store.fetchFavoritedPlaylists();
   try {
-    const res = await http.get('/api/music/providers');
-    enabledProviders.value = res.data.enabled ?? [];
+    // 审计 PERF-10：改走 store 的共享缓存
+    enabledProviders.value = await store.fetchEnabledProviders();
     if (playlistSources.value.length) await loadPlaylists();
   } catch {
     // providers 拉不到时我的歌单区块隐藏
   }
 });
 </script>
+
+<style scoped>
+/* 审计 PERF-10：跳出视口的卡片不参与渲染/布局（同 Playlist.vue 的做法）。
+ * 老账号歌单可达数百个，长尾滚动全量布局代价高。 */
+.cv-grid > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+</style>
