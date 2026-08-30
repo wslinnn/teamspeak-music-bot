@@ -107,9 +107,13 @@ export function buildFfmpegArgs(url: string, seekSeconds: number): string[] {
       "-reconnect_on_http_error", "4xx,5xx",
     );
   }
+  // 本地文件：输入侧 seek（容器/格式自带索引，毫秒级出流，不产生解码丢弃
+  // 空窗）；http 仍用输出侧（上游 #154：兼容拒绝 Range/keyframe seek 的 CDN）
+  const isLocal = !isHttp;
+  if (isLocal && seekSeconds > 0) args.push("-ss", String(seekSeconds));
   args.push("-i", url);
   // Output-side seek (after -i): works on CDNs that reject Range/keyframe seeks (NetEase music.126.net).
-  if (seekSeconds > 0) args.push("-ss", String(seekSeconds));
+  if (isHttp && seekSeconds > 0) args.push("-ss", String(seekSeconds));
   args.push("-f", "s16le", "-ar", "48000", "-ac", "2", "-acodec", "pcm_s16le", "-");
 
   return args;
@@ -203,6 +207,17 @@ export class AudioPlayer extends EventEmitter {
   private static readonly MAX_STALL_ATTEMPTS = 3000;
   private currentSongDuration = 0; // 当前歌曲总时长（秒）
 
+  // --- 过渡静音帧 ---
+  // 上游在暂停/seek 时让语音包流原地断流，TeamSpeak 客户端对该断流的
+  // 丢失隐藏/缓冲重同步会产生爆音。这里保持时间线连续：暂停=末 5 帧
+  // （100ms）淡出 + 0.5s 静音尾后停止发包；恢复/新会话=首 5 帧淡入；
+  // seek/起播空窗由静音帧补位。看门狗计数不变，ffmpeg 真死仍照常切歌。
+  private static readonly FADE_FRAMES = 5; // 淡入/淡出帧数（每帧 20ms）
+  private static readonly PAUSE_SILENCE_MS = 500;
+  private fadeInRemaining = 0;
+  private fadeOutRemaining = 0;
+  private pausedAt = 0;
+
   // --- External PCM mode (Stage 2: go-librespot Spotify sidecar) ---
   // When true, PCM arrives from a long-lived external Readable instead of a
   // per-URL ffmpeg: this.ffmpeg stays null, and the underrun-driven trackEnd
@@ -238,6 +253,9 @@ export class AudioPlayer extends EventEmitter {
     this.spawnFailed = false;
     this.emptyFrameAttempts = 0;
     this.currentSongDuration = songDuration;
+    // 新会话：取消旧收尾状态，首 5 帧淡入
+    this.fadeOutRemaining = 0;
+    this.fadeInRemaining = AudioPlayer.FADE_FRAMES;
 
     if (this.consecutiveFailures >= AudioPlayer.MAX_CONSECUTIVE_FAILURES) {
       this.logger.error({ failures: this.consecutiveFailures }, "FFmpeg failures limit reached");
@@ -562,8 +580,24 @@ export class AudioPlayer extends EventEmitter {
   }
 
   stop(): void {
+    // 旧流末 5 帧淡出后同步发出（增益→0 的突发，客户端按 20ms 帧距回放）：
+    // seek/切歌不再于任意波形处硬切。必须在会话栅栏（sessionId++）之前发。
+    if (
+      !this.externalMode &&
+      (this.state === "playing" || this.fadeOutRemaining > 0)
+    ) {
+      let k = 0;
+      while (k < AudioPlayer.FADE_FRAMES && this.pcmBuffer.length >= PCM_FRAME_BYTES) {
+        const startScale = (AudioPlayer.FADE_FRAMES - k) / AudioPlayer.FADE_FRAMES;
+        const endScale = (AudioPlayer.FADE_FRAMES - k - 1) / AudioPlayer.FADE_FRAMES;
+        const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
+        this.pcmBuffer = this.pcmBuffer.subarray(PCM_FRAME_BYTES);
+        this.sendFrame(pcmFrame, startScale, endScale);
+        k++;
+      }
+    }
     // 3. 递增 ID 是最有效的逻辑“隔离墙”
-    this.sessionId++; 
+    this.sessionId++;
     this.frameLoopRunning = false;
     
     // 立即清空缓冲区，确保切歌瞬间静音 （
@@ -654,7 +688,30 @@ export class AudioPlayer extends EventEmitter {
       if (loopSessionId !== this.sessionId || !this.frameLoopRunning) return;
 
       if (this.state === "playing") this.sendNextFrame();
-      else if (this.state === "paused") this.nextFrameTime = performance.now();
+      else if (this.state === "paused") {
+        // 末 5 帧淡出 + 0.5s 静音尾，随后停止发包（外部模式由 sidecar 管理）
+        if (this.fadeOutRemaining > 0) {
+          const k = AudioPlayer.FADE_FRAMES - this.fadeOutRemaining;
+          if (!this.externalMode && this.pcmBuffer.length >= PCM_FRAME_BYTES) {
+            const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
+            this.pcmBuffer = this.pcmBuffer.subarray(PCM_FRAME_BYTES);
+            this.sendFrame(
+              pcmFrame,
+              (AudioPlayer.FADE_FRAMES - k) / AudioPlayer.FADE_FRAMES,
+              (AudioPlayer.FADE_FRAMES - k - 1) / AudioPlayer.FADE_FRAMES,
+            );
+          } else {
+            this.emitSilenceFrame(false);
+          }
+          this.fadeOutRemaining--;
+        } else if (
+          !this.externalMode &&
+          performance.now() - this.pausedAt < AudioPlayer.PAUSE_SILENCE_MS
+        ) {
+          this.emitSilenceFrame(false);
+        }
+        this.nextFrameTime = performance.now();
+      }
 
       // 检测pcmBuffer不足PCM_FRAME_BYTES导致连续循环卡死：
       // 条件1: FFmpeg仍在运行但缓冲区不足一帧，且连续多次无法获取数据
@@ -738,10 +795,10 @@ export class AudioPlayer extends EventEmitter {
 
   private sendNextFrame(): void {
     if (this.pcmBuffer.length < PCM_FRAME_BYTES) {
-      // External mode: the sidecar PCM stream is long-lived and must NOT end on
-      // a transient underrun. Emit an encoded silence frame so the 20ms voice
-      // timeline stays continuous instead of returning (which would desync TS).
-      if (this.externalMode) this.emitSilenceFrame();
+      // 欠载/seek 空窗期补静音帧，保持 20ms 语音时间线连续（直接 return
+      // 会在 TS 端留下序列空洞）。空窗不计入播放进度；看门狗在循环层照常
+      // 累计，ffmpeg 真死仍会触发 trackEnd。
+      this.emitSilenceFrame(this.externalMode);
       return;
     }
     const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
@@ -757,8 +814,26 @@ export class AudioPlayer extends EventEmitter {
       }
     }
 
+    // 会话/恢复首个 5 帧 100ms 淡入（0→自然增益），消除起播硬切
+    let startScale: number | null = null;
+    let endScale: number | null = null;
+    if (this.fadeInRemaining > 0) {
+      const k = AudioPlayer.FADE_FRAMES - this.fadeInRemaining;
+      startScale = k / AudioPlayer.FADE_FRAMES;
+      endScale = (k + 1) / AudioPlayer.FADE_FRAMES;
+      this.fadeInRemaining--;
+    }
+    this.sendFrame(pcmFrame, startScale, endScale);
+  }
+
+  /** 增益→Opus 编码→发帧（真实帧统一路径；淡入/淡出经 scale 因子注入）。 */
+  private sendFrame(
+    pcmFrame: Buffer,
+    startScale: number | null,
+    endScale: number | null,
+  ): void {
     try {
-      const adjusted = this.applyVolume(pcmFrame);
+      const adjusted = this.applyVolume(pcmFrame, startScale, endScale);
       const opusFrame = this.encoder.encode(adjusted);
       this.emit("frame", opusFrame);
       this.framesPlayed++;
@@ -772,23 +847,30 @@ export class AudioPlayer extends EventEmitter {
     }
   }
 
-  private emitSilenceFrame(): void {
+  /** 静音帧：桥接 seek/起播空窗与暂停静音尾。不推进播放进度（外部模式除外）。 */
+  private emitSilenceFrame(incrementPlayed = true): void {
     try {
       const opusFrame = this.encoder.encode(Buffer.alloc(PCM_FRAME_BYTES));
       this.emit("frame", opusFrame);
-      this.framesPlayed++;
+      if (incrementPlayed) this.framesPlayed++;
     } catch (err) {
       this.emit("error", err as Error);
     }
   }
 
-  private applyVolume(pcm: Buffer): Buffer {
+  private applyVolume(
+    pcm: Buffer,
+    startScale: number | null = null,
+    endScale: number | null = null,
+  ): Buffer {
     const baseFactor = volumeToFactor(this.volume);
     const now = performance.now();
     const startDuckingGain = this.duckingGainAt(now);
     const endDuckingGain = this.duckingGainAt(now + FRAME_DURATION_MS);
-    const startFactor = baseFactor * startDuckingGain;
-    const endFactor = baseFactor * endDuckingGain;
+    // 边界淡入/淡出：scale 乘子作用于自然增益（首帧 0→自然、末帧 自然→0），
+    // 乘子优先于 ducking
+    const startFactor = baseFactor * startDuckingGain * (startScale ?? 1);
+    const endFactor = baseFactor * endDuckingGain * (endScale ?? 1);
 
     if (startFactor >= 1 && endFactor >= 1) {
       return Buffer.from(pcm);
@@ -879,7 +961,16 @@ export class AudioPlayer extends EventEmitter {
       if (wasPaused) this.pause();
     }
   }
-  pause(): void { if (this.state === "playing") this.state = "paused"; }
+  pause(): void {
+    if (this.state === "playing") {
+      this.state = "paused";
+      // 末 7 帧淡出，之后 0.5s 静音尾（包流断流前平滑收尾）
+      if (!this.externalMode) {
+        this.fadeOutRemaining = AudioPlayer.FADE_FRAMES;
+        this.pausedAt = performance.now();
+      }
+    }
+  }
 
   resume(): void {
     if (this.state !== "paused") return;
@@ -894,6 +985,11 @@ export class AudioPlayer extends EventEmitter {
     }
     this.state = "playing";
     this.nextFrameTime = performance.now();
+    // 重新衔接时间线：取消淡出，恢复后首 5 帧淡入
+    if (!this.externalMode) {
+      this.fadeOutRemaining = 0;
+      this.fadeInRemaining = AudioPlayer.FADE_FRAMES;
+    }
   }
 
   resetFailures(): void { this.consecutiveFailures = 0; }

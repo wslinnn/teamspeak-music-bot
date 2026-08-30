@@ -69,6 +69,21 @@ describe("buildFfmpegArgs", () => {
     expect(args).not.toContain("-ss");
   });
 
+  it("本地文件 seek 用输入侧 -ss（before -i）；http 仍为输出侧", () => {
+    const local = buildFfmpegArgs("C:/temp/song.mp3", 42);
+    const ssIdx = local.indexOf("-ss");
+    const iIdx = local.indexOf("-i");
+    expect(ssIdx).toBeGreaterThan(-1);
+    expect(local[ssIdx + 1]).toBe("42");
+    expect(ssIdx).toBeLessThan(iIdx);
+
+    const http = buildFfmpegArgs("https://example.com/song.mp3", 42);
+    const httpSs = http.indexOf("-ss");
+    expect(httpSs).toBeGreaterThan(-1);
+    expect(http[httpSs + 1]).toBe("42");
+    expect(httpSs).toBeGreaterThan(http.indexOf("-i"));
+  });
+
   it("omits HTTP-only flags when input is a local file path", () => {
     const args = buildFfmpegArgs("C:/temp/song.mp3", 0);
     expect(args).not.toContain("-reconnect");
@@ -675,5 +690,71 @@ describe("AudioPlayer.seek — paused intent (review F3)", () => {
     expect(stateSpy).toHaveBeenCalledWith("https://x/y.mp3", 42, 0);
     expect(player.getState()).toBe("paused");
     stateSpy.mockRestore();
+  });
+});
+
+describe("AudioPlayer 过渡静音帧", () => {
+  // 直接注入私有状态驱动真实 20ms 帧循环，不 spawn ffmpeg
+  type PlayerInternals = {
+    state: string;
+    pcmBuffer: Buffer;
+    ffmpeg: unknown;
+    framesPlayed: number;
+    startFrameLoop(): void;
+  };
+  const internals = (player: AudioPlayer): PlayerInternals =>
+    player as unknown as PlayerInternals;
+
+  it("播放态欠载补静音帧（seek/起播空窗的桥接，时间线不断流）", async () => {
+    const player = new AudioPlayer(silentLogger);
+    const frames: Buffer[] = [];
+    let trackEnds = 0;
+    player.on("frame", (f) => frames.push(f));
+    player.on("trackEnd", () => trackEnds++);
+
+    const p = internals(player);
+    p.state = "playing";
+    p.pcmBuffer = Buffer.alloc(0);
+    p.ffmpeg = { stdout: { pause() {}, resume() {} } }; // 假 ffmpeg：活着但无数据
+    p.startFrameLoop();
+
+    await wait(250); // ~8-12 tick
+    player.stop();
+
+    expect(frames.length).toBeGreaterThanOrEqual(5);
+    for (let i = 1; i < frames.length; i++) {
+      expect(Buffer.compare(frames[i], frames[i - 1])).toBe(0); // 全部是同一静音帧
+    }
+    expect(trackEnds).toBe(0); // 看门狗远未到，不得误切
+  });
+
+  it("暂停：末 5 帧淡出 + 0.5s 静音尾后停止发包", async () => {
+    const player = new AudioPlayer(silentLogger);
+    const frames: Buffer[] = [];
+    player.on("frame", (f) => frames.push(f));
+
+    const p = internals(player);
+    p.state = "playing";
+    p.pcmBuffer = Buffer.concat(
+      Array.from({ length: 6 }, (_, i) => stereoPcm(1000 * (i + 1), 960)),
+    );
+    p.startFrameLoop();
+
+    await wait(70); // 消费 2-3 帧
+    const before = frames.length;
+    player.pause();
+    await wait(300); // 淡出 5 帧 + 0.5s 静音时限内
+    const during = frames.length;
+    expect(during).toBeGreaterThan(before); // 淡出/静音帧仍在发
+    // 暂停静音不计入播放进度：进度冻结
+    const playedDuring = p.framesPlayed;
+    expect(playedDuring).toBeGreaterThan(0);
+    await wait(700); // 时限（500ms）已过
+    const after = frames.length;
+    expect(after).toBeGreaterThanOrEqual(during);
+    await wait(400);
+    expect(frames.length).toBe(after); // 静音期结束后包流停止
+    expect(p.framesPlayed).toBe(playedDuring);
+    player.stop();
   });
 });
