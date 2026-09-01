@@ -28,7 +28,7 @@
 
 ## 与上游的差异
 
-本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。以下覆盖 v2.0.0（Fork 首个独立版本）与 v2.1.2（当前版）的全部差异要点。
+本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。以下覆盖 v2.0.0（Fork 首个独立版本）与 v2.1.3（当前版）的全部差异要点。
 
 **前端与体验**
 
@@ -174,7 +174,7 @@ docker-compose pull && docker-compose up -d   # 升级到最新版
 
 ```bash
 # ① 载入镜像（成功后镜像名即 tsmusicbot:latest）
-docker load -i tsmusicbot-v2.1.2-linux-amd64.tar.gz
+docker load -i tsmusicbot-v2.1.3-linux-amd64.tar.gz
 
 # ② 切到仓库的 scripts/docker 目录，用离线专用 compose 启动
 cd teamspeak-music-bot/scripts/docker
@@ -183,7 +183,7 @@ docker-compose -f docker-compose.prod.yml up -d
 
 > 仓库没法 clone 的离线服务器，把 `scripts/docker/docker-compose.prod.yml` 这一个文件单独拷过去放在任意目录也可以，`cd` 到它所在目录执行即可。
 >
-> 后续升级同理：载入新版本的 tar.gz 后重复第 ② 步的 `up -d`（需要固定版本时加 `TSMUSICBOT_IMAGE=tsmusicbot:v2.1.2`）。
+> 后续升级同理：载入新版本的 tar.gz 后重复第 ② 步的 `up -d`（需要固定版本时加 `TSMUSICBOT_IMAGE=tsmusicbot:v2.1.3`）。
 
 如果 TS3 服务器在其他机器上，编辑 `docker-compose.yml`：
 ```yaml
@@ -961,10 +961,12 @@ A：本项目内置 `/login` 限流（每 IP 每分钟 5 次），但生产部�
 
 > **Fork 各版本（v2.0.0 起）的完整差异要点已并入顶部 [与上游的差异](#与上游的差异) 章节。** 面向升级用户的注意事项：
 >
+> - **v2.1.3（依赖维护）**：`@honeybbq/teamspeak-client` 升 0.2.3（上游修复 clientEnter 频道号恒 0 的缺陷，自动暂停 / 恢复的占用判定更精准）；清理上游遗留的未使用依赖。**无配置变化与破坏性改动**，Docker 部署照常拉取即可
+>
 > - **v2.1.2（同步上游 v1.13.2）：Node 20 不再支持**，引擎要求 `^22.12 || >=24`（better-sqlite3 12.10.0 起不再发布 Node 20 ABI 的预编译包）。源码部署需先安装 Node 22 LTS 并**重跑 `setup.bat` / `setup.sh`**（原生模块必须按新 ABI 重新安装）；**Docker 部署无任何操作**（镜像本就是 node:22）。同时吸收上游安装脚本加固：setup 阶段控制台写入失败不再中断安装
 > - **v2.1.1（播放转场听感优化）**：无配置变化与破坏性改动
 > - **游客模式默认权限收紧（v2.1.0 安全加固）**：8 项游客开关现默认**全部关闭**——此前「添加到队列末尾」默认开启，未显式配置过的部署升级后游客将无法加歌，请在 设置 → 游客模式 按需重新放开
-> - 源码部署拉取后重新构建即可；**Docker 部署只需 `docker-compose pull && docker-compose up -d`**（GHCR 已发布 `2.1.2` / `latest` 多架构镜像）；移动端浏览器若行为异常请强刷一次（Service Worker 缓存旧资源）
+> - 源码部署拉取后重新构建即可；**Docker 部署只需 `docker-compose pull && docker-compose up -d`**（GHCR 已发布 `2.1.3` / `latest` 多架构镜像）；移动端浏览器若行为异常请强刷一次（Service Worker 缓存旧资源）
 
 ### v1.13.0：本地视频上传播放 / 头像上传时机
 
