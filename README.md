@@ -61,6 +61,7 @@
 - **安全批次（v2.0.0）** — Jellyfin 封面经服务端代理（凭据不下发客户端）、机器人密码只写不回显、播放地址 scheme 白名单、本地上传串行化、搜索限流、登录时序等化、配置与数据库文件 0600（完整清单见 [docs/code-review-2026-08-24.md](docs/code-review-2026-08-24.md)）
 - **安全批次（v2.1.0）** — 内嵌网易云 API 绑定 127.0.0.1、yt-dlp 歌单 URL 域名白名单（堵 SSRF）、已存队列补 bot 级访问控制、WS 广播按权限范围过滤、登录限流 IP+用户名双维键控、**游客默认权限全部关闭**、54 处错误响应不再回显内部异常、登出 / 改密即时吊销 WS 会话、补齐安全响应头
 - **性能与依赖（v2.1.0）** — 依赖漏洞升级；FFmpeg stderr 消费（修复长歌中途卡死）、FM / 24x7 播放队列裁剪防无限膨胀、上传写盘异步化、头像更新不占播放闸、状态广播带队列签名省流量、前端空转帧率与批量请求 N+1 治理、日志滚动
+- **依赖瘦身** — 清理上游遗留的未使用依赖（`ts3-nodejs-library`、`chalk`、`koa-bodyparser`、`koa-static`、`yt-dlp-wrap`），安装体积与供应链面同步减小
 - **CI** — push / PR 全量测试 + 构建；actions 固定官方 tag SHA
 
 **发版运维**
@@ -577,7 +578,7 @@ teamspeak-music-bot/
 | 层级 | 技术 |
 |------|------|
 | **运行时** | Node.js 22 LTS（推荐）, TypeScript 5 |
-| **后端框架** | Express 4, WebSocket (ws) |
+| **后端框架** | Express 5, WebSocket (ws) |
 | **数据库** | better-sqlite3 (SQLite) |
 | **音频处理** | FFmpeg (ffmpeg-static 内置), @discordjs/opus |
 | **TS 协议** | @honeybbq/teamspeak-client（完整客户端协议）+ 自研 TS6 协议适配层 |

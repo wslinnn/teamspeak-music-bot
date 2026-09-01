@@ -26,19 +26,15 @@
     "axios": "^1.14.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
-    "chalk": "^5.6.2",
     "cookie-parser": "^1.4.7",
     "express": "^5.2.1",
     "ffmpeg-static": "^5.3.0",
     "koa": "^3.2.0",
-    "koa-bodyparser": "^4.4.1",
-    "koa-static": "^5.0.0",
     "NeteaseCloudMusicApi": "~4.32.0",
     "pino": "^10.3.1",
     "pino-roll": "^4.0.0",
     "tweetnacl": "^1.0.3",
-    "ws": "^8.20.0",
-    "yt-dlp-wrap": "^2.3.12"
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
