@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { createDatabase, type BotDatabase } from "../../data/database.js";
 import { createUserStore } from "../../data/users.js";
 import { createSessionStore } from "../../data/sessions.js";
+import { createClientTokenStore } from "../../data/client-tokens.js";
 import { createAvatarStore } from "../../data/avatars.js";
 import { createRequireAuth } from "../middleware/requireAuth.js";
 import { createPermissionStore } from "../../data/permissions.js";
@@ -69,7 +70,7 @@ describe("bot router /settings", () => {
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use(
       "/api/bot",
       createBotRouter(fakeManager, config, configPath, pino({ level: "silent" }), botDb, avatarStore),
@@ -458,7 +459,7 @@ describe("bot router /settings applies spotify creds to the live OAuth (I2)", ()
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use(
       "/api/bot",
       createBotRouter(fakeManager, config, configPath, pino({ level: "silent" }), botDb, avatarStore, undefined, fakeOAuth),
@@ -546,7 +547,7 @@ describe("bot router /settings refreshes the Web API search provider creds (R2-4
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use(
       "/api/bot",
       createBotRouter(fakeManager, config, configPath, pino({ level: "silent" }), botDb, avatarStore, undefined, fakeOAuth, fakeProvider),
@@ -844,7 +845,7 @@ describe("bot router /:id/config — password masking (review S3)", () => {
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use("/api/bot", createBotRouter(fakeManager, getDefaultConfig(), "/tmp/none.json", pino({ level: "silent" }), botDb, createAvatarStore(tmpdir())));
     seedBot();
   });
@@ -909,7 +910,7 @@ describe("bot router GET /settings — platform block visibility (review S8)", (
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, perms, () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), perms, () => getDefaultConfig().guestMode));
     app.use("/api/bot", createBotRouter({ getAllBots: () => [] } as unknown as BotManager, getDefaultConfig(), "/tmp/none.json", pino({ level: "silent" }), botDb, createAvatarStore(tmpdir())));
     (app as any).__cookies = { admin: mk(admin), plain: mk(plain), plat: mk(plat) };
     void sessionFor;

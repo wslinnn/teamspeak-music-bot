@@ -363,6 +363,18 @@ function initTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_userId ON sessions(userId);
     CREATE INDEX IF NOT EXISTS idx_sessions_expiresAt ON sessions(expiresAt);
 
+    CREATE TABLE IF NOT EXISTS client_tokens (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      deviceName TEXT NOT NULL DEFAULT 'desktop',
+      createdAt INTEGER NOT NULL,
+      lastUsedAt INTEGER,
+      expiresAt INTEGER NOT NULL,
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_client_tokens_userId ON client_tokens(userId);
+
     CREATE TABLE IF NOT EXISTS user_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       timestamp INTEGER NOT NULL,

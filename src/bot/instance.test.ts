@@ -1006,15 +1006,19 @@ describe("BotInstance.seek — spotify routing (C4)", () => {
       spotifyController: { seek: vi.fn(async () => {}) },
       player: { seek: vi.fn() },
       logger: { warn: vi.fn() },
+      emit: vi.fn(),
     } as any;
   }
 
-  it("routes seek to the controller for a spotify track, converting seconds -> ms", () => {
+  it("routes seek to the controller for a spotify track, converting seconds -> ms", async () => {
     const ctx = makeSeekCtx("spotify");
     seek.call(ctx, 30); // 30 seconds
     // SpotifyController.seek is millisecond-based: 30s -> 30000ms (not 30).
     expect(ctx.spotifyController.seek).toHaveBeenCalledWith(30000);
     expect(ctx.player.seek).not.toHaveBeenCalled();
+    // The stateChange broadcast follows once the sidecar confirms the seek.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ctx.emit).toHaveBeenCalledWith("stateChange");
   });
 
   it("routes seek to the player (seconds-based) for a non-spotify track", () => {
@@ -1022,6 +1026,8 @@ describe("BotInstance.seek — spotify routing (C4)", () => {
     seek.call(ctx, 30);
     expect(ctx.player.seek).toHaveBeenCalledWith(30);
     expect(ctx.spotifyController.seek).not.toHaveBeenCalled();
+    // Seek broadcasts stateChange so WS clients converge immediately.
+    expect(ctx.emit).toHaveBeenCalledWith("stateChange");
   });
 });
 

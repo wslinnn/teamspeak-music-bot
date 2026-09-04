@@ -15,6 +15,7 @@ import { createMusicRouter } from "./api/music.js";
 import { createPlayerRouter } from "./api/player.js";
 import { createAuthRouter } from "./api/auth.js";
 import { createSessionRouter } from "./api/session.js";
+import { createClientTokenRouter } from "./api/client.js";
 import { createUsersRouter } from "./api/users.js";
 import { createAuditStore } from "../data/audit.js";
 import { createAuditRouter } from "./api/audit.js";
@@ -33,6 +34,7 @@ import {
 import { setupWebSocket } from "./websocket.js";
 import { createUserStore } from "../data/users.js";
 import { createSessionStore } from "../data/sessions.js";
+import { createClientTokenStore } from "../data/client-tokens.js";
 import { createPermissionStore } from "../data/permissions.js";
 import { createRequireAuth } from "./middleware/requireAuth.js";
 import { requireAdmin } from "./middleware/requireAdmin.js";
@@ -112,6 +114,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
 
   const users = createUserStore(options.database.db);
   const sessions = createSessionStore(options.database.db);
+  const clientTokens = createClientTokenStore(options.database.db);
   const audit = createAuditStore(options.database.db);
   const permissions = createPermissionStore(options.database.db);
 
@@ -156,18 +159,30 @@ export function createWebServer(options: WebServerOptions): WebServer {
   // can mint 1-day session rows at line speed and bloat the sessions table.
   const guestLimit = createRateLimit({ capacity: 10, refillPerSec: 10 / 60 });
   app.use("/api/session/guest", guestLimit);
+  // Client bearer-token login shares the login limiter (same bcrypt cost, and
+  // brute-forcing one route must not get a fresh bucket on the other).
+  app.use("/api/client/login", loginLimit);
 
   app.use(
     "/api/session",
     createSessionRouter(
-      users, sessions, audit, logger, permissions,
+      users, sessions, clientTokens, audit, logger, permissions,
       () => options.config.guestMode,
       (userId, exceptHash) => onSessionsRevoked(userId, exceptHash)
     )
   );
 
+  // ─── Client bearer-token routes (credentials in body / Authorization      ───
+  // header — no cookie semantics) mount before the gates, mirroring session.  ───
+  // Same no-op bridge pattern: wired to the WS hub once it exists.
+  let closeSocketsByTokenHash: (tokenHash: string) => void = () => {};
+  app.use(
+    "/api/client",
+    createClientTokenRouter(users, clientTokens, audit, logger, (hash) => closeSocketsByTokenHash(hash))
+  );
+
   // ─── Gates for everything else under /api ───────────────────────────────
-  const requireAuth = createRequireAuth(sessions, permissions, () => options.config.guestMode);
+  const requireAuth = createRequireAuth(sessions, clientTokens, permissions, () => options.config.guestMode);
   app.use("/api", csrfOriginCheck);
   app.use("/api", requireAuth);
 
@@ -269,7 +284,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   app.use(
     "/api/users",
     requireAdmin,
-    createUsersRouter(users, sessions, audit, logger, permissions, (userId, exceptHash) =>
+    createUsersRouter(users, sessions, clientTokens, audit, logger, permissions, (userId, exceptHash) =>
       onSessionsRevoked(userId, exceptHash)
     )
   );
@@ -339,13 +354,28 @@ export function createWebServer(options: WebServerOptions): WebServer {
         return;
       }
     }
-    const result = validateSessionFromHeaders(req.headers.cookie as string | undefined, sessions);
-    if (!result) {
-      // 认证失败：完成握手后以 4001 关闭（B3）。前端 useWebSocket 以 4001
-      // 判定"请重新登录"并停止重连；裸 401 拒绝只会让浏览器报 1006，前端
-      // 陷入无效重连循环、与 HTTP 401 跳转互相打架。
-      wss.handleUpgrade(req, socket, head, (ws) => ws.close(4001, "session expired"));
-      return;
+    // Bearer auth (non-browser clients, e.g. tsmb-desktop) takes precedence
+    // over the cookie path; an explicit header credential fails loudly.
+    const authHeader = req.headers.authorization;
+    let result: ReturnType<typeof validateSessionFromHeaders>;
+    let bearerHash: string | undefined;
+    if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+      const raw = authHeader.slice(7);
+      result = clientTokens.validate(raw);
+      if (!result) {
+        wss.handleUpgrade(req, socket, head, (ws) => ws.close(4001, "invalid token"));
+        return;
+      }
+      bearerHash = hashToken(raw);
+    } else {
+      result = validateSessionFromHeaders(req.headers.cookie as string | undefined, sessions);
+      if (!result) {
+        // 认证失败：完成握手后以 4001 关闭（B3）。前端 useWebSocket 以 4001
+        // 判定"请重新登录"并停止重连；裸 401 拒绝只会让浏览器报 1006，前端
+        // 陷入无效重连循环、与 HTTP 401 跳转互相打架。
+        wss.handleUpgrade(req, socket, head, (ws) => ws.close(4001, "session expired"));
+        return;
+      }
     }
     // Guest sessions are only valid while guest mode is enabled.
     if (result.role === "guest" && !options.config.guestMode.enabled) {
@@ -369,11 +399,15 @@ export function createWebServer(options: WebServerOptions): WebServer {
       w.userId = result.userId;
       w.isGuest = result.role === "guest";
       w.botScope = botScope;
-      // Audit SEC-08: remember which session this socket belongs to so a
-      // later logout/revocation can close exactly it (and spare other
-      // devices' still-valid sessions).
-      const upgradeToken = extractSessionToken(req.headers.cookie as string | undefined);
-      if (upgradeToken) w.tokenHash = hashToken(upgradeToken);
+      // Audit SEC-08: remember which credential this socket belongs to so a
+      // later logout/revocation can close exactly it (cookie sessions and
+      // client bearer tokens alike) and spare other devices' live logins.
+      if (bearerHash) {
+        w.tokenHash = bearerHash;
+      } else {
+        const upgradeToken = extractSessionToken(req.headers.cookie as string | undefined);
+        if (upgradeToken) w.tokenHash = hashToken(upgradeToken);
+      }
       wss.emit("connection", ws, req);
     });
   });
@@ -381,6 +415,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   onGuestPolicyChanged = controller.refreshGuestPolicy;
   broadcastToClients = (data) => controller.broadcast(data);
   onSessionsRevoked = (userId, exceptHash) => controller.closeUserSessions(userId, { exceptTokenHash: exceptHash });
+  closeSocketsByTokenHash = controller.closeSocketsByTokenHash;
 
   // ─── Session cleanup interval ──────────────────────────────────────────
   let cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -393,6 +428,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
           cleanupTimer = setInterval(() => {
             try {
               sessions.cleanupExpired();
+              clientTokens.cleanupExpired();
             } catch (err) {
               logger.error({ err }, "session cleanup failed");
             }

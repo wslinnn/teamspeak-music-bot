@@ -11,6 +11,7 @@ import { getDefaultConfig, loadConfig, type BotConfig } from "../../data/config.
 import { createDatabase, type BotDatabase } from "../../data/database.js";
 import { createUserStore } from "../../data/users.js";
 import { createSessionStore } from "../../data/sessions.js";
+import { createClientTokenStore } from "../../data/client-tokens.js";
 import { createPermissionStore } from "../../data/permissions.js";
 import { createRequireAuth } from "../middleware/requireAuth.js";
 import { SESSION_COOKIE_NAME } from "../auth/validateSession.js";
@@ -287,7 +288,7 @@ describe("music router POST /quality — persistence (#125)", () => {
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use(
       "/api/music",
       createMusicRouter(
@@ -375,7 +376,7 @@ describe("music router POST /local/upload — content types and size cap (#149)"
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use("/api/music", createMusicRouter(
       fakeProvider("netease"), fakeProvider("qq"), fakeProvider("bilibili"),
       pino({ level: "silent" }), local, getDefaultConfig(),
@@ -476,7 +477,7 @@ describe("music router POST /local/upload — content types and size cap (#149)"
     const c2 = `${SESSION_COOKIE_NAME}=${sessions.createSession(a2.id).token}`;
     const app2 = express();
     app2.use(cookieParser());
-    app2.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app2.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app2.use("/api/music", createMusicRouter(
       fakeProvider("netease"), fakeProvider("qq"), fakeProvider("bilibili"),
       pino({ level: "silent" }),

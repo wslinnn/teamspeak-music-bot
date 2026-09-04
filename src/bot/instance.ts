@@ -2260,11 +2260,17 @@ export class BotInstance extends EventEmitter {
     if (this.queue.current()?.platform === "spotify") {
       // The web route + AudioPlayer.seek are seconds-based, but
       // SpotifyController.seek expects milliseconds — convert here.
-      this.spotifyController.seek(seconds * 1000).catch((err) =>
-        this.logger.warn({ err }, "Spotify seek failed"));
+      this.spotifyController
+        .seek(seconds * 1000)
+        .then(() => this.emit("stateChange"))
+        .catch((err) => this.logger.warn({ err }, "Spotify seek failed"));
       return;
     }
     this.player.seek(seconds);
+    // Seek must broadcast like every other transport change: WS clients
+    // (web panel, desktop lyrics) have no other signal that playback jumped,
+    // and without this they only converge on the next poll (seconds later).
+    this.emit("stateChange");
   }
 
   getQueueManager(): PlayQueue {

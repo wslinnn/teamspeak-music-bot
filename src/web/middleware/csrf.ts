@@ -14,6 +14,13 @@ export function csrfOriginCheck(req: Request, res: Response, next: NextFunction)
     next();
     return;
   }
+  // Explicit header credentials (/api/client bearer tokens) carry no ambient
+  // browser authority — nothing for a cross-site page to auto-attach — so the
+  // origin dance does not apply. Cookie-authed requests keep the full check.
+  if (req.get("authorization")?.startsWith("Bearer ")) {
+    next();
+    return;
+  }
   const expectedHost = req.get("host");
   const originHeader = req.get("origin");
   const refererHeader = req.get("referer");

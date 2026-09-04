@@ -1,22 +1,18 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
-import bcrypt from "bcryptjs";
 import type { Logger } from "../../logger.js";
 import type { UserStore } from "../../data/users.js";
 import type { SessionStore } from "../../data/sessions.js";
+import type { ClientTokenStore } from "../../data/client-tokens.js";
 import type { AuditStore } from "../../data/audit.js";
 import { resolvePermissionContext, type PermissionStore } from "../../data/permissions.js";
 import { SESSION_TTL_MS, GUEST_SESSION_TTL_MS, hashToken } from "../../data/sessions.js";
 import { GUEST_USER_ID, GUEST_USERNAME } from "../../data/users.js";
 import type { GuestModeConfig } from "../../data/config.js";
 import { SESSION_COOKIE_NAME, validateSessionFromHeaders, extractSessionToken } from "../auth/validateSession.js";
+import { verifyLoginCredentials } from "../auth/verifyCredentials.js";
 
 const FAILED_LOGIN_DELAY_MS = 250;
-
-// Timing equalizer (review S4): a fixed bcrypt hash so the missing-user login
-// branch costs the same bcrypt compare as the existing-user branch — without
-// it, response latency reveals whether a username exists.
-const DUMMY_HASH = bcrypt.hashSync("tsmb-timing-equalizer", 12);
 
 /**
  * Soft CSRF gate for the session routes, which mount BEFORE the global
@@ -74,6 +70,7 @@ function parseTokenFromCookie(cookieHeader: string | undefined): string | null {
 export function createSessionRouter(
   users: UserStore,
   sessions: SessionStore,
+  clientTokens: ClientTokenStore,
   audit: AuditStore,
   logger: Logger,
   permissions: PermissionStore,
@@ -149,21 +146,8 @@ export function createSessionRouter(
       res.status(400).json({ error: "invalid request" });
       return;
     }
-    const user = users.findByUsername(username);
-    const ok = await users.verifyPassword(password, user ? user.passwordHash : DUMMY_HASH);
-    if (!user || !ok) {
-      await delay(FAILED_LOGIN_DELAY_MS);
-      // Audit SEC-12: record failed attempts so brute-forcing is visible in
-      // the audit trail (actor fields stay null — no verified identity yet).
-      try {
-        audit.record({
-          actorId: null, actorUsername: null,
-          targetUserId: null, targetUsername: username,
-          action: "login.failed",
-        });
-      } catch (auditErr) {
-        logger.warn({ err: auditErr, action: "login.failed" }, "audit insert failed");
-      }
+    const user = await verifyLoginCredentials(users, audit, logger, username, password);
+    if (!user) {
       res.status(401).json({ error: "invalid credentials" });
       return;
     }
@@ -246,6 +230,9 @@ export function createSessionRouter(
     await users.changePassword(u.id, newPassword);
     const currentToken = parseTokenFromCookie(req.headers.cookie);
     sessions.deleteAllForUser(u.id, currentToken ?? undefined);
+    // Client bearer tokens have no "current" to spare — all of them die with
+    // the password change (re-login on the desktop app).
+    clientTokens.deleteAllForUser(u.id);
     // Audit SEC-08: kill this user's other live WS sockets (current session
     // survives, and so does its socket).
     onSessionsRevoked?.(u.id, currentToken ? hashToken(currentToken) : undefined);
