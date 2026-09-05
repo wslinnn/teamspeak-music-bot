@@ -1,6 +1,11 @@
 # 服务端内容缓存方案（歌词 / 歌单 / 专辑 / 搜索 / 歌曲详情）
 
-状态：方案定稿，未实施。实施时按「八、提交切分」逐步落地，每步独立可回滚。
+状态：**已实施**（2026-09-05）。实现：`src/music/cache.ts`（TtlLruCache）、
+`src/music/cached-provider.ts`（withContentCache）、`src/index.ts` 接线、
+`src/web/api/music.ts` /lyrics 限流。
+实施偏差：§3.2 草稿的 `Object.create` 原型委托不可行——类实例字段
+（this.api 等）挂在实例上，原型委托会让 this 指向 wrapper 而丢字段；
+实际实现为「原型方法 bind 回原实例 + 字段描述符复制」。
 姊妹文档：tsmb-desktop `docs/lightweight-plan.md` S1（客户端侧的抖动缓解已上线，
 本文档是其标注的「建议后端缓存」的落地设计）。
 
