@@ -24,6 +24,13 @@ export interface WebSocketController {
    * password). 4001 = auth-failure close code (B3 contract).
    */
   closeUserSessions: (userId: string, opts?: { exceptTokenHash?: string }) => void;
+  /**
+   * Close exactly the sockets authenticated with one client bearer token
+   * (DELETE /api/client/session). Counterpart to closeUserSessions: there the
+   * hash marks the one session to SPARE, here it IS the match. Same 4001
+   * auth-failure close code (B3 contract).
+   */
+  closeSocketsByTokenHash: (tokenHash: string) => void;
 }
 
 export function setupWebSocket(
@@ -239,5 +246,17 @@ export function setupWebSocket(
     }
   };
 
-  return { cleanup, refreshGuestPolicy, broadcast, closeUserSessions };
+  const closeSocketsByTokenHash = (tokenHash: string): void => {
+    for (const ws of clients) {
+      const w = ws as unknown as { tokenHash?: string };
+      if (w.tokenHash !== tokenHash) continue;
+      try {
+        ws.close(4001, "session revoked");
+      } catch {
+        // socket may already be closing; ignore
+      }
+    }
+  };
+
+  return { cleanup, refreshGuestPolicy, broadcast, closeUserSessions, closeSocketsByTokenHash };
 }

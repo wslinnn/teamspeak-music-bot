@@ -6,6 +6,7 @@ import pino from "pino";
 import { createDatabase, type BotDatabase } from "../../data/database.js";
 import { createUserStore, GUEST_USER_ID, type UserStore } from "../../data/users.js";
 import { createSessionStore, type SessionStore } from "../../data/sessions.js";
+import { createClientTokenStore } from "../../data/client-tokens.js";
 import { createAuditStore, type AuditStore } from "../../data/audit.js";
 import { createPermissionStore, type PermissionStore } from "../../data/permissions.js";
 import { getDefaultConfig } from "../../data/config.js";
@@ -18,10 +19,10 @@ function makeApp(botDb: BotDatabase, users: UserStore, sessions: SessionStore) {
   app.use(express.json());
   app.use(cookieParser());
   const permissions = createPermissionStore(botDb.db);
-  const requireAuth = createRequireAuth(sessions, permissions, () => getDefaultConfig().guestMode);
+  const requireAuth = createRequireAuth(sessions, createClientTokenStore(botDb.db), permissions, () => getDefaultConfig().guestMode);
   const audit = createAuditStore(botDb.db);
   app.use("/api", requireAuth);
-  app.use("/api/users", createUsersRouter(users, sessions, audit, pino({ level: "silent" }), permissions));
+  app.use("/api/users", createUsersRouter(users, sessions, createClientTokenStore(botDb.db), audit, pino({ level: "silent" }), permissions));
   return { app, permissions, audit };
 }
 
@@ -153,10 +154,10 @@ describe("users router", () => {
     const localApp = express();
     localApp.use(express.json());
     localApp.use(cookieParser());
-    localApp.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    localApp.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     localApp.use(
       "/api/users",
-      createUsersRouter(users, sessions, brokenAudit, pino({ level: "silent" }), createPermissionStore(botDb.db))
+      createUsersRouter(users, sessions, createClientTokenStore(botDb.db), brokenAudit, pino({ level: "silent" }), createPermissionStore(botDb.db))
     );
     const res = await request(localApp)
       .post("/api/users")

@@ -6,6 +6,7 @@ import pino from "pino";
 import { createDatabase, type BotDatabase } from "../../data/database.js";
 import { createUserStore, type UserStore } from "../../data/users.js";
 import { createSessionStore, type SessionStore } from "../../data/sessions.js";
+import { createClientTokenStore } from "../../data/client-tokens.js";
 import { createAuditStore } from "../../data/audit.js";
 import { createPermissionStore } from "../../data/permissions.js";
 import { getDefaultConfig, type GuestModeConfig } from "../../data/config.js";
@@ -24,6 +25,7 @@ function makeApp(botDb: BotDatabase, users: UserStore, sessions: SessionStore) {
     createSessionRouter(
       users,
       sessions,
+      createClientTokenStore(botDb.db),
       audit,
       pino({ level: "silent" }),
       permissions,
@@ -234,7 +236,7 @@ describe("session router — guest mode", () => {
     app.use(cookieParser());
     app.use(
       "/api/session",
-      createSessionRouter(users, sessions, audit, pino({ level: "silent" }), permissions, () => guestCfg)
+      createSessionRouter(users, sessions, createClientTokenStore(botDb.db), audit, pino({ level: "silent" }), permissions, () => guestCfg)
     );
     return { app, users, sessions };
   }
@@ -295,7 +297,7 @@ describe("session router — guest mode", () => {
     app.use(cookieParser());
     app.use(
       "/api/session",
-      createSessionRouter(users, sessions, audit, pino({ level: "silent" }), permissions, () => guestCfg)
+      createSessionRouter(users, sessions, createClientTokenStore(botDb.db), audit, pino({ level: "silent" }), permissions, () => guestCfg)
     );
 
     const login = await request(app).post("/api/session/guest");

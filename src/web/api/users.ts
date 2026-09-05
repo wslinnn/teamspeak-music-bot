@@ -4,6 +4,7 @@ import type { UserStore } from "../../data/users.js";
 import { UsernameTakenError, GUEST_USER_ID } from "../../data/users.js";
 import type { SessionStore } from "../../data/sessions.js";
 import { hashToken } from "../../data/sessions.js";
+import type { ClientTokenStore } from "../../data/client-tokens.js";
 import type { AuditStore } from "../../data/audit.js";
 import { isCapability, BASIC_TIER_CAPABILITIES, type PermissionStore } from "../../data/permissions.js";
 import { extractSessionToken } from "../auth/validateSession.js";
@@ -19,6 +20,7 @@ function isValidPassword(v: unknown): v is string {
 export function createUsersRouter(
   users: UserStore,
   sessions: SessionStore,
+  clientTokens: ClientTokenStore,
   audit: AuditStore,
   logger: Logger,
   permissions: PermissionStore,
@@ -88,6 +90,7 @@ export function createUsersRouter(
     }
     // FK CASCADE removes sessions; explicit call is belt-and-suspenders
     sessions.deleteAllForUser(targetId);
+    clientTokens.deleteAllForUser(targetId);
     onSessionsRevoked?.(targetId);
     try {
       audit.record({
@@ -121,6 +124,8 @@ export function createUsersRouter(
       ? (extractSessionToken(req.headers.cookie) ?? undefined)
       : undefined;
     sessions.deleteAllForUser(targetId, exceptToken);
+    // Admin-forced reset spares no client token either.
+    clientTokens.deleteAllForUser(targetId);
     onSessionsRevoked?.(targetId, exceptToken ? hashToken(exceptToken) : undefined);
     try {
       audit.record({

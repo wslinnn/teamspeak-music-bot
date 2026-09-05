@@ -5,6 +5,7 @@ import request from "supertest";
 import { createDatabase, type BotDatabase } from "../../data/database.js";
 import { createUserStore } from "../../data/users.js";
 import { createSessionStore } from "../../data/sessions.js";
+import { createClientTokenStore } from "../../data/client-tokens.js";
 import { createAuditStore } from "../../data/audit.js";
 import { createPermissionStore } from "../../data/permissions.js";
 import { getDefaultConfig } from "../../data/config.js";
@@ -35,7 +36,7 @@ describe("audit router", () => {
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, permissions, () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), permissions, () => getDefaultConfig().guestMode));
     app.use("/api/audit", createAuditRouter(audit));
   });
 

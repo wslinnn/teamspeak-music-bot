@@ -9,6 +9,8 @@ import { QQMusicProvider } from "./music/qq.js";
 import { BiliBiliProvider } from "./music/bilibili.js";
 import { LocalMusicProvider } from "./music/local.js";
 import { KugouProvider } from "./music/kugou.js";
+import { TtlLruCache } from "./music/cache.js";
+import { withContentCache } from "./music/cached-provider.js";
 import { JellyfinProvider } from "./music/jellyfin.js";
 import { SpotifyProvider } from "./music/spotify/provider.js";
 import { SpotifyOAuth, createFileOAuthTokenStore } from "./music/spotify/spotify-oauth.js";
@@ -65,11 +67,21 @@ async function main() {
   );
   await apiServer.start();
 
-  const neteaseProvider = new NeteaseProvider(apiServer.getNeteaseBaseUrl());
-  const qqProvider = new QQMusicProvider(apiServer.getQQMusicBaseUrl());
+  // 内容缓存（docs/server-cache-plan.md）：歌词/歌单/专辑/详情/搜索/推荐榜。
+  // 只包 netease/qq/kugou 三家有上游 API 的音源；每实例独立缓存（实例即平台，
+  // key 无需带 platform）。bilibili/spotify/youtube/local/jellyfin 不包。
+  const contentCache = () => new TtlLruCache(600);
+  const neteaseProvider = withContentCache(
+    new NeteaseProvider(apiServer.getNeteaseBaseUrl()),
+    contentCache()
+  );
+  const qqProvider = withContentCache(
+    new QQMusicProvider(apiServer.getQQMusicBaseUrl()),
+    contentCache()
+  );
   const bilibiliProvider = new BiliBiliProvider();
   const localProvider = new LocalMusicProvider(LOCAL_AUDIO_DIR);
-  const kugouProvider = new KugouProvider();
+  const kugouProvider = withContentCache(new KugouProvider(), contentCache());
   const spotifyProvider = new SpotifyProvider();
   // Safety gate (spec §7): the source is inert unless EXPLICITLY enabled.
   // Only feed credentials when enabled — otherwise the provider has no creds,

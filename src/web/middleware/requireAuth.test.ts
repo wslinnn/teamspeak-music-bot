@@ -5,6 +5,7 @@ import request from "supertest";
 import { createDatabase, type BotDatabase } from "../../data/database.js";
 import { createUserStore } from "../../data/users.js";
 import { createSessionStore } from "../../data/sessions.js";
+import { createClientTokenStore } from "../../data/client-tokens.js";
 import { createPermissionStore } from "../../data/permissions.js";
 import { createRequireAuth } from "./requireAuth.js";
 import { SESSION_COOKIE_NAME } from "../auth/validateSession.js";
@@ -13,19 +14,23 @@ describe("requireAuth middleware", () => {
   let botDb: BotDatabase;
   let app: express.Express;
   let validToken: string;
+  let clientTokens: ReturnType<typeof createClientTokenStore>;
+  let aliceId: string;
 
   beforeEach(async () => {
     botDb = createDatabase(":memory:");
     const users = createUserStore(botDb.db);
     const sessions = createSessionStore(botDb.db);
+    clientTokens = createClientTokenStore(botDb.db);
     const permissions = createPermissionStore(botDb.db);
     const u = await users.createUser("alice", "pw-alice", "admin");
+    aliceId = u.id;
     validToken = sessions.createSession(u.id).token;
 
     app = express();
     app.use(cookieParser());
     app.use(
-      createRequireAuth(sessions, permissions, () => ({
+      createRequireAuth(sessions, clientTokens, permissions, () => ({
         enabled: true,
         bots: "all",
         permissions: {
@@ -84,12 +89,32 @@ describe("requireAuth middleware", () => {
     expect(refreshed!).toMatch(/Max-Age=\d+/);
   });
 
+  // Bearer path (client tokens, tsmb-desktop): explicit header credentials.
+  it("authenticates a valid bearer token and sets no cookie", async () => {
+    const { token } = clientTokens.createToken(aliceId);
+    const res = await request(app).get("/protected").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.user.username).toBe("alice");
+    expect(res.body.user.role).toBe("admin");
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("rejects an invalid bearer token even when a valid cookie is present", async () => {
+    const res = await request(app)
+      .get("/protected")
+      .set("Authorization", "Bearer garbage")
+      .set("Cookie", `${SESSION_COOKIE_NAME}=${validToken}`);
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: "invalid token" });
+  });
+
   // A guest session is rejected (401) when guest mode is disabled.
   it("rejects a guest session when guest mode is disabled", () => {
     const sessions: any = { validateAndTouch: () => ({ userId: "__guest__", username: "游客", role: "guest" }) };
+    const clientTokens: any = { validate: () => null };
     const permissions: any = { getCapabilities: () => [], getBotAccess: () => [] };
     const getGuestConfig = () => ({ enabled: false, bots: "all" as const, permissions: {} as any });
-    const mw = createRequireAuth(sessions, permissions, getGuestConfig);
+    const mw = createRequireAuth(sessions, clientTokens, permissions, getGuestConfig);
     const req: any = { headers: { cookie: "tsmb_session=x" } };
     const res: any = { statusCode: 0, cleared: false, clearCookie() { this.cleared = true; }, status(c: number) { this.statusCode = c; return this; }, json() { return this; }, cookie() {} };
     const next = vi.fn();
@@ -103,7 +128,8 @@ describe("requireAuth middleware", () => {
     const permissions: any = { getCapabilities: () => [], getBotAccess: () => [] };
     const perms = { addToQueue: true, playNext: false, playNow: false, skip: false, transport: false, removeClear: false, playMode: false, playCollection: false };
     const getGuestConfig = () => ({ enabled: true, bots: ["bot1"], permissions: perms });
-    const mw = createRequireAuth(sessions, permissions, getGuestConfig);
+    const clientTokens: any = { validate: () => null };
+    const mw = createRequireAuth(sessions, clientTokens, permissions, getGuestConfig);
     const req: any = { headers: { cookie: "tsmb_session=x" }, secure: false };
     const res: any = { status() { return this; }, json() { return this; }, cookie() {}, clearCookie() {} };
     const next = vi.fn();

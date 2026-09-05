@@ -364,7 +364,9 @@ export function createMusicRouter(
     }
   });
 
-  router.get("/lyrics/:id", async (req, res) => {
+  // 内容缓存在 provider 装饰器层（docs/server-cache-plan.md）；这里只做
+  // 路由级限流兜底（对齐 search/playlist 的配置量级）。
+  router.get("/lyrics/:id", createRateLimit({ capacity: 20, refillPerSec: 0.5 }), async (req: Request<{ id: string }>, res: Response) => {
     try {
       const provider = resolveProvider(req.query.platform, res);
       if (!provider) return;

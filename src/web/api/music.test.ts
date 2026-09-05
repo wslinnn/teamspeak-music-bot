@@ -7,10 +7,13 @@ import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MusicProvider, SearchResult } from "../../music/provider.js";
+import { TtlLruCache } from "../../music/cache.js";
+import { withContentCache } from "../../music/cached-provider.js";
 import { getDefaultConfig, loadConfig, type BotConfig } from "../../data/config.js";
 import { createDatabase, type BotDatabase } from "../../data/database.js";
 import { createUserStore } from "../../data/users.js";
 import { createSessionStore } from "../../data/sessions.js";
+import { createClientTokenStore } from "../../data/client-tokens.js";
 import { createPermissionStore } from "../../data/permissions.js";
 import { createRequireAuth } from "../middleware/requireAuth.js";
 import { SESSION_COOKIE_NAME } from "../auth/validateSession.js";
@@ -22,6 +25,7 @@ function fakeProvider(platform: MusicProvider["platform"]): MusicProvider {
   return {
     platform,
     search: vi.fn().mockResolvedValue(empty),
+    getLyrics: vi.fn().mockResolvedValue([{ time: 0, text: "line" }]),
   } as unknown as MusicProvider;
 }
 
@@ -287,7 +291,7 @@ describe("music router POST /quality — persistence (#125)", () => {
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use(
       "/api/music",
       createMusicRouter(
@@ -375,7 +379,7 @@ describe("music router POST /local/upload — content types and size cap (#149)"
     app = express();
     app.use(express.json());
     app.use(cookieParser());
-    app.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use("/api/music", createMusicRouter(
       fakeProvider("netease"), fakeProvider("qq"), fakeProvider("bilibili"),
       pino({ level: "silent" }), local, getDefaultConfig(),
@@ -476,7 +480,7 @@ describe("music router POST /local/upload — content types and size cap (#149)"
     const c2 = `${SESSION_COOKIE_NAME}=${sessions.createSession(a2.id).token}`;
     const app2 = express();
     app2.use(cookieParser());
-    app2.use("/api", createRequireAuth(sessions, createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
+    app2.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app2.use("/api/music", createMusicRouter(
       fakeProvider("netease"), fakeProvider("qq"), fakeProvider("bilibili"),
       pino({ level: "silent" }),
@@ -565,5 +569,46 @@ describe("GET /search/all — rate limit (review P4)", () => {
       if (res.status === 429) saw429 = true;
     }
     expect(saw429).toBe(true);
+  });
+});
+
+describe("GET /lyrics/:id — content cache + route rate limit", () => {
+  it("serves repeated requests from the provider cache (one upstream call)", async () => {
+    const netease = fakeProvider("netease");
+    const router = createMusicRouter(
+      withContentCache(netease, new TtlLruCache(50)),
+      fakeProvider("qq"),
+      fakeProvider("bilibili"),
+      pino({ level: "silent" })
+    );
+    const app = express();
+    app.use("/api/music", router);
+
+    const first = await request(app).get("/api/music/lyrics/s1?platform=netease");
+    const second = await request(app).get("/api/music/lyrics/s1?platform=netease");
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(first.body).toEqual(second.body);
+    expect(netease.getLyrics).toHaveBeenCalledTimes(1);
+  });
+
+  it("rate limits /lyrics to the bucket capacity then 429s with Retry-After", async () => {
+    const router = createMusicRouter(
+      fakeProvider("netease"),
+      fakeProvider("qq"),
+      fakeProvider("bilibili"),
+      pino({ level: "silent" })
+    );
+    const app = express();
+    app.use("/api/music", router);
+
+    // capacity=20：前 20 个不同 id 正常，第 21 个被限流
+    for (let i = 0; i < 20; i++) {
+      const res = await request(app).get(`/api/music/lyrics/s${i}?platform=netease`);
+      expect(res.status).toBe(200);
+    }
+    const blocked = await request(app).get("/api/music/lyrics/overflow?platform=netease");
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers["retry-after"]).toBeDefined();
   });
 });
