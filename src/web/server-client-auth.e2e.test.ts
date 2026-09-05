@@ -103,11 +103,11 @@ describe("client bearer-token auth over the real web server", () => {
     });
     expect(after.status).toBe(401);
 
-    const closed = await new Promise<{ code: number }>((resolve) => {
+    const closed = await new Promise<{ code: number | undefined }>((resolve) => {
       const ws = new WSClient(`ws://127.0.0.1:${port}/ws`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      ws.on("close", (code: number) => resolve({ code }));
+      ws.on("close", (code?: number) => resolve({ code }));
       ws.on("unexpected-response", (_req, res) => resolve({ code: res.statusCode }));
     });
     expect(closed.code).toBe(4001);
