@@ -28,7 +28,7 @@
 
 ## 与上游的差异
 
-本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。以下覆盖 v2.0.0（Fork 首个独立版本）与 v2.1.3（当前版）的全部差异要点。
+本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。以下覆盖 v2.0.0（Fork 首个独立版本）与 v2.2.0（当前版）的全部差异要点。
 
 **前端与体验**
 
@@ -46,6 +46,7 @@
 - **跨客户端歌曲收藏** — 任意歌曲一键红心（`/api/song-favorites`），WebSocket 实时同步；与上游按用户的歌单收藏并存互补
 - **本地歌曲列表直达**（v2.1.0）— 搜索页「本地」页签免关键词直接列出全部本地歌曲
 - **私人 FM 一键退出**（v2.1.0）— 播放器 FM 徽标透出当前音源，点击退出后保留队列按顺序播完
+- **桌面客户端鉴权通道 + 桌面伴侣应用**（v2.2.0）— `/api/client` Bearer token 通道（60 天有效、每账号 10 设备、改密即时失效，与 WebUI cookie 会话完全隔离），配套独立仓库的桌面端 [tsmb-desktop](https://github.com/wslinnn/tsmb-desktop)（托盘常驻 + 桌面歌词）
 
 **行为改进与修复**
 
@@ -55,12 +56,14 @@
 - **播放转场静音桥接**（v2.1.1）— 暂停 / 恢复 / seek 时语音包流不再原地硬切：淡入淡出（各 100ms）+ 暂停期短静音尾平滑过渡，本地源 seek 改为 FFmpeg 输入侧定位、起播空窗由静音帧桥接；经实际部署验证转场爆音基本消除
 - **权限操作有反馈**（v2.1.0）— 歌词页所有人可看；歌词行跳转、进度条 seek 等控制操作在无权限时给出 toast 提示，而非静默无效
 - **稳定性修复**（v2.1.0）— 二维码登录（B站 / 酷狗恢复渲染、本地生成兜底、轮询服务端 TTL 兜底）、游客点歌失败提示、鉴权错误文案中文化等
+- **Web 端 seek 补发 stateChange**（v2.2.0）— WebUI 拖动进度条后服务端立即向全部 WS 客户端广播，桌面端歌词即时收敛（不再等下一轮轮询）
 
 **安全与加固**
 
 - **安全批次（v2.0.0）** — Jellyfin 封面经服务端代理（凭据不下发客户端）、机器人密码只写不回显、播放地址 scheme 白名单、本地上传串行化、搜索限流、登录时序等化、配置与数据库文件 0600（完整清单见 [docs/code-review-2026-08-24.md](docs/code-review-2026-08-24.md)）
 - **安全批次（v2.1.0）** — 内嵌网易云 API 绑定 127.0.0.1、yt-dlp 歌单 URL 域名白名单（堵 SSRF）、已存队列补 bot 级访问控制、WS 广播按权限范围过滤、登录限流 IP+用户名双维键控、**游客默认权限全部关闭**、54 处错误响应不再回显内部异常、登出 / 改密即时吊销 WS 会话、补齐安全响应头
 - **性能与依赖（v2.1.0）** — 依赖漏洞升级；FFmpeg stderr 消费（修复长歌中途卡死）、FM / 24x7 播放队列裁剪防无限膨胀、上传写盘异步化、头像更新不占播放闸、状态广播带队列签名省流量、前端空转帧率与批量请求 N+1 治理、日志滚动
+- **服务端内容缓存**（v2.2.0）— 歌词 / 歌单 / 专辑 / 歌曲详情 / 搜索 / 推荐歌单榜 LRU+TTL 缓存（600 条/音源，播放流地址不缓存），多客户端同歌只穿透一次上游；`/lyrics/:id` 补路由级限流
 - **依赖瘦身** — 清理上游遗留的未使用依赖（`ts3-nodejs-library`、`chalk`、`koa-bodyparser`、`koa-static`、`yt-dlp-wrap`），安装体积与供应链面同步减小
 - **CI** — push / PR 全量测试 + 构建；actions 固定官方 tag SHA
 
@@ -176,7 +179,7 @@ docker-compose pull && docker-compose up -d   # 升级到最新版
 
 ```bash
 # ① 载入镜像（成功后镜像名即 tsmusicbot:latest）
-docker load -i tsmusicbot-v2.1.3-linux-amd64.tar.gz
+docker load -i tsmusicbot-v2.2.0-linux-amd64.tar.gz
 
 # ② 切到仓库的 scripts/docker 目录，用离线专用 compose 启动
 cd teamspeak-music-bot/scripts/docker
@@ -185,7 +188,7 @@ docker-compose -f docker-compose.prod.yml up -d
 
 > 仓库没法 clone 的离线服务器，把 `scripts/docker/docker-compose.prod.yml` 这一个文件单独拷过去放在任意目录也可以，`cd` 到它所在目录执行即可。
 >
-> 后续升级同理：载入新版本的 tar.gz 后重复第 ② 步的 `up -d`（需要固定版本时加 `TSMUSICBOT_IMAGE=tsmusicbot:v2.1.3`）。
+> 后续升级同理：载入新版本的 tar.gz 后重复第 ② 步的 `up -d`（需要固定版本时加 `TSMUSICBOT_IMAGE=tsmusicbot:v2.2.0`）。
 
 如果 TS3 服务器在其他机器上，编辑 `docker-compose.yml`：
 ```yaml
@@ -963,14 +966,12 @@ A：本项目内置 `/login` 限流（每 IP 每分钟 5 次），但生产部�
 
 > **Fork 各版本（v2.0.0 起）的完整差异要点已并入顶部 [与上游的差异](#与上游的差异) 章节。** 面向升级用户的注意事项：
 >
-> > - **v2.2.0（桌面客户端支持 + 服务端内容缓存）**：新增 `/api/client` Bearer token 鉴权通道供桌面端伴侣应用使用——现有 WebUI 的 cookie 鉴权、全部配置与行为**完全不变**；服务端为歌词 / 歌单 / 专辑等上游内容加了 LRU+TTL 缓存与 `/lyrics` 路由限流。**无配置变化与破坏性改动**，升级照常拉取重启即可
-
-- **v2.1.3（依赖维护）**：`@honeybbq/teamspeak-client` 升 0.2.3（上游修复 clientEnter 频道号恒 0 的缺陷，自动暂停 / 恢复的占用判定更精准）；清理上游遗留的未使用依赖。**无配置变化与破坏性改动**，Docker 部署照常拉取即可
->
+> - **v2.2.0（桌面客户端支持 + 服务端内容缓存）**：新增 `/api/client` Bearer token 鉴权通道供桌面端伴侣应用使用——现有 WebUI 的 cookie 鉴权、全部配置与行为**完全不变**；服务端为歌词 / 歌单 / 专辑等上游内容加了 LRU+TTL 缓存与 `/lyrics` 路由限流。**无配置变化与破坏性改动**，升级照常拉取重启即可
+> - **v2.1.3（依赖维护）**：`@honeybbq/teamspeak-client` 升 0.2.3（上游修复 clientEnter 频道号恒 0 的缺陷，自动暂停 / 恢复的占用判定更精准）；清理上游遗留的未使用依赖。**无配置变化与破坏性改动**，Docker 部署照常拉取即可
 > - **v2.1.2（同步上游 v1.13.2）：Node 20 不再支持**，引擎要求 `^22.12 || >=24`（better-sqlite3 12.10.0 起不再发布 Node 20 ABI 的预编译包）。源码部署需先安装 Node 22 LTS 并**重跑 `setup.bat` / `setup.sh`**（原生模块必须按新 ABI 重新安装）；**Docker 部署无任何操作**（镜像本就是 node:22）。同时吸收上游安装脚本加固：setup 阶段控制台写入失败不再中断安装
 > - **v2.1.1（播放转场听感优化）**：无配置变化与破坏性改动
 > - **游客模式默认权限收紧（v2.1.0 安全加固）**：8 项游客开关现默认**全部关闭**——此前「添加到队列末尾」默认开启，未显式配置过的部署升级后游客将无法加歌，请在 设置 → 游客模式 按需重新放开
-> - 源码部署拉取后重新构建即可；**Docker 部署只需 `docker-compose pull && docker-compose up -d`**（GHCR 已发布 `2.1.3` / `latest` 多架构镜像）；移动端浏览器若行为异常请强刷一次（Service Worker 缓存旧资源）
+> - 源码部署拉取后重新构建即可；**Docker 部署只需 `docker-compose pull && docker-compose up -d`**（GHCR 已发布 `2.2.0` / `latest` 多架构镜像）；移动端浏览器若行为异常请强刷一次（Service Worker 缓存旧资源）
 
 ### v2.2.0：桌面客户端支持 / 服务端内容缓存
 
