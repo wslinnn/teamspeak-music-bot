@@ -19,14 +19,15 @@ const SONG_ID = "20391";
 const startedAt = Date.now();
 const songElapsed = () => ((Date.now() - startedAt) / 1000) % SONG_DURATION;
 
+const PAUSED = process.env.PAUSED === "1";
 const fakeBot = new EventEmitter();
 fakeBot.id = "bot-dev";
 fakeBot.getStatus = () => ({
   id: "bot-dev",
   name: "Dev Bot",
   connected: true,
-  playing: true,
-  paused: false,
+  playing: !PAUSED,
+  paused: PAUSED,
   currentSong: {
     id: SONG_ID,
     platform: "netease",
@@ -64,8 +65,13 @@ const provider = {
 };
 
 const logger = pino({ level: "info" });
-const botDb = createDatabase(":memory:");
-await createUserStore(botDb.db).createUser("alice", "pw-alice-123", "admin");
+// 文件持久化：重启后 client token 仍有效，便于桌面端联调
+const DB_PATH = process.env.DEV_DB ?? "scripts/dev-bot.db";
+const botDb = createDatabase(DB_PATH);
+const userStore = createUserStore(botDb.db);
+if (!userStore.findByUsername("alice")) {
+  await userStore.createUser("alice", "pw-alice-123", "admin");
+}
 
 const web = createWebServer({
   port: PORT,
