@@ -12,3 +12,6 @@ setup.log
 /bin/
 scripts/navbar_bigger.png
 AGENTS.md
+*.db
+*.db-shm
+*.db-wal
