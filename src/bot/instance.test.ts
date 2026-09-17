@@ -775,6 +775,7 @@ describe("BotInstance transport delegation — spotify current song", () => {
         stop: vi.fn(() => {}),
       },
       queue: { current: vi.fn(() => ({ platform: currentPlatform })), clear: vi.fn() },
+      tryResumeAgedUrl: vi.fn(async () => false), // 非 spotify 恢复路径会先尝试重取
       logger: { warn: vi.fn() },
       emit: vi.fn(),
       autoPaused: true,
@@ -814,6 +815,238 @@ describe("BotInstance transport delegation — spotify current song", () => {
     cmdResume.call(ctx);
     expect(ctx.spotifyController.pause).not.toHaveBeenCalled();
     expect(ctx.spotifyController.resume).not.toHaveBeenCalled();
+  });
+});
+
+// --- 长暂停后恢复重取 CDN 链接（tryResumeAgedUrl）---------------------------
+// 网易等临时 CDN 链接会过期：长暂停后恢复时 ffmpeg 进程通常还活着（对过期
+// URL 无限重连、永不退出不报错），普通 resume 只会播出几秒残余缓冲后静音到
+// stall 看门狗切歌。恢复路径在链接签发超过 URL_REFRESH_AGE_MS 后重取一条新
+// 链接、按暂停位置重建管线；不适用/失败则回退原恢复路径（最坏等同旧行为）。
+const tryResumeAgedUrl = (BotInstance.prototype as any).tryResumeAgedUrl as (
+  this: unknown,
+) => Promise<boolean>;
+const updateAutoPause = (BotInstance.prototype as any).updateAutoPause as (
+  this: unknown,
+  enabled: boolean,
+) => void;
+
+function makeAgedResumeCtx(opts: {
+  platform?: string;
+  aged?: boolean;
+  playerState?: string;
+  urlResult?: { url: string } | null;
+  failGetSongUrl?: boolean;
+}) {
+  let state = opts.playerState ?? "paused";
+  const song = { id: "s1", name: "Song", platform: opts.platform ?? "netease" };
+  let current: any = song;
+  const player = {
+    getState: vi.fn(() => state),
+    getElapsed: vi.fn(() => 173),
+    play: vi.fn((_url: string, _offset: number, _duration?: number) => {
+      state = "playing";
+    }),
+    resume: vi.fn(() => {
+      if (state === "paused") state = "playing";
+    }),
+    resetFailures: vi.fn(),
+  };
+  const ctx: any = {
+    connected: true,
+    lastUrlResolvedAt:
+      (opts.aged ?? true) ? Date.now() - 10 * 60_000 : Date.now(),
+    effectiveDuration: 240,
+    autoPaused: true,
+    autoPausedAt: Date.now() - 60 * 60_000,
+    config: { autoPauseOnEmpty: true },
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    emit: vi.fn(),
+    _scheduleIdleCheck: vi.fn(),
+    _cancelIdleTimer: vi.fn(),
+    queue: { current: vi.fn(() => current) },
+    getProviderFor: vi.fn(() => ({
+      getSongUrl: opts.failGetSongUrl
+        ? vi.fn(async () => {
+            throw new Error("provider down");
+          })
+        : vi.fn(async () => opts.urlResult ?? { url: "https://cdn.example.com/fresh.mp3" }),
+    })),
+    player,
+    spotifyController: { resume: vi.fn(async () => {}) },
+  };
+  // .call(ctx) 假对象不走原型链：把真方法挂到 ctx 上，接线测试才能贯通
+  // cmdResume/handleOccupancy/updateAutoPause → tryResumeAgedUrl 整条链路。
+  ctx.tryResumeAgedUrl = () => tryResumeAgedUrl.call(ctx);
+  return { ctx, song, setCurrent: (s: any) => (current = s), setState: (s: any) => (state = s) };
+}
+
+/** 冲掉 fire-and-forget 的微任务链（handleOccupancy/updateAutoPause 路径用）。 */
+const flushAsync = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+describe("BotInstance.tryResumeAgedUrl — long-pause CDN URL refresh", () => {
+  it("re-fetches the URL and replays at the pause offset when the URL is aged", async () => {
+    const { ctx } = makeAgedResumeCtx({});
+    const before = Date.now();
+
+    const refreshed = await tryResumeAgedUrl.call(ctx);
+
+    expect(refreshed).toBe(true);
+    expect(ctx.player.play).toHaveBeenCalledWith(
+      "https://cdn.example.com/fresh.mp3",
+      173,
+      240,
+    );
+    expect(ctx.player.resume).not.toHaveBeenCalled();
+    // 签发时刻被刷新为"刚刚"（±1s 容差）
+    expect(ctx.lastUrlResolvedAt).toBeGreaterThanOrEqual(before - 1);
+  });
+
+  it("skips the refresh while the URL is still young", async () => {
+    const { ctx } = makeAgedResumeCtx({ aged: false });
+
+    const refreshed = await tryResumeAgedUrl.call(ctx);
+
+    expect(refreshed).toBe(false);
+    expect(ctx.getProviderFor).not.toHaveBeenCalled();
+    expect(ctx.player.play).not.toHaveBeenCalled();
+  });
+
+  it("skips spotify tracks (the sidecar owns the transport)", async () => {
+    const { ctx } = makeAgedResumeCtx({ platform: "spotify", aged: true });
+
+    const refreshed = await tryResumeAgedUrl.call(ctx);
+
+    expect(refreshed).toBe(false);
+    expect(ctx.getProviderFor).not.toHaveBeenCalled();
+  });
+
+  it("skips when the player is not paused (e.g. !resume while already playing)", async () => {
+    const { ctx } = makeAgedResumeCtx({ playerState: "playing" });
+
+    const refreshed = await tryResumeAgedUrl.call(ctx);
+
+    expect(refreshed).toBe(false);
+    expect(ctx.getProviderFor).not.toHaveBeenCalled();
+    expect(ctx.player.play).not.toHaveBeenCalled();
+  });
+
+  it("aborts when the user skipped to another song while the URL was being re-fetched", async () => {
+    const { ctx, setCurrent } = makeAgedResumeCtx({});
+    const stale = { id: "s2", name: "Next", platform: "netease" };
+    ctx.getProviderFor = vi.fn(() => ({
+      getSongUrl: vi.fn(async () => {
+        setCurrent(stale); // await 期间用户切歌
+        return { url: "https://cdn.example.com/fresh.mp3" };
+      }),
+    }));
+
+    const refreshed = await tryResumeAgedUrl.call(ctx);
+
+    expect(refreshed).toBe(false);
+    expect(ctx.player.play).not.toHaveBeenCalled();
+  });
+
+  it("aborts when the player is no longer paused after the re-fetch", async () => {
+    const { ctx, setState } = makeAgedResumeCtx({});
+    ctx.getProviderFor = vi.fn(() => ({
+      getSongUrl: vi.fn(async () => {
+        setState("idle"); // await 期间用户停止
+        return { url: "https://cdn.example.com/fresh.mp3" };
+      }),
+    }));
+
+    const refreshed = await tryResumeAgedUrl.call(ctx);
+
+    expect(refreshed).toBe(false);
+    expect(ctx.player.play).not.toHaveBeenCalled();
+  });
+
+  it("returns false (caller falls back to legacy resume) when the provider fails", async () => {
+    const { ctx } = makeAgedResumeCtx({ failGetSongUrl: true });
+
+    const refreshed = await tryResumeAgedUrl.call(ctx);
+
+    expect(refreshed).toBe(false);
+    expect(ctx.player.play).not.toHaveBeenCalled();
+    expect(ctx.logger.warn).toHaveBeenCalled();
+  });
+
+  it("refuses refreshed URLs carrying a non-http scheme", async () => {
+    const { ctx } = makeAgedResumeCtx({ urlResult: { url: "file:///etc/passwd" } });
+
+    const refreshed = await tryResumeAgedUrl.call(ctx);
+
+    expect(refreshed).toBe(false);
+    expect(ctx.player.play).not.toHaveBeenCalled();
+  });
+});
+
+describe("BotInstance resume paths — aged-URL rebuild wiring", () => {
+  it("cmdResume rebuilds from a fresh URL at the pause offset for an aged URL track", async () => {
+    const { ctx } = makeAgedResumeCtx({});
+    await cmdResume.call(ctx);
+    expect(ctx.player.play).toHaveBeenCalledWith(
+      "https://cdn.example.com/fresh.mp3",
+      173,
+      240,
+    );
+    expect(ctx.player.resume).not.toHaveBeenCalled();
+    expect(ctx.autoPaused).toBe(false);
+    expect(ctx.emit).toHaveBeenCalledWith("stateChange");
+  });
+
+  it("cmdResume falls back to player.resume while the URL is still young", async () => {
+    const { ctx } = makeAgedResumeCtx({ aged: false });
+    await cmdResume.call(ctx);
+    expect(ctx.player.play).not.toHaveBeenCalled();
+    expect(ctx.player.resume).toHaveBeenCalledTimes(1);
+  });
+
+  it("handleOccupancy auto-resume rebuilds an aged URL track when a listener returns", async () => {
+    const { ctx } = makeAgedResumeCtx({});
+    handleOccupancy.call(ctx, 1);
+    await flushAsync();
+    expect(ctx.player.play).toHaveBeenCalledWith(
+      "https://cdn.example.com/fresh.mp3",
+      173,
+      240,
+    );
+    expect(ctx.player.resume).not.toHaveBeenCalled();
+    expect(ctx.autoPaused).toBe(false);
+  });
+
+  it("handleOccupancy auto-resume falls back to player.resume when the refresh fails", async () => {
+    const { ctx } = makeAgedResumeCtx({ failGetSongUrl: true });
+    handleOccupancy.call(ctx, 1);
+    await flushAsync();
+    expect(ctx.player.play).not.toHaveBeenCalled();
+    expect(ctx.player.resume).toHaveBeenCalledTimes(1);
+    expect(ctx.autoPaused).toBe(false);
+  });
+
+  it("updateAutoPause (setting disabled mid-pause) rebuilds an aged URL track", async () => {
+    const { ctx } = makeAgedResumeCtx({});
+    updateAutoPause.call(ctx, false);
+    await flushAsync();
+    expect(ctx.player.play).toHaveBeenCalledWith(
+      "https://cdn.example.com/fresh.mp3",
+      173,
+      240,
+    );
+    expect(ctx.player.resume).not.toHaveBeenCalled();
+    expect(ctx.autoPaused).toBe(false);
+  });
+
+  it("resolveAndPlay stamps lastUrlResolvedAt so the age predicate starts from the fresh URL", async () => {
+    const controller = makeController();
+    const player = makePlayer();
+    const ctx = makeResolveCtx({ controller, player, url: "https://cdn.example.com/x.mp3" });
+    ctx.lastUrlResolvedAt = 0;
+
+    await resolveAndPlay.call(ctx, spotifySong());
+
+    expect(ctx.lastUrlResolvedAt).toBeGreaterThan(0);
   });
 });
 

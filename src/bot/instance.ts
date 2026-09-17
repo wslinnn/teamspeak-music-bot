@@ -63,6 +63,12 @@ const MANAGED_VOICE_CLIENT_RELEASE_GRACE_MS = 1_000;
  *  避免 24/7 FM 场景下队列数组无限增长。 */
 const FM_QUEUE_MAX = 500;
 
+/** 播放链接视为"已老化"的签发时长阈值。网易等临时 CDN 链接会过期（TTL 未知
+ *  且接口不返回，量级为几十分钟），暂停恢复时链接签发超过该阈值就重取一次，
+ *  而不是复用可能已失效的旧链接。取值远低于各平台 TTL 下限，误重建的代价
+ *  只是一次廉价 API 调用 + 约 1 秒恢复延迟。 */
+const URL_REFRESH_AGE_MS = 5 * 60_000;
+
 /** Fallback message when Spotify audio can't be served (backend unavailable
  *  OR a per-track playTrack failure against a dead/failed sidecar). */
 const SPOTIFY_UNAVAILABLE_MESSAGE =
@@ -202,6 +208,9 @@ export class BotInstance extends EventEmitter {
   private lastSearchResults: Song[] = [];
   /** 当前曲实际播放时长（试听片段秒数或完整 duration）；resolveAndPlay 赋值。 */
   private effectiveDuration: number | undefined;
+  /** 当前曲播放链接的签发时刻（Date.now()）。resolveAndPlay 与恢复期重取成功后
+   *  更新；seek/普通恢复不重签链接故不改。0 表示尚未解析过。 */
+  private lastUrlResolvedAt = 0;
   private playGate: Promise<unknown> = Promise.resolve();
   /** Per-bot Jellyfin playback-report session (start / ~10s progress / stop).
    *  null when the wired provider has no reporting capability. */
@@ -640,10 +649,15 @@ export class BotInstance extends EventEmitter {
   updateAutoPause(enabled: boolean): void {
     this.config.autoPauseOnEmpty = enabled;
     if (!enabled && this.autoPaused && this.player.getState() === "paused") {
-      this.player.resume();
       if (this.queue.current()?.platform === "spotify") {
+        this.player.resume();
         this.spotifyController.resume().catch((err) =>
           this.logger.warn({ err }, "Spotify resume failed (auto-pause disabled)"));
+      } else {
+        // URL 曲目可能已因长暂停链接过期，先尝试重取；不适用/失败则回退原逻辑
+        void this.tryResumeAgedUrl().then((refreshed) => {
+          if (!refreshed) this.player.resume();
+        });
       }
       this.autoPaused = false;
       this.emit("stateChange");
@@ -776,19 +790,29 @@ export class BotInstance extends EventEmitter {
       this.autoPausedAt = Date.now();
       this.emit("stateChange");
     } else if (action === "resume") {
-      this.player.resume();
+      const finalize = (): void => {
+        const pausedForMs = this.autoPausedAt !== null ? Date.now() - this.autoPausedAt : null;
+        this.logger.info(
+          { source, pausedForMs },
+          "Auto-resumed playback: listener returned to the channel",
+        );
+        this.autoPaused = false;
+        this.autoPausedAt = null;
+        this.emit("stateChange");
+      };
       if (this.queue.current()?.platform === "spotify") {
+        this.player.resume();
         this.spotifyController.resume().catch((err) =>
           this.logger.warn({ err }, "Spotify resume failed (occupancy)"));
+        finalize();
+      } else {
+        // 长暂停后链接可能已过期：先尝试重取并按暂停位置重建，失败/不适用
+        // 则回退原恢复路径（tryResumeAgedUrl 返回 false 时不抛错）。
+        void this.tryResumeAgedUrl().then((refreshed) => {
+          if (!refreshed) this.player.resume();
+          finalize();
+        });
       }
-      const pausedForMs = this.autoPausedAt !== null ? Date.now() - this.autoPausedAt : null;
-      this.logger.info(
-        { source, pausedForMs },
-        "Auto-resumed playback: listener returned to the channel",
-      );
-      this.autoPaused = false;
-      this.autoPausedAt = null;
-      this.emit("stateChange");
     }
   }
 
@@ -1135,6 +1159,7 @@ export class BotInstance extends EventEmitter {
         );
         return false;
       }
+      this.lastUrlResolvedAt = Date.now();
       // 时长回填：播放历史等来源的歌曲可能缺 duration——进度条增长与点击
       // 跳转都依赖它（除以 0 会导致进度条不动、每次点击跳回开头）。按
       // songId 重新解析详情补全，失败不阻塞播放。
@@ -1286,6 +1311,59 @@ export class BotInstance extends EventEmitter {
       return true;
     } catch (err) {
       this.logger.error({ err, songId: song.id }, "Failed to resolve URL");
+      return false;
+    }
+  }
+
+  /**
+   * 长暂停后恢复当前 URL 曲目前调用：若播放链接签发已超过 URL_REFRESH_AGE_MS，
+   * 重取一条新链接并以暂停位置为偏移重建播放管线。
+   *
+   * 背景：恢复时 ffmpeg 进程通常还"活着"——长暂停中 CDN 侧早已掐断闲置连接，
+   * 恢复后它会对过期 URL 反复重连（403 无限重试，永不退出不报错，已实测），
+   * 普通 resume() 只会播出几秒残余缓冲后一路静音到 stall 看门狗切歌。而
+   * player.resume() 原有的死管道重启分支复用的也是同一条过期链接。
+   *
+   * 返回 false 表示不适用（spotify/链接尚年轻）或重取失败，调用方应照常走
+   * 原恢复路径——最坏情况等同旧行为，不引入新的失败分支。
+   */
+  private async tryResumeAgedUrl(): Promise<boolean> {
+    const song = this.queue.current();
+    if (!song || song.platform === "spotify") return false;
+    if (Date.now() - this.lastUrlResolvedAt < URL_REFRESH_AGE_MS) return false;
+    if (this.player.getState() !== "paused") return false;
+    const provider = this.getProviderFor(song.platform);
+    try {
+      const result = await provider.getSongUrl(song.id);
+      // await 期间用户可能已切歌/停止/断连/再次暂停：状态不符就放弃本次重建
+      //（player.play 会自增 sessionId 打断旧会话，误判的代价是播错位置的重建）。
+      if (
+        !result?.url ||
+        !this.connected ||
+        this.queue.current()?.id !== song.id ||
+        this.player.getState() !== "paused"
+      ) {
+        return false;
+      }
+      if (/^[a-z][a-z0-9+.-]*:\/\//i.test(result.url) && !/^https?:\/\//i.test(result.url)) {
+        this.logger.warn(
+          { songId: song.id, platform: song.platform, scheme: result.url.split(":")[0] },
+          "Refusing refreshed playback URL with a non-http scheme",
+        );
+        return false;
+      }
+      // 必须在 play() 前取：play 会清零帧计数并以入参为 seekOffset
+      const offset = this.player.getElapsed();
+      this.effectiveDuration = result.trialDuration ?? this.effectiveDuration;
+      this.player.play(result.url, offset, this.effectiveDuration);
+      this.lastUrlResolvedAt = Date.now();
+      this.logger.info(
+        { songId: song.id, platform: song.platform, offset: Math.round(offset) },
+        "Resumed with refreshed playback URL after long pause",
+      );
+      return true;
+    } catch (err) {
+      this.logger.warn({ err, songId: song.id }, "Failed to refresh playback URL on resume");
       return false;
     }
   }
@@ -1528,10 +1606,16 @@ export class BotInstance extends EventEmitter {
         if (!ok) return "Failed to resume";
       }
     } else {
-      this.player.resume();
-      if (this.queue.current()?.platform === "spotify") {
-        this.spotifyController.resume().catch((err) =>
-          this.logger.warn({ err }, "Spotify resume failed"));
+      // spotify 曲目保持同步委派（sidecar 自己管传输）；URL 曲目长暂停后链接
+      // 可能已过期，先尝试重取，不适用/失败则回退原 resume 逻辑。
+      const refreshed = this.queue.current()?.platform !== "spotify"
+        && (await this.tryResumeAgedUrl());
+      if (!refreshed) {
+        this.player.resume();
+        if (this.queue.current()?.platform === "spotify") {
+          this.spotifyController.resume().catch((err) =>
+            this.logger.warn({ err }, "Spotify resume failed"));
+        }
       }
     }
     // User-initiated resume — drop any auto-pause flag.
