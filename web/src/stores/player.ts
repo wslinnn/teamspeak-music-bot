@@ -174,12 +174,31 @@ export const usePlayerStore = defineStore('player', {
 
     /** 切歌类操作的乐观更新：按钮立即转为播放态（进度归零由调用方设置），
      * 不再单靠 WS stateChange 广播修复——广播丢失时轮询也能自愈 */
-    _optimisticPlay() {
-      const bot = this.bots.find((b) => b.id === this.activeBotId);
+    _optimisticPlay(botId?: string) {
+      const id = botId ?? this.activeBotId;
+      if (!id) return;
+      const bot = this.bots.find((b) => b.id === id);
       if (bot) {
         bot.playing = true;
         bot.paused = false;
       }
+    },
+
+    /** 播放控制的目标 bot：显式指定优先（Navbar 下拉栏可跨 bot 控制），
+     * 缺省时作用于当前选中的 bot（主播放器/迷你播放器的既有语义） */
+    _targetBotId(botId?: string): string | null {
+      return botId ?? this.activeBotId ?? null;
+    },
+
+    /** 指定 bot 的实时插值进度（pause 乐观冻结进度条用；liveElapsed 的按 bot 版本） */
+    _liveElapsedFor(botId: string): number {
+      const bot = this.bots.find((b) => b.id === botId);
+      if (!bot?.currentSong) return 0;
+      const timing = this.timings[botId] ?? defaultTiming();
+      // 试听曲按 effectiveDuration 钳制（B1）：否则进度条按完整曲长走不完
+      const maxDuration =
+        (bot.effectiveDuration ?? bot.currentSong.duration) || Infinity;
+      return interpolateElapsed(timing, bot.paused, maxDuration);
     },
 
     getQueueForBot(botId: string): Song[] {
@@ -701,10 +720,11 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    async pause() {
-      if (!this.activeBotId) return;
+    async pause(botId?: string) {
+      const id = this._targetBotId(botId);
+      if (!id) return;
       // Optimistically update local state for instant UI feedback
-      const bot = this.bots.find((b) => b.id === this.activeBotId);
+      const bot = this.bots.find((b) => b.id === id);
       if (bot) {
         bot.playing = false;
         bot.paused = true;
@@ -712,43 +732,47 @@ export const usePlayerStore = defineStore('player', {
       // Freeze elapsed at the current LIVE interpolated value. The cached
       // `elapsed` getter can be seconds stale → pause would rewind the bar.
       // （审计 C4：上游 #107 同款修复，重写时遗失）
-      this._setTiming(this.activeBotId, {
-        serverElapsed: this.liveElapsed(),
+      this._setTiming(id, {
+        serverElapsed: this._liveElapsedFor(id),
         wasPlaying: false,
       });
-      await http.post(`/api/player/${this.activeBotId}/pause`);
+      await http.post(`/api/player/${id}/pause`);
     },
 
-    async resume() {
-      if (!this.activeBotId) return;
+    async resume(botId?: string) {
+      const id = this._targetBotId(botId);
+      if (!id) return;
       // Optimistically update local state for instant UI feedback
-      const bot = this.bots.find((b) => b.id === this.activeBotId);
+      const bot = this.bots.find((b) => b.id === id);
       if (bot) {
         bot.playing = true;
         bot.paused = false;
       }
-      await http.post(`/api/player/${this.activeBotId}/resume`);
-      this._setTiming(this.activeBotId, {
+      await http.post(`/api/player/${id}/resume`);
+      this._setTiming(id, {
         serverSyncTime: Date.now(),
         wasPlaying: true,
       });
-      setTimeout(() => this.syncElapsed(), 300);
+      // 跨 bot 控制时轮询无意义（syncElapsed 只拉当前选中 bot），状态靠 WS 广播
+      if (id === this.activeBotId) setTimeout(() => this.syncElapsed(), 300);
     },
 
-    async next() {
-      if (!this.activeBotId) return;
-      this._optimisticPlay();
-      await http.post(`/api/player/${this.activeBotId}/next`);
-      this._setTiming(this.activeBotId, { serverElapsed: 0 });
-      this._syncAfterAction();
+    async next(botId?: string) {
+      const id = this._targetBotId(botId);
+      if (!id) return;
+      this._optimisticPlay(id);
+      await http.post(`/api/player/${id}/next`);
+      this._setTiming(id, { serverElapsed: 0 });
+      if (id === this.activeBotId) this._syncAfterAction();
     },
 
-    async prev() {
-      if (!this.activeBotId) return;
-      this._optimisticPlay();
-      await http.post(`/api/player/${this.activeBotId}/prev`);
-      this._setTiming(this.activeBotId, { serverElapsed: 0 });
-      this._syncAfterAction();
+    async prev(botId?: string) {
+      const id = this._targetBotId(botId);
+      if (!id) return;
+      this._optimisticPlay(id);
+      await http.post(`/api/player/${id}/prev`);
+      this._setTiming(id, { serverElapsed: 0 });
+      if (id === this.activeBotId) this._syncAfterAction();
     },
 
     async stop() {

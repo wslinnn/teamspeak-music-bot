@@ -79,7 +79,7 @@
                 class="shrink-0 p-1.5 px-2 rounded-[var(--radius-sm)] text-[15px] opacity-40 transition-opacity duration-[var(--transition-fast)] cursor-pointer hover:opacity-100 hover:bg-hover-bg"
                 :disabled="!bot.connected"
                 title="停止播放"
-                @click.stop="store.pause()"
+                @click.stop="store.pause(bot.id)"
               >
                 <Icon icon="mdi:stop" />
               </button>
@@ -88,7 +88,7 @@
                 class="shrink-0 p-1.5 px-2 rounded-[var(--radius-sm)] text-[15px] opacity-40 transition-opacity duration-[var(--transition-fast)] cursor-pointer hover:opacity-100 hover:bg-hover-bg"
                 :disabled="!bot.connected"
                 title="播放"
-                @click.stop="store.resume()"
+                @click.stop="store.resume(bot.id)"
               >
                 <Icon icon="mdi:play" />
               </button>
@@ -96,7 +96,7 @@
                 class="shrink-0 p-1.5 px-2 rounded-[var(--radius-sm)] text-[15px] opacity-40 transition-opacity duration-[var(--transition-fast)] cursor-pointer hover:opacity-100 hover:bg-hover-bg"
                 :disabled="!bot.connected || (!bot.playing && !bot.paused)"
                 title="下一首"
-                @click.stop="store.next()"
+                @click.stop="store.next(bot.id)"
               >
                 <Icon icon="mdi:skip-next" />
               </button>

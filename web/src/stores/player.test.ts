@@ -93,3 +93,55 @@ describe('player store playSong 业务失败分支（审计 B1）', () => {
     expect(optimistic).toHaveBeenCalled();
   });
 });
+
+// 多机器人：Navbar 下拉栏的播放控制必须作用于按钮所在行的 bot，
+// 而不是当前选中的 bot（无参调用保持原语义——作用于 activeBotId）。
+describe('player store 跨 bot 播放控制（多机器人下拉栏）', () => {
+  const twoBots = [
+    { id: 'bot1', name: '一号', playing: true, paused: false, connected: true },
+    { id: 'bot2', name: '二号', playing: true, paused: false, connected: true },
+  ] as any;
+
+  function makeStore() {
+    setActivePinia(createPinia());
+    hoisted.postMock.mockReset();
+    hoisted.postMock.mockResolvedValue({ data: {} });
+    const store = usePlayerStore();
+    store.bots = twoBots.map((b: any) => ({ ...b })) as any;
+    store.activeBotId = 'bot1';
+    return store;
+  }
+
+  const botById = (store: ReturnType<typeof usePlayerStore>, id: string) =>
+    store.bots.find((b: any) => b.id === id)!;
+
+  it("pause('bot2') 请求打到 bot2 且乐观更新只改 bot2（bot1 不受影响）", async () => {
+    const store = makeStore();
+    await store.pause('bot2');
+    expect(hoisted.postMock).toHaveBeenCalledWith('/api/player/bot2/pause');
+    expect(botById(store, 'bot1').paused).toBe(false);
+    expect(botById(store, 'bot2').paused).toBe(true);
+  });
+
+  it("resume('bot2') 同理作用于 bot2", async () => {
+    const store = makeStore();
+    botById(store, 'bot2').paused = true;
+    await store.resume('bot2');
+    expect(hoisted.postMock).toHaveBeenCalledWith('/api/player/bot2/resume');
+    expect(botById(store, 'bot2').paused).toBe(false);
+  });
+
+  it("next('bot2') 打到 bot2 且不为非当前 bot 触发 active 轮询同步", async () => {
+    const store = makeStore();
+    const sync = vi.spyOn(store, '_syncAfterAction');
+    await store.next('bot2');
+    expect(hoisted.postMock).toHaveBeenCalledWith('/api/player/bot2/next');
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  it('无参调用保持原语义：作用于当前选中 bot', async () => {
+    const store = makeStore();
+    await store.next();
+    expect(hoisted.postMock).toHaveBeenCalledWith('/api/player/bot1/next');
+  });
+});
