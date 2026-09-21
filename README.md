@@ -28,7 +28,7 @@
 
 ## 与上游的差异
 
-本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。以下覆盖 v2.0.0（Fork 首个独立版本）与 v2.2.1（当前版）的全部差异要点。
+本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。以下覆盖 v2.0.0（Fork 首个独立版本）与 v2.2.2（当前版）的全部差异要点。
 
 **前端与体验**
 
@@ -180,7 +180,7 @@ docker-compose pull && docker-compose up -d   # 升级到最新版
 
 ```bash
 # ① 载入镜像（成功后镜像名即 tsmusicbot:latest）
-docker load -i tsmusicbot-v2.2.1-linux-amd64.tar.gz
+docker load -i tsmusicbot-v2.2.2-linux-amd64.tar.gz
 
 # ② 切到仓库的 scripts/docker 目录，用离线专用 compose 启动
 cd teamspeak-music-bot/scripts/docker
@@ -189,7 +189,7 @@ docker-compose -f docker-compose.prod.yml up -d
 
 > 仓库没法 clone 的离线服务器，把 `scripts/docker/docker-compose.prod.yml` 这一个文件单独拷过去放在任意目录也可以，`cd` 到它所在目录执行即可。
 >
-> 后续升级同理：载入新版本的 tar.gz 后重复第 ② 步的 `up -d`（需要固定版本时加 `TSMUSICBOT_IMAGE=tsmusicbot:v2.2.1`）。
+> 后续升级同理：载入新版本的 tar.gz 后重复第 ② 步的 `up -d`（需要固定版本时加 `TSMUSICBOT_IMAGE=tsmusicbot:v2.2.2`）。
 
 如果 TS3 服务器在其他机器上，编辑 `docker-compose.yml`：
 ```yaml
@@ -967,6 +967,7 @@ A：本项目内置 `/login` 限流（每 IP 每分钟 5 次），但生产部�
 
 > **Fork 各版本（v2.0.0 起）的完整差异要点已并入顶部 [与上游的差异](#与上游的差异) 章节。** 面向升级用户的注意事项：
 >
+> - **v2.2.2（多机器人播放控制修复）**：修复顶栏机器人切换下拉栏里的播放控制作用于当前选中机器人、而非按钮所在行机器人问题（多机器人场景下会暂停/切错机器人）。**无配置变化与破坏性改动**，升级照常拉取重启即可
 > - **v2.2.1（长暂停恢复修复）**：修复暂停（含频道无人自动暂停）一段时间后恢复播放，只播几秒残余缓冲就一路静音直到切歌的问题——根因是网易等平台的临时播放链接在长暂停期间过期，恢复时现在会自动重取链接并按暂停位置续播。**无配置变化与破坏性改动**，升级照常拉取重启即可（Docker 镜像随 tag 自动发布 `2.2.1` / `latest`）
 > - **v2.2.0（桌面客户端支持 + 服务端内容缓存）**：新增 `/api/client` Bearer token 鉴权通道供桌面端伴侣应用使用——现有 WebUI 的 cookie 鉴权、全部配置与行为**完全不变**；服务端为歌词 / 歌单 / 专辑等上游内容加了 LRU+TTL 缓存与 `/lyrics` 路由限流。**无配置变化与破坏性改动**，升级照常拉取重启即可
 > - **v2.1.3（依赖维护）**：`@honeybbq/teamspeak-client` 升 0.2.3（上游修复 clientEnter 频道号恒 0 的缺陷，自动暂停 / 恢复的占用判定更精准）；清理上游遗留的未使用依赖。**无配置变化与破坏性改动**，Docker 部署照常拉取即可
@@ -974,6 +975,24 @@ A：本项目内置 `/login` 限流（每 IP 每分钟 5 次），但生产部�
 > - **v2.1.1（播放转场听感优化）**：无配置变化与破坏性改动
 > - **游客模式默认权限收紧（v2.1.0 安全加固）**：8 项游客开关现默认**全部关闭**——此前「添加到队列末尾」默认开启，未显式配置过的部署升级后游客将无法加歌，请在 设置 → 游客模式 按需重新放开
 > - 源码部署拉取后重新构建即可；**Docker 部署只需 `docker-compose pull && docker-compose up -d`**（GHCR 已发布 `2.2.0` / `latest` 多架构镜像）；移动端浏览器若行为异常请强刷一次（Service Worker 缓存旧资源）
+
+### v2.2.2：修复多机器人下拉栏播放控制错位
+
+修复一个 WebUI 多机器人操作的缺陷。**没有配置变化，没有破坏性改动**，升级照常拉取重启即可（纯前端修复，浏览器若行为异常请强刷一次）。
+
+**问题现象**
+
+- 多机器人运行时，在顶栏机器人切换下拉栏里点某一行的「停止 / 播放 / 下一首」，实际被控制的是**当前选中的机器人**而不是按钮所在行的机器人——比如正看着机器人 1 的页面，点机器人 2 行的暂停，结果机器人 1 被暂停了；切歌（下一首）同样错位，且进度/状态的乐观更新也打在错误的机器人上。
+
+**根因**
+
+- 下拉栏按钮无参调用 store 的 `pause()/resume()/next()`，而这些方法（含上一首）一律作用于当前选中的机器人（`activeBotId`）——API 请求目标、乐观更新、进度计时三处全部打错。
+
+**修复**
+
+- 播放控制方法（暂停 / 播放 / 下一首 / 上一首）支持显式传入 botId，API 请求、乐观更新与进度计时全部跟随目标 bot；下拉栏按钮改为作用于所在行机器人。
+- 无参调用语义不变：主播放器与迷你播放器的「控制当前机器人」行为零改动。
+- 跨机器人控制不再触发当前机器人的轮询同步，目标行状态由 WebSocket 广播回填。
 
 ### v2.2.1：修复长暂停后恢复静音直到切歌
 
