@@ -10,6 +10,8 @@
 
         <SettingsAccount v-if="activeTab === 'general'" class="mt-6" />
 
+        <SettingsNeteaseAccount v-if="activeTab === 'general'" class="mt-6" />
+
         <SettingsBots
           v-if="activeTab === 'bots'"
           :bots="store.bots"
@@ -193,6 +195,7 @@ import { useAuthStore } from '../stores/auth';
 import SettingsLayout, { type TabDef } from '../components/settings/SettingsLayout.vue';
 import SettingsTheme from '../components/settings/SettingsTheme.vue';
 import SettingsAccount from '../components/settings/SettingsAccount.vue';
+import SettingsNeteaseAccount from '../components/settings/SettingsNeteaseAccount.vue';
 import SettingsQuality from '../components/settings/SettingsQuality.vue';
 import SettingsBots from '../components/settings/SettingsBots.vue';
 import SettingsPlatforms from '../components/settings/SettingsPlatforms.vue';
