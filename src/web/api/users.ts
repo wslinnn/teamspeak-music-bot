@@ -5,6 +5,7 @@ import { UsernameTakenError, GUEST_USER_ID } from "../../data/users.js";
 import type { SessionStore } from "../../data/sessions.js";
 import { hashToken } from "../../data/sessions.js";
 import type { ClientTokenStore } from "../../data/client-tokens.js";
+import type { ApiKeyStore } from "../../data/api-keys.js";
 import type { AuditStore } from "../../data/audit.js";
 import { isCapability, BASIC_TIER_CAPABILITIES, type PermissionStore } from "../../data/permissions.js";
 import { extractSessionToken } from "../auth/validateSession.js";
@@ -25,7 +26,8 @@ export function createUsersRouter(
   logger: Logger,
   permissions: PermissionStore,
   // Audit SEC-08: close the target user's live WS sockets after revocation.
-  onSessionsRevoked?: (userId: string, exceptTokenHash?: string) => void
+  onSessionsRevoked?: (userId: string, exceptTokenHash?: string) => void,
+  apiKeys?: ApiKeyStore
 ): Router {
   const router = Router();
 
@@ -91,6 +93,7 @@ export function createUsersRouter(
     // FK CASCADE removes sessions; explicit call is belt-and-suspenders
     sessions.deleteAllForUser(targetId);
     clientTokens.deleteAllForUser(targetId);
+    apiKeys?.deleteAllForUser(targetId);
     onSessionsRevoked?.(targetId);
     try {
       audit.record({
@@ -126,6 +129,9 @@ export function createUsersRouter(
     sessions.deleteAllForUser(targetId, exceptToken);
     // Admin-forced reset spares no client token either.
     clientTokens.deleteAllForUser(targetId);
+    // A password reset must also kill the target's API keys — they are
+    // long-lived credentials that otherwise survive credential rotation.
+    apiKeys?.deleteAllForUser(targetId);
     onSessionsRevoked?.(targetId, exceptToken ? hashToken(exceptToken) : undefined);
     try {
       audit.record({

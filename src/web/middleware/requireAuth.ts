@@ -2,6 +2,8 @@ import type { Request, Response, NextFunction, RequestHandler } from "express";
 import type { SessionStore, SessionValidation } from "../../data/sessions.js";
 import { SESSION_TTL_MS } from "../../data/sessions.js";
 import type { ClientTokenStore } from "../../data/client-tokens.js";
+import type { ApiKeyStore } from "../../data/api-keys.js";
+import { API_KEY_RAW_PREFIX } from "../../data/api-keys.js";
 import { resolvePermissionContext, type PermissionStore, type GuestPermissions } from "../../data/permissions.js";
 import type { GuestModeConfig } from "../../data/config.js";
 import {
@@ -9,6 +11,7 @@ import {
   extractSessionToken,
   SESSION_COOKIE_NAME,
 } from "../auth/validateSession.js";
+import { extractApiKey } from "../auth/api-key-header.js";
 
 declare module "express-serve-static-core" {
   interface Request {
@@ -20,6 +23,8 @@ declare module "express-serve-static-core" {
       bots?: "all" | Set<string>;
       guest?: GuestPermissions;
     };
+    /** How this request authenticated: browser session cookie or API key. */
+    authMethod?: "session" | "api-key";
   }
 }
 
@@ -27,9 +32,38 @@ export function createRequireAuth(
   sessions: SessionStore,
   clientTokens: ClientTokenStore,
   permissions: PermissionStore,
-  getGuestConfig: () => GuestModeConfig
+  getGuestConfig: () => GuestModeConfig,
+  apiKeys?: ApiKeyStore
 ): RequestHandler {
   return function requireAuth(req: Request, res: Response, next: NextFunction) {
+    // ─── API-key path ──────────────────────────────────────────────────────
+    // A key in a header authenticates on its own; cookies are ignored on this
+    // path so the two credential types can never be mixed.
+    const rawKey = extractApiKey(req);
+    // Fork coexistence: `Authorization: Bearer` also carries desktop client
+    // tokens, so only a key-SHAPED credential claims the API-key path — an
+    // explicit X-API-Key header is unambiguous, raw keys are always tsmb_-prefixed.
+    const apiKeyCredential = rawKey !== null &&
+      (typeof req.headers["x-api-key"] === "string" || rawKey.startsWith(API_KEY_RAW_PREFIX));
+    if (apiKeyCredential && rawKey !== null) {
+      const validation = apiKeys?.validateAndTouch(rawKey) ?? null;
+      if (!validation) {
+        res.status(401).json({ error: "invalid api key" });
+        return;
+      }
+      const ctx = resolvePermissionContext(validation.role, validation.userId, permissions);
+      req.user = {
+        id: validation.userId,
+        username: validation.username,
+        role: validation.role,
+        capabilities: ctx.capabilities,
+        bots: ctx.bots,
+      };
+      req.authMethod = "api-key";
+      next();
+      return;
+    }
+
     // Bearer path (non-browser clients): an explicit header credential fails
     // loudly — no fallback to any ambient cookie, no cookie side effects.
     const authHeader = req.headers.authorization;
@@ -75,6 +109,7 @@ export function createRequireAuth(
       bots: ctx.bots,
       guest: ctx.guest,
     };
+    req.authMethod = "session";
     // Sliding renewal is cookie-session bookkeeping only.
     if (!viaBearer) {
       const token = extractSessionToken(req.headers.cookie);

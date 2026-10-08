@@ -4,6 +4,7 @@ import type { Logger } from "../../logger.js";
 import type { UserStore } from "../../data/users.js";
 import type { SessionStore } from "../../data/sessions.js";
 import type { ClientTokenStore } from "../../data/client-tokens.js";
+import type { ApiKeyStore } from "../../data/api-keys.js";
 import type { AuditStore } from "../../data/audit.js";
 import { resolvePermissionContext, type PermissionStore } from "../../data/permissions.js";
 import { SESSION_TTL_MS, GUEST_SESSION_TTL_MS, hashToken } from "../../data/sessions.js";
@@ -77,7 +78,8 @@ export function createSessionRouter(
   getGuestConfig: () => GuestModeConfig,
   // Audit SEC-08: lets the router ask the WS hub to close sockets whose
   // session was just revoked (logout / password change).
-  onSessionsRevoked?: (userId: string, exceptTokenHash?: string) => void
+  onSessionsRevoked?: (userId: string, exceptTokenHash?: string) => void,
+  apiKeys?: ApiKeyStore
 ): Router {
   const router = Router();
 
@@ -233,6 +235,8 @@ export function createSessionRouter(
     // Client bearer tokens have no "current" to spare — all of them die with
     // the password change (re-login on the desktop app).
     clientTokens.deleteAllForUser(u.id);
+    // Rotating a password must also kill long-lived API keys (b9c79c8).
+    apiKeys?.deleteAllForUser(u.id);
     // Audit SEC-08: kill this user's other live WS sockets (current session
     // survives, and so does its socket).
     onSessionsRevoked?.(u.id, currentToken ? hashToken(currentToken) : undefined);

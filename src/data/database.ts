@@ -174,6 +174,10 @@ export interface BotDatabase {
   getSongFavorites(userId: string): SongFavoriteRecord[];
   deleteSongFavorite(id: number, userId: string): boolean;
   isSongFavorite(userId: string, songId: string, platform: string): boolean;
+  // Per-user music account cookies (#164).
+  getUserMusicCookie(userId: string, platform: string): string | null;
+  setUserMusicCookie(userId: string, platform: string, cookie: string): void;
+  deleteUserMusicCookie(userId: string, platform: string): boolean;
   // Saved queues (Feature 1) — upsert by (ownerId, name), capped.
   saveQueue(ownerId: string, name: string, songs: StoredSong[], createdBy?: string): SavedQueue;
   listSavedQueues(ownerId: string, includeShared: boolean): SavedQueueMeta[];
@@ -374,6 +378,17 @@ function initTables(db: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_client_tokens_userId ON client_tokens(userId);
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      keyHash TEXT NOT NULL UNIQUE,
+      keyPrefix TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      lastUsedAt INTEGER,
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_keys_userId ON api_keys(userId);
 
     CREATE TABLE IF NOT EXISTS user_audit (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -447,6 +462,17 @@ function initTables(db: Database.Database): void {
       fmPlatform   TEXT NOT NULL DEFAULT '',
       wasPlaying   INTEGER NOT NULL DEFAULT 0,
       updatedAt    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- A web user's own music-platform login (#164), used for their personal
+    -- FM instead of the bot's shared account. Secret: never sent to clients.
+    CREATE TABLE IF NOT EXISTS user_music_cookies (
+      userId    TEXT NOT NULL,
+      platform  TEXT NOT NULL,
+      cookie    TEXT NOT NULL,
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (userId, platform),
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
 }
@@ -599,6 +625,16 @@ export function createDatabase(dbPath: string): BotDatabase {
   const checkSongFavorite = db.prepare(`
     SELECT 1 FROM favorites WHERE userId = ? AND songId = ? AND platform = ? LIMIT 1
   `);
+  const selectUserMusicCookie = db.prepare(
+    `SELECT cookie FROM user_music_cookies WHERE userId = ? AND platform = ?`,
+  );
+  const upsertUserMusicCookie = db.prepare(`
+    INSERT INTO user_music_cookies (userId, platform, cookie) VALUES (?, ?, ?)
+    ON CONFLICT(userId, platform) DO UPDATE SET cookie = excluded.cookie, updatedAt = datetime('now')
+  `);
+  const deleteUserMusicCookieStmt = db.prepare(
+    `DELETE FROM user_music_cookies WHERE userId = ? AND platform = ?`,
+  );
 
   // A corrupt/hand-edited songs blob must never throw into a route or the
   // restore path — degrade to an empty list instead.
@@ -810,6 +846,19 @@ export function createDatabase(dbPath: string): BotDatabase {
     isSongFavorite(userId, songId, platform) {
       const row = checkSongFavorite.get(userId, songId, platform);
       return row !== undefined;
+    },
+
+    getUserMusicCookie(userId, platform) {
+      const row = selectUserMusicCookie.get(userId, platform) as { cookie: string } | undefined;
+      return row?.cookie ?? null;
+    },
+
+    setUserMusicCookie(userId, platform, cookie) {
+      upsertUserMusicCookie.run(userId, platform, cookie);
+    },
+
+    deleteUserMusicCookie(userId, platform) {
+      return deleteUserMusicCookieStmt.run(userId, platform).changes > 0;
     },
 
     saveQueue(ownerId, name, songs, createdBy) {

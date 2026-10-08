@@ -21,8 +21,10 @@ import { createAuditStore } from "../data/audit.js";
 import { createAuditRouter } from "./api/audit.js";
 import { createFavoritesRouter } from "./api/favorites.js";
 import { createSongFavoritesRouter } from "./api/song-favorites.js";
+import { createPersonalMusicRouter } from "./api/personal-music.js";
 import { createSavedQueuesRouter } from "./api/saved-queues.js";
 import { createSpotifyRouter } from "./api/spotify.js";
+import { createApiKeysRouter } from "./api/api-keys.js";
 import type { SpotifyOAuth } from "../music/spotify/spotify-oauth.js";
 import type { SpotifyProvider } from "../music/spotify/provider.js";
 import type { JellyfinProvider } from "../music/jellyfin.js";
@@ -35,6 +37,7 @@ import { setupWebSocket } from "./websocket.js";
 import { createUserStore } from "../data/users.js";
 import { createSessionStore } from "../data/sessions.js";
 import { createClientTokenStore } from "../data/client-tokens.js";
+import { createApiKeyStore } from "../data/api-keys.js";
 import { createPermissionStore } from "../data/permissions.js";
 import { createRequireAuth } from "./middleware/requireAuth.js";
 import { requireAdmin } from "./middleware/requireAdmin.js";
@@ -117,6 +120,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   const clientTokens = createClientTokenStore(options.database.db);
   const audit = createAuditStore(options.database.db);
   const permissions = createPermissionStore(options.database.db);
+  const apiKeys = createApiKeyStore(options.database.db);
 
   // ─── Public routes (no auth, no CSRF) ───────────────────────────────────
   // Disallow every crawler (issue #128). Declared before the static SPA
@@ -168,7 +172,8 @@ export function createWebServer(options: WebServerOptions): WebServer {
     createSessionRouter(
       users, sessions, clientTokens, audit, logger, permissions,
       () => options.config.guestMode,
-      (userId, exceptHash) => onSessionsRevoked(userId, exceptHash)
+      (userId, exceptHash) => onSessionsRevoked(userId, exceptHash),
+      apiKeys
     )
   );
 
@@ -182,7 +187,7 @@ export function createWebServer(options: WebServerOptions): WebServer {
   );
 
   // ─── Gates for everything else under /api ───────────────────────────────
-  const requireAuth = createRequireAuth(sessions, clientTokens, permissions, () => options.config.guestMode);
+  const requireAuth = createRequireAuth(sessions, clientTokens, permissions, () => options.config.guestMode, apiKeys);
   app.use("/api", csrfOriginCheck);
   app.use("/api", requireAuth);
 
@@ -267,6 +272,13 @@ export function createWebServer(options: WebServerOptions): WebServer {
     requireNotGuest,
     createSongFavoritesRouter(options.database, (data) => broadcastToClients(data), logger)
   );
+  // The caller's own NetEase login for their personal FM (#164). Guests share
+  // one anonymous identity, so they cannot link an account.
+  app.use(
+    "/api/me/music",
+    requireNotGuest,
+    createPersonalMusicRouter(options.database, options.neteaseProvider, logger),
+  );
   // Saved queues (Feature 1, #119). Members + admins only (requireNotGuest);
   // the router itself 403s every route unless savedQueuesEnabled is on.
   app.use(
@@ -286,9 +298,13 @@ export function createWebServer(options: WebServerOptions): WebServer {
     requireAdmin,
     createUsersRouter(users, sessions, clientTokens, audit, logger, permissions, (userId, exceptHash) =>
       onSessionsRevoked(userId, exceptHash)
-    )
+    , apiKeys)
   );
   app.use("/api/audit", requireAdmin, createAuditRouter(audit));
+
+  // API-key management — interactive sessions only (guests excluded; the
+  // router itself rejects key-authenticated requests).
+  app.use("/api/keys", requireNotGuest, createApiKeysRouter(apiKeys, audit, logger));
 
   // ─── Static SPA (public) ────────────────────────────────────────────────
   if (options.staticDir) {

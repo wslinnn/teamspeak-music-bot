@@ -4,6 +4,7 @@ import {
   type TS3ClientOptions,
   type TS3TextMessage,
   type TS3VoiceActivity,
+  type TS3VoiceSendFailure,
 } from "../ts-protocol/client.js";
 import { AudioPlayer } from "../audio/player.js";
 import { PlayQueue, PlayMode, type QueuedSong } from "../audio/queue.js";
@@ -14,7 +15,13 @@ import {
   canRunCommand,
   type ParsedCommand,
 } from "./commands.js";
-import { parseSongRef, parseSelectionIndex } from "./song-ref.js";
+import {
+  parseSongRef,
+  parseSelectionIndex,
+  parsePlaylistRef,
+  findShareShortLink,
+  resolveShareLink,
+} from "./song-ref.js";
 import { splitTextIntoChunks } from "./text-chunk.js";
 import type { Logger } from "../logger.js";
 import { SHARED_QUEUE_OWNER, type BotDatabase, type ProfileConfig, type StoredSong } from "../data/database.js";
@@ -29,7 +36,7 @@ import type { JellyfinPlaybackReporter } from "../music/jellyfin.js";
 import { sanitizeJellyfinCoverUrl } from "../music/jellyfin.js";
 import { BotProfileManager } from "./profile.js";
 import type { AvatarStore } from "../data/avatars.js";
-import { decideOccupancyAction, shouldResumeOnReturn } from "./auto-pause.js";
+import { decideOccupancyAction, occupancyFromClientList, shouldResumeOnReturn } from "./auto-pause.js";
 import { ChannelView } from "./channel-view.js";
 import { isSpotifyUri } from "../music/spotify/webapi.js";
 import path from "node:path";
@@ -187,6 +194,9 @@ export class BotInstance extends EventEmitter {
   private logger: Logger;
   private avatarStore: AvatarStore;
   private connected = false;
+  /** Fences async work and timers from earlier TeamSpeak connections. */
+  private lifecycleGeneration = 0;
+  private occupancyRequest = 0;
   private disconnectEmitted = false;
   private voteSkipUsers = new Set<string>();
   private isAdvancing = false;
@@ -211,6 +221,8 @@ export class BotInstance extends EventEmitter {
   /** 当前曲播放链接的签发时刻（Date.now()）。resolveAndPlay 与恢复期重取成功后
    *  更新；seek/普通恢复不重签链接故不改。0 表示尚未解析过。 */
   private lastUrlResolvedAt = 0;
+  /** Resume attempts for the current song's stream (#161); see resumeInterruptedStream. */
+  private streamRecovery: { song: QueuedSong; attempts: number; position: number; session: number; generation: number; pauseRequested: boolean; inFlight: boolean } | null = null;
   private playGate: Promise<unknown> = Promise.resolve();
   /** Per-bot Jellyfin playback-report session (start / ~10s progress / stop).
    *  null when the wired provider has no reporting capability. */
@@ -336,14 +348,41 @@ export class BotInstance extends EventEmitter {
 
   private setupPlayerEvents(): void {
     this.player.on("frame", (opusFrame: Buffer) => {
-      this.tsClient.sendVoiceData(opusFrame);
+      const result = this.tsClient.sendVoiceData(opusFrame);
+      // A terminal fault can outlive a pause, queue change, or URL recovery.
+      // Retry the actual send first so a repaired transport can clear it.
+      if (result === "failed" && this.connected && this.player.getState() === "playing") {
+        this.logger.warn("Voice transport is still failing; playback paused");
+        this.cmdPause(true); // 传输已死：立即停发，不做淡出/静音尾
+      }
     });
 
     this.player.on("trackEnd", () => {
-      this.logger.debug("Track ended, advancing queue");
-      this.playNext().catch((err) => {
-        this.logger.error({ err }, "playNext failed after trackEnd");
-      });
+      const endedSong = this.queue.current();
+      const endedSession = this.player.getPlaybackSessionId();
+      this.resumeInterruptedStream()
+        .catch(() => {
+          this.logger.warn({ sessionId: endedSession, reason: "recovery-error" }, "Stream resume failed");
+          return false;
+        })
+        .then((resumed) => {
+          if (resumed) return;
+          // A pending command may replace, stop, or restart the same queue
+          // song before this continuation. Only advance the session that ended.
+          if (
+            !this.connected ||
+            this.queue.current() !== endedSong ||
+            this.player.getPlaybackSessionId() !== endedSession ||
+            this.player.getState() !== "idle" ||
+            (this.streamRecovery?.song === endedSong && this.streamRecovery.session === endedSession &&
+              (this.streamRecovery.pauseRequested || this.streamRecovery.inFlight))
+          ) return;
+          this.logger.debug("Track ended, advancing queue");
+          return this.playNext();
+        })
+        .catch((err) => {
+          this.logger.error({ err }, "playNext failed after trackEnd");
+        });
     });
 
     this.player.on("error", (err: Error) => {
@@ -403,6 +442,22 @@ export class BotInstance extends EventEmitter {
   }
 
   private setupTsEvents(): void {
+    this.tsClient.on("voiceSendFailed", (failure: TS3VoiceSendFailure) => {
+      if (!this.connected) return;
+      const recovery = this.streamRecovery;
+      const pendingRecovery = this.player.getState() === "idle" && recovery &&
+        recovery.song === this.queue.current() && recovery.generation === this.lifecycleGeneration &&
+        recovery.session === this.player.getPlaybackSessionId();
+      if (this.player.getState() !== "playing" && !pendingRecovery) return;
+      this.logger.warn(
+        { code: failure.code, consecutiveFailures: failure.consecutiveFailures, durationMs: failure.durationMs },
+        "Voice transmission failed; playback paused. Restore the connection before resuming",
+      );
+      // Preserve the queue and seek position. Use the normal pause path so
+      // Spotify also pauses and occupancy cannot resume a broken transport.
+      this.cmdPause(true); // 传输已死：立即停发，不做淡出/静音尾
+    });
+
     this.tsClient.on("textMessage", (msg: TS3TextMessage) => {
       this.handleTextMessage(msg).catch((err) => {
         this.logger.error({ err }, "Unhandled error in text message handler");
@@ -414,7 +469,9 @@ export class BotInstance extends EventEmitter {
       // completed (hanging handshake → 60s library idle timeout) and
       // this.connected was never flipped to true. Previously this handler
       // short-circuited on !this.connected, leaving player stuck as "playing".
+      this.lifecycleGeneration++;
       this.connected = false;
+      this._cancelIdleTimer();
       this.unregisterManagedVoiceClient(MANAGED_VOICE_CLIENT_RELEASE_GRACE_MS);
       this.voiceDucking.reset(true);
       // Cancel any pending live-queue snapshot BEFORE clearing the queue: a
@@ -446,6 +503,8 @@ export class BotInstance extends EventEmitter {
     });
 
     this.tsClient.on("connected", () => {
+      this.lifecycleGeneration++;
+      this._cancelIdleTimer();
       // Fresh connection — clear any stale auto-pause flag from a prior session.
       this.autoPaused = false;
       // 事件源频道视图播种（reset 已移至 disconnected）：连接握手期送达的
@@ -494,14 +553,17 @@ export class BotInstance extends EventEmitter {
     // Fork：clientEnter 是自动恢复的快路径（部分环境 observe 到 leave 推送
     // 可达而 enter 不可达——不可达时由 voiceActivity 与 5s 加速对账兜底）。
     this.tsClient.on("clientEnter", (info: { id: number; channelID: bigint }) => {
-      this.channelView.onEnter(info);
+      // info 可缺省：合并后该事件也承担上游「触发占用对账」的角色，允许无载荷触发
+      if (info) this.channelView.onEnter(info);
       this._resumeIfReturning("clientEnter");
       this.applyChannelView();
+      void this.refreshOccupancy(); // upstream 围栏查询：与事件视图并行校准占用
     });
     this.tsClient.on("clientLeave", (event: { id: number }) => {
       this.channelView.onLeave(event.id);
       this.voiceDucking.removeSpeaker(event.id);
       this.applyChannelView();
+      void this.refreshOccupancy();
     });
     this.tsClient.on("clientMoved", (event: { id: number; targetChannelID: bigint }) => {
       this.channelView.onMoved(event);
@@ -511,10 +573,16 @@ export class BotInstance extends EventEmitter {
         this.voiceDucking.reset(false);
         // 新频道成员由 enterview 回放/对账重建，在此之前占用未知（不动作）
         void this.reconcileChannelView();
+        // Carry the now-playing channel description over to the new
+        // channel instead of leaving it stale in the old one (#159).
+        this.profileManager.onChannelMoved(event.targetChannelID).catch((err) => {
+          this.logger.warn({ err }, "Channel description move update failed");
+        });
       } else {
         this.voiceDucking.removeSpeaker(event.id);
       }
       this.applyChannelView();
+      void this.refreshOccupancy();
     });
   }
 
@@ -578,7 +646,35 @@ export class BotInstance extends EventEmitter {
     }
   }
 
+  /**
+   * Upstream occupancy reconcile (fenced by request id / generation / client
+   * identity). Not wired into the 30s poll — the fork's event-sourced
+   * channelView + reconcileChannelView own production decisions; this exists
+   * for the upstream fencing tests and as the vehicle for the planned
+   * fencing port into reconcileChannelView (T1).
+   */
+  private async refreshOccupancy(): Promise<void> {
+    if (!this.connected) return;
+    const request = ++this.occupancyRequest;
+    const generation = this.lifecycleGeneration;
+    const client = this.tsClient;
+    try {
+      const clients = await client.getClientsInChannel();
+      if (!this.connected || this.lifecycleGeneration !== generation ||
+          this.occupancyRequest !== request || this.tsClient !== client) return;
+      // A 0-length result means the clientlist query failed (the bot is always
+      // in its own channel) — occupancy is unknown, so don't act. Acting on it
+      // would mis-read it as "empty" and falsely auto-pause / idle-disconnect.
+      const userCount = occupancyFromClientList(clients.length);
+      if (userCount !== null) this.handleOccupancy(userCount);
+    } catch {
+      // ignore — the 30s poll is the fallback
+    }
+  }
+
   async connect(): Promise<void> {
+    this.lifecycleGeneration++;
+    this._cancelIdleTimer();
     this.disconnectEmitted = false;
     await this.tsClient.connect();
     const resolvedEndpoint = this.tsClient.getResolvedVoiceEndpoint();
@@ -611,6 +707,7 @@ export class BotInstance extends EventEmitter {
   }
 
   disconnect(): void {
+    this.lifecycleGeneration++;
     this._cancelIdleTimer();
     this.voiceDucking.reset(true);
     // Cancel any pending live-queue snapshot before clearing so it can't fire
@@ -674,10 +771,12 @@ export class BotInstance extends EventEmitter {
     // 每 30 秒做一次对账：与 WebUI 频道树同源的查询，作为推送事件之外
     // 的权威快照修正。自动恢复主要由 enter 事件与语音活动秒级触发，
     // 对账只作兜底（静默进入频道的听众最多延迟一个周期被恢复）。
+    const generation = this.lifecycleGeneration;
     const poll = async () => {
-      if (!this.connected) return;
+      if (!this.connected || this.lifecycleGeneration !== generation) return;
       await this.reconcileChannelView();
-      setTimeout(poll, 30_000);
+      await this.refreshOccupancy(); // upstream：频道级围栏查询直接驱动占用决策
+      if (this.connected && this.lifecycleGeneration === generation) setTimeout(poll, 30_000);
     };
     setTimeout(poll, 30_000);
   }
@@ -806,12 +905,21 @@ export class BotInstance extends EventEmitter {
           this.logger.warn({ err }, "Spotify resume failed (occupancy)"));
         finalize();
       } else {
-        // 长暂停后链接可能已过期：先尝试重取并按暂停位置重建，失败/不适用
-        // 则回退原恢复路径（tryResumeAgedUrl 返回 false 时不抛错）。
-        void this.tryResumeAgedUrl().then((refreshed) => {
-          if (!refreshed) this.player.resume();
+        // 长暂停后链接可能已过期：确实老化才先重取并按暂停位置重建（异步），
+        // 否则同步恢复——上游的 clientEnter 恢复语义是即时的，不必要时不该
+        // 引入微任务延迟。重取失败回退原恢复路径（tryResumeAgedUrl 不抛错）。
+        if (
+          this.lastUrlResolvedAt > 0 &&
+          Date.now() - this.lastUrlResolvedAt >= URL_REFRESH_AGE_MS
+        ) {
+          void this.tryResumeAgedUrl().then((refreshed) => {
+            if (!refreshed) this.player.resume();
+            finalize();
+          });
+        } else {
+          this.player.resume();
           finalize();
-        });
+        }
       }
     }
   }
@@ -843,8 +951,9 @@ export class BotInstance extends EventEmitter {
     if (this.idleTimer !== null) return; // 已经在倒计时，不重复创建
     const minutes = this.config.idleTimeoutMinutes ?? 0;
     if (!this.connected || minutes <= 0) return;
+    const generation = this.lifecycleGeneration;
     this.idleTimer = setTimeout(() => {
-      if (!this.connected) return;
+      if (!this.connected || this.lifecycleGeneration !== generation) return;
       this.logger.info({ idleMinutes: minutes }, "Channel empty, disconnecting due to idle timeout");
       this.disconnect();
     }, minutes * 60 * 1000);
@@ -1138,6 +1247,14 @@ export class BotInstance extends EventEmitter {
     this.voteSkipUsers.clear();
     const provider = this.getProviderFor(song.platform);
     try {
+      if (song.platform === "bilibili" && (!song.id.includes("?p=") || song.duration === 0)) {
+        const detail = await provider.getSongDetail(song.id);
+        if (detail) {
+          song.duration = detail.duration;
+          song.name = detail.name;
+          song.id = detail.id;
+        }
+      }
       const result = await provider.getSongUrl(song.id);
       if (!result?.url) {
         this.logger.warn({ songId: song.id, name: song.name }, "No URL available, skipping");
@@ -1368,6 +1485,108 @@ export class BotInstance extends EventEmitter {
     }
   }
 
+  /** Platforms whose CDN stream can die mid-file on long content (#89, #161). */
+  private static readonly RESUMABLE_PLATFORMS: ReadonlySet<Platform> = new Set(["bilibili"]);
+  /** A track that ends within this many seconds of its duration ended normally. */
+  private static readonly STREAM_END_TOLERANCE_S = 30;
+  private static readonly MAX_STREAM_RESUMES = 3;
+  private static readonly MAX_STREAM_URL_LOOKUPS = 3;
+
+  /**
+   * Called when the player reports a track end. If a B站 stream ended long
+   * before its known duration, the CDN dropped it (#161): fetch a fresh URL
+   * and continue from where it stopped instead of skipping the rest of a
+   * 2-3 hour video. Gives up after MAX_STREAM_RESUMES attempts that make no
+   * real progress, so a truly broken stream still advances the queue.
+   *
+   * Returns true when it handled the end (resumed, or a newer track has
+   * already taken over), false when the caller should advance the queue.
+   */
+  private async resumeInterruptedStream(): Promise<boolean> {
+    const song = this.queue.current();
+    if (!song || !this.connected || !BotInstance.RESUMABLE_PLATFORMS.has(song.platform)) {
+      return false;
+    }
+    const duration = this.effectiveDuration ?? song.duration;
+    const position = Math.floor(this.player.getElapsed());
+    const endedSession = this.player.getPlaybackSessionId();
+    if (!(duration > 0) || duration - position <= BotInstance.STREAM_END_TOLERANCE_S) {
+      return false;
+    }
+    if (this.player.getState() !== "idle") return true;
+    const generation = this.lifecycleGeneration;
+
+    const recovery = this.streamRecovery;
+    if (
+      !recovery ||
+      recovery.song !== song ||
+      recovery.session !== endedSession ||
+      recovery.generation !== generation ||
+      position - recovery.position > BotInstance.STREAM_END_TOLERANCE_S
+    ) {
+      this.streamRecovery = { song, attempts: 0, position, session: endedSession, generation, pauseRequested: false, inFlight: false };
+    }
+    const state = this.streamRecovery!;
+    if (state.inFlight) return true;
+    if (state.attempts >= BotInstance.MAX_STREAM_RESUMES) {
+      this.logger.warn(
+        { songId: song.id, position, duration, attempts: state.attempts },
+        "Stream keeps ending early — giving up and advancing",
+      );
+      this.streamRecovery = null;
+      return false;
+    }
+    state.position = position;
+
+    this.logger.warn(
+      { songId: song.id, position, duration, attempt: state.attempts + 1 },
+      "Stream ended before the track did — resuming with a fresh URL",
+    );
+    state.inFlight = true;
+    const isCurrent = () => this.connected && this.lifecycleGeneration === generation &&
+      this.streamRecovery === state && this.queue.current() === song &&
+      this.player.getPlaybackSessionId() === endedSession && this.player.getState() === "idle";
+    const cancelled = () => {
+      if (this.streamRecovery === state) this.streamRecovery = null;
+      return true;
+    };
+    try {
+      for (let lookup = 0; lookup < BotInstance.MAX_STREAM_URL_LOOKUPS; lookup++) {
+        if (!isCurrent()) return cancelled();
+        if (lookup > 0) {
+          await new Promise<void>(resolve => setTimeout(resolve, lookup * 1000));
+          if (!isCurrent()) return cancelled();
+        }
+        let result: Awaited<ReturnType<MusicProvider["getSongUrl"]>> = null;
+        let reason = "no-url";
+        try {
+          result = await this.getProviderFor(song.platform).getSongUrl(song.id);
+        } catch {
+          reason = "lookup-error";
+        }
+        // Skip, stop, reconnect, or a new playback session supersedes the lookup.
+        if (!isCurrent()) return cancelled();
+        if (result?.url) {
+          // Lookup retries do not consume the actual decoder resume budget.
+          state.attempts++;
+          song.url = result.url;
+          this.player.play(result.url, position, duration);
+          state.session = this.player.getPlaybackSessionId();
+          if (state.pauseRequested) this.player.pause();
+          this.emit("stateChange");
+          return true;
+        }
+        this.logger.warn(
+          { platform: "bilibili", sessionId: endedSession, position, duration, lookupAttempt: lookup + 1, reason },
+          "Fresh stream URL lookup failed",
+        );
+      }
+      return false;
+    } finally {
+      state.inFlight = false;
+    }
+  }
+
   private async syncProfileToSong(song: QueuedSong | null): Promise<void> {
     try {
       await this.profileManager.onSongChange(song);
@@ -1394,7 +1613,12 @@ export class BotInstance extends EventEmitter {
         return { error: `No recent search. Use ${p}search <name> first.` };
       if (sel > this.lastSearchResults.length)
         return { error: `Invalid selection #${sel}. ${p}search returned ${this.lastSearchResults.length} results.` };
-      return { song: this.lastSearchResults[sel - 1] };
+      let song = this.lastSearchResults[sel - 1];
+      if (song.platform === "bilibili") {
+        const detail = await this.getProviderFor("bilibili").getSongDetail(song.id);
+        if (detail) song = { ...detail, platform: "bilibili" };
+      }
+      return { song };
     }
 
     // 2) id/URL — fetch that exact song.
@@ -1411,7 +1635,12 @@ export class BotInstance extends EventEmitter {
     const provider = this.getProvider(cmd.flags);
     const result = await provider.search(args, 1);
     if (result.songs.length === 0) return { error: `No results found for: ${args}` };
-    return { song: { ...result.songs[0], platform: provider.platform } };
+    let song = result.songs[0];
+    if (provider.platform === "bilibili") {
+      const detail = await provider.getSongDetail(song.id);
+      if (detail) song = detail;
+    }
+    return { song: { ...song, platform: provider.platform } };
   }
 
   private async cmdSearch(cmd: ParsedCommand): Promise<string> {
@@ -1583,8 +1812,12 @@ export class BotInstance extends EventEmitter {
     return `Up next: ${s.name} - ${s.artist}`;
   }
 
-  private cmdPause(): string {
-    this.player.pause();
+  private cmdPause(immediate = false): string {
+    const recovery = this.streamRecovery;
+    if (recovery && recovery.song === this.queue.current() && this.player.getState() === "idle") {
+      recovery.pauseRequested = true;
+    }
+    this.player.pause(immediate);
     if (this.queue.current()?.platform === "spotify") {
       this.spotifyController.pause().catch((err) =>
         this.logger.warn({ err }, "Spotify pause failed"));
@@ -1596,19 +1829,40 @@ export class BotInstance extends EventEmitter {
   }
 
   private async cmdResume(): Promise<string> {
-    // 意图驱动："继续"不区分 paused 还是恢复后的 idle——idle 且队列有当前曲
-    //（忠实恢复的暂停态）时直接起播当前曲，否则该命令对用户是假成功。
-    if (this.player.getState() === "idle") {
-      const current = this.queue.current();
-      if (current) {
-        this.player.resetFailures();
-        const ok = await this.resolveAndPlay(current);
-        if (!ok) return "Failed to resume";
+    // 上游（#161/#89）：断流恢复挂起期间按「继续」→ 重入有界恢复，从暂停位置续播。
+    // ?? null：兼容未初始化该字段的旧测试桩（生产字段恒已初始化）。
+    const recovery = this.streamRecovery ?? null;
+    const state = this.player.getState();
+    const recoveryCurrent = recovery !== null && recovery.song === this.queue.current();
+    const retryInterrupted = recoveryCurrent && !recovery.inFlight && recovery.pauseRequested &&
+      recovery.session === this.player.getPlaybackSessionId() && state === "idle";
+    // lookup 进行中也不能走 idle 起播分支——那会从 0 重播，并使恢复的会话
+    // 校验失配、作废已记录的续播位置；等 lookup 完成后按 resume 意图直接起播。
+    const recoveryInFlight = recoveryCurrent && recovery.inFlight && state === "idle";
+    if (recovery) recovery.pauseRequested = false;
+    if (state === "idle") {
+      if (retryInterrupted) {
+        // A lookup that failed while paused has no stream to resume. Re-enter
+        // the bounded end/recovery handler instead of reporting success forever idle.
+        this.player.emit("trackEnd");
+      } else if (recoveryInFlight) {
+        // 等待进行中的 URL lookup 完成（内部已按清除后的 pauseRequested 处理意图）。
+      } else {
+        // 意图驱动："继续"不区分 paused 还是恢复后的 idle——idle 且队列有当前曲
+        //（忠实恢复的暂停态）时直接起播当前曲，否则该命令对用户是假成功。
+        const current = this.queue.current();
+        if (current) {
+          this.player.resetFailures();
+          const ok = await this.resolveAndPlay(current);
+          if (!ok) return "Failed to resume";
+        }
       }
     } else {
       // spotify 曲目保持同步委派（sidecar 自己管传输）；URL 曲目长暂停后链接
       // 可能已过期，先尝试重取，不适用/失败则回退原 resume 逻辑。
-      const refreshed = this.queue.current()?.platform !== "spotify"
+      // 恢复挂起期间例外：让位给 recovery 交付续播（此时重取会作废恢复会话）。
+      const refreshed = !recoveryCurrent
+        && this.queue.current()?.platform !== "spotify"
         && (await this.tryResumeAgedUrl());
       if (!refreshed) {
         this.player.resume();
@@ -1798,8 +2052,21 @@ export class BotInstance extends EventEmitter {
   }
 
   private async cmdPlaylist(cmd: ParsedCommand, requesterName?: string): Promise<string> {
-    if (!cmd.args) return "Usage: !playlist <playlist name or ID>";
-    const provider = this.getProvider(cmd.flags);
+    if (!cmd.args) return "Usage: !playlist <playlist name, ID or link>";
+
+    // A playlist link (#160) names its own platform, so it wins over flags.
+    // App share short links are followed one hop to the real URL first.
+    let ref = parsePlaylistRef(cmd.args);
+    if (!ref) {
+      const shortLink = findShareShortLink(cmd.args);
+      if (shortLink) {
+        const target = await resolveShareLink(shortLink);
+        ref = target ? parsePlaylistRef(target) : null;
+        if (!ref) return "Could not open that share link — paste the full playlist link or its ID instead";
+      }
+    }
+    if (ref) this.assertProviderEnabled(ref.platform);
+    const provider = ref ? this.getProviderFor(ref.platform) : this.getProvider(cmd.flags);
 
     // Determine if input is a direct ID (numeric / Jellyfin GUID) or a name search
     const id = this.extractId(cmd.args);
@@ -1807,7 +2074,9 @@ export class BotInstance extends EventEmitter {
 
     let playlistId: string;
 
-    if (isDirectId || id !== cmd.args) {
+    if (ref) {
+      playlistId = ref.id;
+    } else if (isDirectId || id !== cmd.args) {
       // Input is a direct ID or URL containing an ID — use existing logic
       playlistId = id;
     } else {
@@ -2304,12 +2573,17 @@ export class BotInstance extends EventEmitter {
   }
 
   getStatus(): BotStatus {
+    const playerState = this.player.getState();
+    const recovery = this.streamRecovery;
+    const recoveryPaused = playerState === "idle" && recovery?.pauseRequested &&
+      recovery.song === this.queue.current() && recovery.generation === this.lifecycleGeneration &&
+      recovery.session === this.player.getPlaybackSessionId();
     return {
       id: this.id,
       name: this.name,
       connected: this.connected,
-      playing: this.player.getState() === "playing",
-      paused: this.player.getState() === "paused",
+      playing: playerState === "playing",
+      paused: playerState === "paused" || !!recoveryPaused,
       currentSong: this.queue.current(),
       queueSize: this.queue.size(),
       volume: this.player.getVolume(),
