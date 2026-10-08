@@ -21,24 +21,35 @@ git show upstream-ref:src/bot/instance.ts     # 直接查看上游版某文件
 ## 与上游的结构性差异（为什么不能直接吸收上游前端）
 
 - 前端：本 fork 使用 **Tailwind CSS 4 + Vite 6**（上游为 SCSS + Vite 6，2026-08 已同步升级到 Vite 6；构建栈同代，样式体系仍是接管边界）。`web/` 由本 fork 完全接管，上游新增的前端页面（如已存队列、用户管理）需用 Tailwind 自行实现，只参考上游的交互逻辑与 API 契约。前端逐项差异见 `docs/frontend-diff-vs-upstream.md`。
-- 鉴权：使用上游的会话式多用户体系（`/api/session`），旧主线的 JWT 鉴权已废弃。
+- 鉴权：使用上游的会话式多用户体系（`/api/session`），旧主线的 JWT 鉴权已废弃。**Bearer 凭据三分流**（v1.15.2 合并起）：`X-API-Key` 头或 `tsmb_` 前缀 Bearer 走上游 API key（`API_KEY_RAW_PREFIX`），其余 Bearer 走 fork 桌面端 client token，无凭据回落 cookie 会话——动 `requireAuth.ts` 时三分支顺序与门槛不可破坏，上游测试与 fork 测试同时守护它。
 - 路由冲突处理：上游 `/api/favorites` 是按用户的歌单收藏，本 fork 的歌曲收藏挂载在 **`/api/song-favorites`**。两者语义并存、互不冲突（一个收藏歌单、一个收藏歌曲）；`/api/favorites` 族（搜索/歌单页红心 + Library 音乐库页）已于 2026-08 前端对接（见 `docs/rebuild-gap-fix-plan.md` D12），**不是死代码，不要删除**。
 
 ## 同步上游的例行流程
 
 ```bash
 git fetch upstream
+# 0) 试合并预检（不落工作区）：确认冲突面与「双方都改的 web 文件」清单
+git merge-tree --write-tree main upstream/main
 git merge upstream/main
-# 1) 前端冲突由 merge=ours 自动保留我们的版本（见下节）
-# 2) 清理上游新增的、未被我们引用的 web 文件：
-git diff --name-only upstream/main -- web/   # 人工确认后 git rm 未引用的 SCSS 页面
+# 1) 前端无需回退：web/** 的 merge=ours 在「双方都改」时即生效（不只冲突时），
+#    自动合并也保 fork 版本；合并后用 git diff main --stat -- web/ 验证，
+#    预期只剩上游新增且我们保留的纯 TS 文件；上游 SCSS 组件按接管边界 git rm
+#    （不删会让 vue-tsc/根 vitest 收集到无法解析的依赖）
+# 2) 上游新增/变更的测试有三类必然适配：工厂函数按并集签名改调用点、
+#    上游测试桩补 fork 字段（channelView/getChannelId/tryResumeAgedUrl 等）、
+#    fork 独有路径补模块级 vi.mock（如 client-voice 的 getClientInfo）
 # 3) 跑测试
 npm install && npm run build && npm test
 # 4) 更新参考分支
 git branch -f upstream-ref upstream/main
+# 5) 三方 diff 审查（ours=合并前 main / theirs=upstream/main / result）：
+#    git diff upstream/main -- src/ 的每个 hunk 都必须是「有意的 fork 增量」，
+#    任何无法解释的 hunk 都是事故
 ```
 
-预期冲突只剩 README / package.json / package-lock.json 的小摩擦。
+预期冲突只剩 README / package.json / package-lock.json 的小摩擦；后端冲突
+以「上游框架为底、fork 增量移植回上游结构」为基调（v1.15.2 合并实例见
+提交 2254dca）。
 
 ## 协作者一次性配置
 
@@ -62,6 +73,7 @@ git config merge.ours.driver true
 | 队列重排序 | `src/audio/queue.ts` 的 `reorder()`、`!reorder` 命令、`POST /api/player/:botId/queue/reorder` |
 | WebSocket 广播扩展 | `src/web/websocket.ts` 的 `controller.broadcast`（fork 暴露） |
 | Docker 预构建发布 | `.github/workflows/release-docker.yml`、`scripts/docker/docker-compose.prod.yml` |
+| 播放可靠性双机制（v1.15.2 合并起并存） | 长暂停防链接过期 `instance.ts tryResumeAgedUrl`（resume 路径、全平台）⊕ B站断流续播 `resumeInterruptedStream`（trackEnd、仅 bilibili）；占用判定 ChannelView（`channel-view.ts`）⊕ 上游围栏查询 `refreshOccupancy`；cmdResume/cmdPause 的恢复让位与 immediate 语义见各函数注释 |
 
 ## PR 回上游候选
 

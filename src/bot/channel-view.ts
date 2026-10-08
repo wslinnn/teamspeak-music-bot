@@ -7,11 +7,14 @@
  * clid→channel mirror fed by enter/moved and consult it at leave time. This
  * is the same model the official client UI uses for its channel user list.
  *
- * Why not query: the full-server `clientlist` only ever succeeds when the bot
- * is essentially alone (the library times out with ≥2 clients connected),
- * which made the old poll-based auto-pause silently inert whenever anyone
- * else was on the server. Queries are demoted to a reconcile attempt — used
- * when they succeed, never load-bearing.
+ * Why not query (for the view): the full-server `clientlist` only ever
+ * succeeds when the bot is essentially alone (the library times out with ≥2
+ * clients connected), which made the old poll-based auto-pause silently inert
+ * whenever anyone else was on the server. Since the v1.15.2 merge, upstream's
+ * fenced `refreshOccupancy` (getClientsInChannel — channel-scoped, survives
+ * multiple clients) runs alongside this view and its successful snapshots DO
+ * drive handleOccupancy decisions; this mirror remains the event-sourced
+ * authority for view repair, the WebUI tree, and the fast resume paths.
  *
  * Fail-safe invariant: occupancy is reported as KNOWN only when positively
  * established (a successful reconcile, or live-tracked members in my
