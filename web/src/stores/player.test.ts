@@ -145,3 +145,64 @@ describe('player store 跨 bot 播放控制（多机器人下拉栏）', () => {
     expect(hoisted.postMock).toHaveBeenCalledWith('/api/player/bot1/next');
   });
 });
+
+// 整歌手入队（T2 艺人页）：请求带 skipErrorToast 自管文案（拦截器会直出
+// 后端 501 英文裸文案）；目标 bot 走 _targetBotId 模式；200+ok:false 是
+// 业务失败——提示真实原因且不做乐观更新。
+describe('player store playArtist（T2 艺人页）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    hoisted.postMock.mockReset();
+    vi.clearAllMocks();
+  });
+
+  it('缺省作用于当前选中 bot，先发载入提示，成功后乐观更新', async () => {
+    hoisted.postMock.mockResolvedValue({ data: {} });
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    const optimistic = vi.spyOn(store, '_optimisticPlay').mockImplementation(() => {});
+    await store.playArtist('ar1', 'netease');
+    expect(hoisted.postMock).toHaveBeenCalledWith(
+      '/api/player/bot1/play-artist',
+      { artistId: 'ar1', platform: 'netease' },
+      { skipErrorToast: true },
+    );
+    expect(hoisted.toast.info).toHaveBeenCalledWith('正在载入该歌手的全部歌曲…');
+    expect(optimistic).toHaveBeenCalled();
+  });
+
+  it('传 botId 时请求打到目标 bot（跨 bot 下拉栏）', async () => {
+    hoisted.postMock.mockResolvedValue({ data: {} });
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    await store.playArtist('ar1', 'qq', 'bot2');
+    expect(hoisted.postMock).toHaveBeenCalledWith(
+      '/api/player/bot2/play-artist',
+      { artistId: 'ar1', platform: 'qq' },
+      { skipErrorToast: true },
+    );
+  });
+
+  it('200 + ok:false 提示 message 且不做乐观更新', async () => {
+    hoisted.postMock.mockResolvedValue({
+      data: { ok: false, message: '歌手 100 首歌曲均无版权可播放（区域/版权限制）' },
+    });
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    const optimistic = vi.spyOn(store, '_optimisticPlay').mockImplementation(() => {});
+    await store.playArtist('ar1');
+    expect(hoisted.toast.error).toHaveBeenCalledWith('歌手 100 首歌曲均无版权可播放（区域/版权限制）');
+    expect(optimistic).not.toHaveBeenCalled();
+  });
+
+  it('403/501 按状态码提示中文文案', async () => {
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    hoisted.postMock.mockRejectedValueOnce({ response: { status: 403 } });
+    await store.playArtist('ar1');
+    expect(hoisted.toast.error).toHaveBeenCalledWith('没有权限播放该歌手的全部歌曲');
+    hoisted.postMock.mockRejectedValueOnce({ response: { status: 501 } });
+    await store.playArtist('ar1');
+    expect(hoisted.toast.error).toHaveBeenCalledWith('该音源不支持播放歌手歌曲');
+  });
+});

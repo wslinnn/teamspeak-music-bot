@@ -720,6 +720,48 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
+    /**
+     * 整歌手入队（后端抓取歌手全目录，上限 500 首；QQ 走版权批量过滤）。
+     * 请求要串多个上游分页，先发「载入中」提示。skipErrorToast 自管文案：
+     * 拦截器会直出后端 501 的英文裸文案，这里按状态码给中文提示。
+     * botId 缺省作用于当前选中 bot（跨 bot 下拉栏调用时传目标 bot）。
+     */
+    async playArtist(artistId: string, platform = 'netease', botId?: string) {
+      const id = this._targetBotId(botId);
+      if (!id) return;
+      const toast = useToast();
+      toast.info('正在载入该歌手的全部歌曲…');
+      try {
+        const res = await http.post(
+          `/api/player/${id}/play-artist`,
+          { artistId, platform },
+          { skipErrorToast: true },
+        );
+        if (res.data?.ok === false) {
+          if (id === this.activeBotId) this._syncAfterAction();
+          toast.error(res.data.message || '播放歌手失败');
+          return;
+        }
+        if (res.data?.message) {
+          toast.info(res.data.message);
+        } else {
+          toast.success('开始播放该歌手的全部歌曲');
+        }
+        this._optimisticPlay(id);
+        this._setTiming(id, { serverElapsed: 0 });
+        if (id === this.activeBotId) this._syncAfterAction();
+      } catch (e: any) {
+        const status = e?.response?.status;
+        toast.error(
+          status === 403
+            ? '没有权限播放该歌手的全部歌曲'
+            : status === 501
+              ? '该音源不支持播放歌手歌曲'
+              : '播放歌手失败',
+        );
+      }
+    },
+
     async pause(botId?: string) {
       const id = this._targetBotId(botId);
       if (!id) return;

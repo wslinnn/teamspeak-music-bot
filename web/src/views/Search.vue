@@ -83,6 +83,24 @@
       </button>
     </div>
 
+    <!-- Artist row：仅 netease/qq 有艺人模型，其他源该字段缺省整段不渲染
+         （Apple Music 式横排，位于类目筛选之上） -->
+    <div v-if="searched && !loading && artists.length" class="mb-5 flex gap-4 overflow-x-auto pb-1">
+      <router-link
+        v-for="ar in artists"
+        :key="`${ar.platform}-${ar.id}`"
+        :to="`/artist/${ar.id}?platform=${ar.platform}`"
+        class="w-24 shrink-0 text-center"
+        :title="`打开艺人：${ar.name}`"
+      >
+        <div class="aspect-square rounded-full overflow-hidden">
+          <CoverArt :url="ar.avatarUrl" fill :radius="999" />
+        </div>
+        <div class="mt-1.5 text-xs font-medium truncate">{{ ar.name }}</div>
+        <div v-if="ar.songCount" class="text-[11px] text-text-tertiary">{{ ar.songCount }} 首歌</div>
+      </router-link>
+    </div>
+
     <!-- Loading -->
     <div v-if="loading" class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
       <SkeletonLoader v-for="n in 10" :key="n" height="220px" border-radius="10px" />
@@ -197,6 +215,7 @@ import { useAuthStore } from '../stores/auth';
 import { useToast } from '../composables/useToast';
 import SongGridCard from '../components/SongGridCard.vue';
 import CoverCard from '../components/common/CoverCard.vue';
+import CoverArt from '../components/CoverArt.vue';
 import PlaylistFavoriteButton from '../components/PlaylistFavoriteButton.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import SkeletonLoader from '../components/common/SkeletonLoader.vue';
@@ -226,11 +245,21 @@ interface AlbumHit {
   platform: string;
 }
 
+interface ArtistHit {
+  id: string;
+  name: string;
+  avatarUrl: string;
+  songCount?: number;
+  platform: string;
+}
+
 const searchInput = ref<HTMLInputElement | null>(null);
 const query = ref((route.query.q as string) || '');
 const results = ref<Song[]>([]);
 const playlists = ref<PlaylistHit[]>([]);
 const albums = ref<AlbumHit[]>([]);
+// 仅 netease/qq 贡献（多源合并由 /search/all 聚合）；无艺人时整段不渲染
+const artists = ref<ArtistHit[]>([]);
 const loading = ref(false);
 const loadingMore = ref(false);
 const searched = ref(false);
@@ -296,9 +325,10 @@ watch(activePlatform, (v) => {
 
 const SEARCH_PAGE = 30;
 
-function applyResult(data: { songs?: Song[]; playlists?: PlaylistHit[]; albums?: AlbumHit[] }) {
+function applyResult(data: { songs?: Song[]; playlists?: PlaylistHit[]; albums?: AlbumHit[]; artists?: ArtistHit[] }) {
   results.value = data.songs ?? [];
   playlists.value = data.playlists ?? [];
+  artists.value = data.artists ?? [];
   // 单源模式下补齐专辑缺失的 platform（分页去重键与详情页跳转都依赖它）
   albums.value = (data.albums ?? []).map((ab) => ({
     ...ab,
@@ -342,6 +372,7 @@ async function doSearch() {
     results.value = [];
     playlists.value = [];
     albums.value = [];
+    artists.value = [];
     hasMoreMap.value = {};
   } finally {
     loading.value = false;
@@ -398,6 +429,7 @@ async function loadLocalAll() {
     results.value = [];
     playlists.value = [];
     albums.value = [];
+    artists.value = [];
     hasMoreMap.value = {};
   } finally {
     loading.value = false;
@@ -415,6 +447,7 @@ watch(activePlatform, (v) => {
     results.value = [];
     playlists.value = [];
     albums.value = [];
+    artists.value = [];
     hasMoreMap.value = {};
   } else if (searched.value) {
     doSearch();

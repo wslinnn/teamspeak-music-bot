@@ -28,6 +28,11 @@ const router = createRouter({
       meta: { kind: 'album' },
     },
     {
+      path: '/artist/:id',
+      name: 'artist',
+      component: () => import('../views/Artist.vue'),
+    },
+    {
       path: '/lyrics',
       name: 'lyrics',
       component: () => import('../views/Lyrics.vue'),
