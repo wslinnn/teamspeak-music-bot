@@ -38,32 +38,6 @@ class FakeChild extends EventEmitter {
   finish(code: number | null, signal: string | null) { this.connected = false; this.emit("exit", code, signal); }
 }
 
-// Record every serveNcmApi() option so we can assert the NetEase sidecar is
-// always handed an explicit loopback host.
-const ncmState = vi.hoisted(() => ({
-  serveCalls: [] as Array<{ port: number; host?: string }>,
-}));
-
-vi.mock("NeteaseCloudMusicApi", () => {
-  return {
-    server: {
-      serveNcmApi(options: { port: number; host?: string }) {
-        ncmState.serveCalls.push(options);
-        return Promise.resolve({
-          address: () => ({
-            port: options.port,
-            address: options.host ?? "0.0.0.0",
-            family: "IPv4" as const,
-          }),
-          close(done?: () => void) {
-            done?.();
-          },
-        });
-      },
-    },
-  };
-});
-
 describe("describeQqApiStartupError", () => {
   it("retains ESM diagnostics by code and message", () => {
     expect(describeQqApiStartupError({ code: "ERR_REQUIRE_ESM" })).toMatch(/~2\.4\.0/);

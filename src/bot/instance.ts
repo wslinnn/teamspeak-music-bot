@@ -648,10 +648,10 @@ export class BotInstance extends EventEmitter {
 
   /**
    * Upstream occupancy reconcile (fenced by request id / generation / client
-   * identity). Not wired into the 30s poll — the fork's event-sourced
-   * channelView + reconcileChannelView own production decisions; this exists
-   * for the upstream fencing tests and as the vehicle for the planned
-   * fencing port into reconcileChannelView (T1).
+   * identity), wired from clientEnter/Leave/Moved and the 30s poll alongside
+   * the fork's channelView repair (reconcileChannelView). Both paths converge
+   * on handleOccupancy; T1 plans to port this fencing into the reconcile so a
+   * single query can serve both.
    */
   private async refreshOccupancy(): Promise<void> {
     if (!this.connected) return;

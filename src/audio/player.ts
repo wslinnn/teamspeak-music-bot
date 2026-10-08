@@ -1000,7 +1000,7 @@ export class AudioPlayer extends EventEmitter {
     if (this.state === "playing") {
       this.state = "paused";
       if (this.externalMode) return;
-      // 末 7 帧淡出，之后 0.5s 静音尾（包流断流前平滑收尾）。
+      // 末 5 帧淡出，之后 0.5s 静音尾（包流断流前平滑收尾）。
       // immediate（语音传输故障）：跳过听感收尾——连接已不可用，静音帧
       // 无处送达，且传输故障后帧循环必须立刻停发（上游 voice-failure 契约）。
       if (immediate) {
