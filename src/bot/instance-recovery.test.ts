@@ -49,6 +49,7 @@ function makeBot() {
     id: "bot", name: "Bot", queue, player, tsClient, provider, spotifyController,
     connected: true, disconnectEmitted: false, effectiveDuration: 10_000,
     streamRecovery: null, lifecycleGeneration: 0, occupancyRequest: 0,
+    reconcileRequest: 0,
     channelView: new ChannelView(), lastLoggedOccupancy: null,
     tryResumeAgedUrl: vi.fn(async () => false),
     config: { autoPauseOnEmpty: true, idleTimeoutMinutes: 1 }, autoPaused: false,
@@ -395,5 +396,84 @@ describe("occupancy responses belong to the current request and connection", () 
     expect(bot.player.getState()).toBe("paused");
     expect(bot.autoPaused).toBe(true);
     expect(bot.idleTimer).not.toBeNull();
+  });
+
+  it("treats a successful snapshot without the bot itself as unknown occupancy", async () => {
+    const bot = makeBot();
+    bot.player.state = "playing";
+    bot.tsClient.getClientsInChannel.mockResolvedValueOnce([{ id: 2 }]);
+    await bot.refreshOccupancy();
+    expect(bot.player.getState()).toBe("playing");
+    expect(bot.autoPaused).toBe(false);
+    expect(bot.idleTimer).toBeNull();
+  });
+});
+
+describe("reconcile snapshots belong to the current request and connection", () => {
+  const MY_CHANNEL = 2n;
+
+  it("an older alone snapshot cannot overwrite a newer occupied snapshot", async () => {
+    const bot = makeBot();
+    bot.player.state = "playing";
+    const older = deferred<any[]>(), newer = deferred<any[]>();
+    bot.tsClient.getClientList.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const first = bot.reconcileChannelView(), second = bot.reconcileChannelView();
+    newer.resolve([{ id: 1, channelID: MY_CHANNEL }, { id: 2, channelID: MY_CHANNEL }]);
+    await second;
+    older.resolve([{ id: 1, channelID: MY_CHANNEL }]);
+    await first;
+    expect(bot.player.getState()).toBe("playing");
+    expect(bot.autoPaused).toBe(false);
+    expect(bot.idleTimer).toBeNull();
+  });
+
+  it.each([false, true])("ignores a snapshot from before disconnect (reconnected=%s)", async reconnect => {
+    const bot = makeBot();
+    const older = deferred<any[]>();
+    bot.tsClient.getClientList.mockReturnValueOnce(older.promise);
+    const first = bot.reconcileChannelView();
+    bot.disconnect();
+    if (reconnect) { await bot.connect(); bot.player.state = "playing"; }
+    older.resolve([{ id: 1, channelID: MY_CHANNEL }]);
+    await first;
+    if (reconnect) {
+      expect(bot.player.getState()).toBe("playing");
+    } else {
+      // 视图保持断连时的 reset 态，不被旧快照重新确立
+      expect(bot.channelView.occupancy().known).toBe(false);
+    }
+    expect(bot.autoPaused).toBe(false);
+    expect(bot.idleTimer).toBeNull();
+  });
+
+  it("does not let an old lifecycle's poll reconcile after reconnect", async () => {
+    const bot = makeBot();
+    bot._startIdlePoller();
+    bot.disconnect();
+    await bot.connect();
+    await vi.advanceTimersByTimeAsync(30_000);
+    // 只有新生命周期首个 30s 轮询这 1 次：connected 处理器在握手期内触发时
+    // connected 尚为 false（包装器先于 connect() resolve 事件），其对账空转；
+    // 旧定时器若未被代际挡住会多出第 2 次
+    expect(bot.tsClient.getClientList).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not apply an old pending poll snapshot after reconnect", async () => {
+    const bot = makeBot();
+    const oldReconcile = deferred<any[]>();
+    bot.tsClient.getClientList.mockReturnValueOnce(oldReconcile.promise);
+    bot._startIdlePoller();
+    await vi.advanceTimersByTimeAsync(30_000);
+    bot.disconnect();
+    await bot.connect();
+    bot.player.state = "playing";
+    // 迟到的「独自一人」快照：若被套用会立刻自动暂停
+    oldReconcile.resolve([{ id: 1, channelID: MY_CHANNEL }]);
+    await flush();
+    expect(bot.player.getState()).toBe("playing");
+    await vi.advanceTimersByTimeAsync(30_000);
+    // 第 1 次旧轮询（挂起）+ 第 2 次新轮询（connected 处理器的对账在握手期
+    // 空转，不计入）
+    expect(bot.tsClient.getClientList).toHaveBeenCalledTimes(2);
   });
 });

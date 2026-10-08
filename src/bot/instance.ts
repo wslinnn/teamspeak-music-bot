@@ -197,6 +197,8 @@ export class BotInstance extends EventEmitter {
   /** Fences async work and timers from earlier TeamSpeak connections. */
   private lifecycleGeneration = 0;
   private occupancyRequest = 0;
+  /** Fork: 对账查询的独立请求序号——与 occupancyRequest 不混用，两条查询路径可并发在途。 */
+  private reconcileRequest = 0;
   private disconnectEmitted = false;
   private voteSkipUsers = new Set<string>();
   private isAdvancing = false;
@@ -649,9 +651,10 @@ export class BotInstance extends EventEmitter {
   /**
    * Upstream occupancy reconcile (fenced by request id / generation / client
    * identity), wired from clientEnter/Leave/Moved and the 30s poll alongside
-   * the fork's channelView repair (reconcileChannelView). Both paths converge
-   * on handleOccupancy; T1 plans to port this fencing into the reconcile so a
-   * single query can serve both.
+   * the fork's channelView repair (reconcileChannelView), which has carried
+   * the same fencing since T1. The two queries stay separate on purpose: the
+   * full-server clientlist times out with ≥2 clients while this channel-scoped
+   * query does not, so occupancy decisions must not bind to the flakiest one.
    */
   private async refreshOccupancy(): Promise<void> {
     if (!this.connected) return;
@@ -666,7 +669,18 @@ export class BotInstance extends EventEmitter {
       // in its own channel) — occupancy is unknown, so don't act. Acting on it
       // would mis-read it as "empty" and falsely auto-pause / idle-disconnect.
       const userCount = occupancyFromClientList(clients.length);
-      if (userCount !== null) this.handleOccupancy(userCount);
+      // Self-presence check: a fresh snapshot of my channel always contains
+      // the bot. A snapshot taken before the bot's own arrival (channel moved
+      // mid-query) can list the new channel's incumbents without it — reading
+      // that off-by-one as "alone" would pause with a listener present, so
+      // treat it as unknown. This does NOT cover the stale-before-enter race
+      // (those snapshots still contain self); that one is upstream-native and
+      // self-heals on the next event/poll.
+      const selfId = client.getClientId();
+      if (userCount !== null &&
+          (!selfId || clients.some((c) => c.id === selfId))) {
+        this.handleOccupancy(userCount);
+      }
     } catch {
       // ignore — the 30s poll is the fallback
     }
@@ -785,21 +799,30 @@ export class BotInstance extends EventEmitter {
    *  同源同一查询，频道树能用此路径就能用。自机频道优先取快照里 bot 自己
    *  所在频道（自愈播种：即使 connect 时 seeding 失败，30s 内也会被纠正），
    *  其次才是 getChannelId() 的显式解析值。查询失败即放弃——它不承担决策，
-   *  只做修正；成功返回必须包含 bot 自身，空数组视为失败。 */
+   *  只做修正；成功返回必须包含 bot 自身，空数组视为失败。查询受四重围栏
+   *  保护（connected/请求序号/生命周期代际/tsClient 身份），迟到响应直接
+   *  丢弃、不记失败。 */
   private reconcileFailures = 0;
 
   private async reconcileChannelView(): Promise<void> {
     if (!this.connected) return;
+    // 与 refreshOccupancy 同款四重围栏：重连或快速移动频道后，迟到的
+    // clientlist 快照不得把旧生命周期/旧请求的成员数据写进当前视图。
+    const request = ++this.reconcileRequest;
+    const generation = this.lifecycleGeneration;
+    const client = this.tsClient;
     try {
-      const clients = await this.tsClient.getClientList();
+      const clients = await client.getClientList();
+      if (!this.connected || this.lifecycleGeneration !== generation ||
+          this.reconcileRequest !== request || this.tsClient !== client) return;
       if (clients.length === 0) {
         this.noteReconcileFailure();
         return;
       }
-      const selfId = this.tsClient.getClientId();
+      const selfId = client.getClientId();
       const selfChannel =
         clients.find((c) => c.id === selfId)?.channelID ??
-        this.tsClient.getChannelId();
+        client.getChannelId();
       if (!selfId || !selfChannel) {
         this.noteReconcileFailure();
         return;
