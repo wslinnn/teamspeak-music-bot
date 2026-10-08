@@ -6,13 +6,14 @@ import { createPinia, setActivePinia } from 'pinia';
 const hoisted = vi.hoisted(() => ({
   isGuest: false,
   postMock: vi.fn(),
+  getMock: vi.fn().mockResolvedValue({ data: {} }),
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
 }));
 
 vi.mock('../utils/http', () => ({
   http: {
     post: hoisted.postMock,
-    get: vi.fn().mockResolvedValue({ data: {} }),
+    get: hoisted.getMock,
     delete: vi.fn(),
   },
 }));
@@ -204,5 +205,106 @@ describe('player store playArtist（T2 艺人页）', () => {
     hoisted.postMock.mockRejectedValueOnce({ response: { status: 501 } });
     await store.playArtist('ar1');
     expect(hoisted.toast.error).toHaveBeenCalledWith('该音源不支持播放歌手歌曲');
+  });
+});
+
+// B 站多 P 拦截（T3）：多 P 弹窗接管（handled=true 短路，不发播放请求——
+// 弹窗组件必须同批上线，缺一则多 P 视频静默不播）；skipPartCheck 供弹窗
+// 选定后重入；单 P 顺手修正时长；查询失败降级正常播放。
+describe('player store B 站多 P 拦截（T3）', () => {
+  const multiP = {
+    id: 'BV1multi', name: '多P视频', artist: 'UP主', album: '',
+    coverUrl: '', duration: 100, platform: 'bilibili' as const,
+  };
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    hoisted.postMock.mockReset();
+    hoisted.getMock.mockReset().mockResolvedValue({ data: {} });
+    hoisted.isGuest = false;
+    vi.clearAllMocks();
+  });
+
+  it('多 P 视频弹窗接管：置位 biliPartModal 且不发播放请求', async () => {
+    hoisted.getMock.mockResolvedValueOnce({
+      data: { bvid: 'BV1multi', title: '多P视频', coverUrl: '', artist: 'UP主', parts: [
+        { part: 1, cid: 11, title: '上半', duration: 60 },
+        { part: 2, cid: 22, title: '下半', duration: 40 },
+      ] },
+    });
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    await store.playSong(multiP);
+    expect(hoisted.getMock).toHaveBeenCalledWith('/api/music/bilibili/parts', { params: { bvid: 'BV1multi' } });
+    expect(store.biliPartModal.open).toBe(true);
+    expect(store.biliPartModal.action).toBe('play');
+    expect(store.biliPartModal.parts).toHaveLength(2);
+    expect(hoisted.postMock).not.toHaveBeenCalled();
+  });
+
+  it('skipPartCheck=true 跳过拦截直接播放（弹窗选定后的重入路径）', async () => {
+    hoisted.postMock.mockResolvedValue({ data: {} });
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    await store.playSong(multiP, true);
+    expect(hoisted.getMock).not.toHaveBeenCalled();
+    expect(hoisted.postMock).toHaveBeenCalled();
+    expect(store.biliPartModal.open).toBe(false);
+  });
+
+  it('单 P 视频不拦截，顺手把时长修正为分 P 实际时长', async () => {
+    hoisted.postMock.mockResolvedValue({ data: {} });
+    hoisted.getMock.mockResolvedValueOnce({
+      data: { parts: [{ part: 1, cid: 11, title: '正片', duration: 321 }] },
+    });
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    const song = { ...multiP, id: 'BV1single', duration: 100 };
+    await store.playSong(song);
+    expect(store.biliPartModal.open).toBe(false);
+    expect(hoisted.postMock).toHaveBeenCalled();
+    expect(song.duration).toBe(321);
+  });
+
+  it('分 P 查询失败降级为正常播放', async () => {
+    hoisted.postMock.mockResolvedValue({ data: {} });
+    hoisted.getMock.mockRejectedValueOnce(new Error('network'));
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    await store.playSong(multiP);
+    expect(store.biliPartModal.open).toBe(false);
+    expect(hoisted.postMock).toHaveBeenCalled();
+  });
+
+  it('selectBilibiliPart 以 bvid?p=N 重组歌曲按原动作重入播放', async () => {
+    hoisted.postMock.mockResolvedValue({ data: {} });
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    store.biliPartModal = {
+      open: true, song: multiP, action: 'play', bvid: 'BV1multi',
+      title: '多P视频', coverUrl: 'c.jpg', artist: 'UP主',
+      parts: [
+        { part: 1, cid: 11, title: '上半', duration: 60 },
+        { part: 2, cid: 22, title: '下半', duration: 40 },
+      ],
+    };
+    store.selectBilibiliPart({ part: 2, cid: 22, title: '下半', duration: 40 });
+    await Promise.resolve();
+    expect(store.biliPartModal.open).toBe(false);
+    expect(hoisted.postMock).toHaveBeenCalledWith(
+      '/api/player/bot1/play-song',
+      expect.objectContaining({
+        song: expect.objectContaining({ id: 'BV1multi?p=2', name: '多P视频 - P2 下半', duration: 40 }),
+      }),
+    );
+  });
+
+  it('非 bilibili 平台不触发分 P 查询', async () => {
+    hoisted.postMock.mockResolvedValue({ data: {} });
+    const store = usePlayerStore();
+    store.activeBotId = 'bot1';
+    await store.playSong({ ...multiP, platform: 'netease' });
+    expect(hoisted.getMock).not.toHaveBeenCalled();
+    expect(hoisted.postMock).toHaveBeenCalled();
   });
 });

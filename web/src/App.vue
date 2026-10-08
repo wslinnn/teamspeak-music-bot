@@ -13,6 +13,7 @@
     <!-- 移动端（md 以下）：胶囊迷你播放器悬浮于底部导航之上 -->
     <MiniPlayer />
     <MobileTabBar />
+    <BilibiliPartModal />
     <ToastContainer />
   </div>
 </template>
@@ -30,6 +31,7 @@ import Player from './components/Player.vue';
 import MiniPlayer from './components/MiniPlayer.vue';
 import MobileTabBar from './components/MobileTabBar.vue';
 import ConnectionBanner from './components/ConnectionBanner.vue';
+import BilibiliPartModal from './components/BilibiliPartModal.vue';
 import ToastContainer from './components/common/ToastContainer.vue';
 
 const route = useRoute();

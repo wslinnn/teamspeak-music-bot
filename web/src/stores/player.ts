@@ -56,6 +56,25 @@ export interface TimingState {
   wasPlaying: boolean;
 }
 
+/** B 站分 P（多 P 弹窗选择用，cid 是播放器定位分 P 的关键） */
+export interface BiliPart {
+  part: number;
+  cid: number;
+  title: string;
+  duration: number;
+}
+
+export interface BiliPartModalState {
+  open: boolean;
+  song: Song | null;
+  action: 'play' | 'playNext' | 'add';
+  bvid: string;
+  title: string;
+  coverUrl: string;
+  artist: string;
+  parts: BiliPart[];
+}
+
 const HOME_CACHE_TTL = 5 * 60 * 1000;
 
 function defaultTiming(): TimingState {
@@ -118,6 +137,19 @@ export const usePlayerStore = defineStore('player', {
     // 供首页推荐/FM 多源切换与各处显隐使用
     enabledProviders: [] as string[],
     authStatus: {} as Record<string, { loggedIn: boolean; nickname: string }>,
+
+    // B 站多 P 选择弹窗（播放入口拦截后置位；弹窗与拦截必须成套，缺一则
+    // 多 P 视频静默不播——见 checkBilibiliMultiPart 的 handled=true 短路）
+    biliPartModal: {
+      open: false,
+      song: null,
+      action: 'play',
+      bvid: '',
+      title: '',
+      coverUrl: '',
+      artist: '',
+      parts: [] as BiliPart[],
+    } as BiliPartModalState,
   }),
 
   getters: {
@@ -594,9 +626,14 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    async playSong(song: Song) {
+    async playSong(song: Song, skipPartCheck = false) {
       if (!this.activeBotId) return;
       const toast = useToast();
+      // B 站多 P：无 ?p= 的视频先查分 P 列表，多 P 弹窗接管本次动作
+      if (!skipPartCheck && song.platform === 'bilibili' && !song.id.includes('?p=')) {
+        const handled = await this.checkBilibiliMultiPart(song, 'play');
+        if (handled) return;
+      }
       try {
         // 回归修复（审计 A1/B1）：游客走非破坏性的 play-now-song（插入下一首
         // + 跳转，不清他人队列）；/play-song 无 guestFlag，游客必 403。
@@ -617,6 +654,71 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
+    /**
+     * 检查 B 站视频是否为多 P：多 P 置位弹窗并接管本次动作（返回 true，
+     * 调用方必须短路——弹窗未挂载时会静默不播）；单 P 顺手修正精确时长；
+     * 查询失败降级为正常播放，不打断收听。
+     */
+    async checkBilibiliMultiPart(song: Song, action: 'play' | 'playNext' | 'add'): Promise<boolean> {
+      try {
+        const cleanBvid = song.id.split('?')[0].split(':')[0];
+        const res = await http.get('/api/music/bilibili/parts', { params: { bvid: cleanBvid } });
+        const parts: BiliPart[] = res.data?.parts ?? [];
+        if (parts.length > 1) {
+          this.biliPartModal = {
+            open: true,
+            song,
+            action,
+            bvid: cleanBvid,
+            title: res.data.title || song.name,
+            coverUrl: res.data.coverUrl || song.coverUrl,
+            artist: res.data.artist || song.artist,
+            parts,
+          };
+          return true;
+        }
+        if (parts.length === 1) {
+          song.duration = parts[0].duration;
+        }
+      } catch {
+        // 查询异常降级为正常播放（后端会按整视频解析）
+      }
+      return false;
+    },
+
+    /** 弹窗选定分 P：以 `bvid?p=N` 重组歌曲并按原动作重入播放（跳过拦截） */
+    selectBilibiliPart(part: BiliPart) {
+      if (!this.biliPartModal.open || !this.biliPartModal.song) return;
+      const { song, action, bvid, title, artist, coverUrl } = this.biliPartModal;
+      this.biliPartModal.open = false;
+
+      const partTitle = part.title && part.title !== title
+        ? `${title} - P${part.part} ${part.title}`
+        : `${title} (P${part.part})`;
+
+      const partSong: Song = {
+        ...song,
+        id: `${bvid}?p=${part.part}`,
+        name: partTitle,
+        artist: artist || song.artist,
+        coverUrl: coverUrl || song.coverUrl,
+        duration: part.duration,
+      };
+
+      if (action === 'play') {
+        this.playSong(partSong, true);
+      } else if (action === 'playNext') {
+        this.playNextSong(partSong, true);
+      } else if (action === 'add') {
+        this.addSong(partSong, true);
+      }
+    },
+
+    closeBilibiliPartModal() {
+      this.biliPartModal.open = false;
+      this.biliPartModal.song = null;
+    },
+
     async addToQueue(query: string, platform = 'netease') {
       if (!this.activeBotId) return;
       const toast = useToast();
@@ -629,9 +731,13 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
-    async addSong(song: Song) {
+    async addSong(song: Song, skipPartCheck = false) {
       if (!this.activeBotId) return;
       const toast = useToast();
+      if (!skipPartCheck && song.platform === 'bilibili' && !song.id.includes('?p=')) {
+        const handled = await this.checkBilibiliMultiPart(song, 'add');
+        if (handled) return;
+      }
       try {
         await http.post(`/api/player/${this.activeBotId}/add-song`, { song });
         await this.fetchQueue();
@@ -654,9 +760,13 @@ export const usePlayerStore = defineStore('player', {
     },
 
     /** 下一首播放：插入到当前曲目之后，不打断当前播放、不清空队列 */
-    async playNextSong(song: Song) {
+    async playNextSong(song: Song, skipPartCheck = false) {
       if (!this.activeBotId) return;
       const toast = useToast();
+      if (!skipPartCheck && song.platform === 'bilibili' && !song.id.includes('?p=')) {
+        const handled = await this.checkBilibiliMultiPart(song, 'playNext');
+        if (handled) return;
+      }
       try {
         const res = await http.post(`/api/player/${this.activeBotId}/play-next-song`, { song });
         if (res.data?.ok === false) {
