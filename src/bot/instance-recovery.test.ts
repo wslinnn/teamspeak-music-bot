@@ -30,6 +30,8 @@ function makeBot() {
   player.getVolume = () => 50;
   player.pause = AudioPlayer.prototype.pause;
   player.resume = AudioPlayer.prototype.resume;
+  // 上游 v1.15.4 引入：pause/resume 的渐变增益（防爆音），桩上无意义，置空。
+  player.setTransportRamp = () => {};
   player.play = vi.fn((_url: string, position: number) => { player.sessionId++; player.elapsed = position; player.state = "playing"; });
   player.stop = vi.fn(() => { player.sessionId++; player.state = "idle"; });
   const provider = { getSongUrl: vi.fn(async (): Promise<{ url: string } | null> => ({ url: "fresh" })) };

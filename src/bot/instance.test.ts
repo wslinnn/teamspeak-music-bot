@@ -2128,6 +2128,8 @@ describe("BotInstance trackEnd — stale playback sessions", () => {
     player.getPlaybackSessionId = AudioPlayer.prototype.getPlaybackSessionId;
     player.pause = AudioPlayer.prototype.pause;
     player.resume = AudioPlayer.prototype.resume;
+    // 上游 v1.15.4 引入：pause/resume 的渐变增益（防爆音），桩上无意义，置空。
+    player.setTransportRamp = () => {};
     player.play = vi.fn(() => { player.sessionId++; player.state = "playing"; });
     const provider = { getSongUrl: vi.fn(async () => ({ url: "fresh" })) };
     const advances: string[] = [];

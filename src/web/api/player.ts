@@ -354,7 +354,7 @@ export function createPlayerRouter(
         if (index >= queue.size()) {
           return { status: 400 as const, body: { error: "Invalid queue index" } };
         }
-        bot.getPlayer().stop();
+        bot.getPlayer().stop(true);
         bot.getPlayer().resetFailures();
         const song = queue.playAt(index);
         if (!song) {
@@ -362,6 +362,7 @@ export function createPlayerRouter(
         }
         const ok = await bot.resolveAndPlay(song);
         if (!ok) {
+          bot.getPlayer().stop();
           return { body: { message: `Cannot play: ${song.name}` } };
         }
         return { body: { message: `Now playing: ${song.name} - ${song.artist}` } };

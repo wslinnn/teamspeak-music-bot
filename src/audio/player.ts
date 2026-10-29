@@ -129,7 +129,7 @@ export function buildFfmpegArgs(url: string, seekSeconds: number): string[] {
     );
   }
   // Input-side seek (before -i): FFmpeg jumps straight to the byte offset.
-  // 本地文件：容器/格式自带索引，毫秒级出流，不产生解码丢弃空窗。
+  // 本地文件：容器/格式自带索引，毫秒级出流，不产生解码丢弃空窗（fork 增量）。
   // B站's CDN serves Range requests too — output-side seek would download and
   // decode everything before the target first (#161), long enough to trip the
   // stall watchdog on a 3-hour video.
@@ -207,6 +207,14 @@ export class AudioPlayer extends EventEmitter {
   private duckingRampStartedAt = 0;
   private duckingRampDurationMs = 0;
   private pcmBuffer: Buffer = Buffer.alloc(0);
+  private transitionSilence = false;
+  private pauseFrames = 0;
+  private resumeSilenceFrames = 0;
+  private stopAfterPauseTail = false;
+  private transportRampStart: number | null = null;
+  private transportRampEnd: number | null = null;
+  private transportRampFrom = 1;
+  private transportRampTo = 1;
   private logger: Logger;
   private frameLoopRunning = false;
   private nextFrameTime = 0;
@@ -233,15 +241,10 @@ export class AudioPlayer extends EventEmitter {
   private static readonly MAX_STALL_ATTEMPTS = 3000;
   private currentSongDuration = 0; // 当前歌曲总时长（秒）
 
-  // --- 过渡静音帧 ---
-  // 上游在暂停/seek 时让语音包流原地断流，TeamSpeak 客户端对该断流的
-  // 丢失隐藏/缓冲重同步会产生爆音。这里保持时间线连续：暂停=末 5 帧
-  // （100ms）淡出 + 0.5s 静音尾后停止发包；恢复/新会话=首 5 帧淡入；
-  // seek/起播空窗由静音帧补位。看门狗计数不变，ffmpeg 真死仍照常切歌。
+  // --- 播放边界淡入淡出（fork 增量，与上游 transportRamp 并存合成） ---
   private static readonly FADE_FRAMES = 5; // 淡入/淡出帧数（每帧 20ms）
   private static readonly PAUSE_SILENCE_MS = 500;
   private fadeInRemaining = 0;
-  private fadeOutRemaining = 0;
   private pausedAt = 0;
 
   // --- External PCM mode (Stage 2: go-librespot Spotify sidecar) ---
@@ -268,7 +271,7 @@ export class AudioPlayer extends EventEmitter {
 
   play(url: string, seekSeconds = 0, songDuration = 0): void {
     // 1. 停止当前所有播放，自增 sessionId 屏蔽旧回调 （
-    this.stop();
+    this.stop(true);
 
     const currentSessionId = this.sessionId; 
     this.currentUrl = url;
@@ -279,13 +282,12 @@ export class AudioPlayer extends EventEmitter {
     this.spawnFailed = false;
     this.emptyFrameAttempts = 0;
     this.currentSongDuration = songDuration;
-    // 新会话：取消旧收尾状态，首 5 帧淡入
-    this.fadeOutRemaining = 0;
+    // 新会话：取消旧收尾状态，首 5 帧淡入（fork 增量）
     this.fadeInRemaining = AudioPlayer.FADE_FRAMES;
 
     if (this.consecutiveFailures >= AudioPlayer.MAX_CONSECUTIVE_FAILURES) {
       this.logger.error({ failures: this.consecutiveFailures }, "FFmpeg failures limit reached");
-      this.state = "idle";
+      this.stop();
       this.emit("error", new Error("ffmpeg unavailable"));
       return;
     }
@@ -311,13 +313,12 @@ export class AudioPlayer extends EventEmitter {
 
     // stderr is drained by `diagnostics` (collectFfmpegDiagnostics) — a pipe
     // left unread fills up after a few minutes and blocks ffmpeg mid-track.
-
     this.ffmpeg.stdout!.on("data", (chunk: Buffer) => {
       // 2. 严格校验 sessionId，防止老进程的数据混入新播放请求 （
       if (this.sessionId !== currentSessionId) {
         return;
       }
-
+      
       this.pcmBuffer = Buffer.concat([this.pcmBuffer, chunk]);
       if (this.pcmBuffer.length > AudioPlayer.BUFFER_HIGH_WATER && !this.ffmpegPaused && this.ffmpeg?.stdout) {
         this.ffmpeg.stdout.pause();
@@ -327,6 +328,7 @@ export class AudioPlayer extends EventEmitter {
 
     this.ffmpeg.on("exit", (code, signal) => {
       if (currentPid) globalActivePids.delete(currentPid);
+      
       // 只有当前会话的进程结束才置空变量
       if (this.sessionId === currentSessionId) {
         this.ffmpeg = null;
@@ -455,7 +457,6 @@ export class AudioPlayer extends EventEmitter {
     const tempDirToCleanup = this.currentTempDir;
 
     // stderr is drained by `diagnostics` (collectFfmpegDiagnostics).
-
     this.ffmpeg.stdout!.on("data", (chunk: Buffer) => {
       if (this.sessionId !== sessionId) return;
       this.pcmBuffer = Buffer.concat([this.pcmBuffer, chunk]);
@@ -516,7 +517,7 @@ export class AudioPlayer extends EventEmitter {
   playPcmStream(readable: Readable, opts: { onExternalEnd?: () => void } = {}): void {
     // 1. Fence current playback: stop() bumps sessionId, clears pcmBuffer, kills
     //    any ffmpeg, and DETACHES (never destroys) any prior external stream.
-    this.stop();
+    this.stop(true);
 
     const currentSessionId = this.sessionId;
     this.externalMode = true;
@@ -606,13 +607,29 @@ export class AudioPlayer extends EventEmitter {
     this.onExternalEnd = null;
   }
 
-  stop(): void {
+  stopWithFade(): void {
+    if (this.externalMode || this.state === "idle") {
+      this.stop();
+      return;
+    }
+    this.stopAfterPauseTail = true;
+    if (this.state === "playing") {
+      this.pauseFrames = 9;
+      this.setTransportRamp(0, 0, 5);
+      this.state = "paused";
+    } else if (this.pauseFrames === 0) {
+      this.stop();
+    }
+  }
+
+  stop(keepAlive = false): void {
+    const wasRunning = this.frameLoopRunning;
+    const deadline = this.nextFrameTime;
+    this.transitionSilence = keepAlive;
+    this.stopAfterPauseTail = false;
     // 旧流末 5 帧淡出后同步发出（增益→0 的突发，客户端按 20ms 帧距回放）：
-    // seek/切歌不再于任意波形处硬切。必须在会话栅栏（sessionId++）之前发。
-    if (
-      !this.externalMode &&
-      (this.state === "playing" || this.fadeOutRemaining > 0)
-    ) {
+    // seek/切歌不再于任意波形处硬切（fork 增量）。必须在会话栅栏（sessionId++）之前发。
+    if (!this.externalMode && this.state === "playing") {
       let k = 0;
       while (k < AudioPlayer.FADE_FRAMES && this.pcmBuffer.length >= PCM_FRAME_BYTES) {
         const startScale = (AudioPlayer.FADE_FRAMES - k) / AudioPlayer.FADE_FRAMES;
@@ -665,6 +682,19 @@ export class AudioPlayer extends EventEmitter {
     this.seekOffset = 0;
     this.framesPlayed = 0;
     this.healthyFrames = 0;
+    this.pauseFrames = 0;
+    this.resumeSilenceFrames = 0;
+    this.fadeInRemaining = 0;
+    this.pausedAt = 0;
+    this.transportRampStart = null;
+    this.transportRampEnd = null;
+    this.transportRampFrom = 1;
+    this.transportRampTo = 1;
+    if (keepAlive) {
+      this.frameLoopRunning = true;
+      this.nextFrameTime = wasRunning ? Math.max(performance.now(), deadline - FRAME_DURATION_MS) : performance.now();
+      this.scheduleNextFrame();
+    }
   }
 
   private forceCleanup(proc: ChildProcess, pid: number): void {
@@ -676,7 +706,7 @@ export class AudioPlayer extends EventEmitter {
     } catch (e) { /* ignore */ }
 
     const killTimeout = setTimeout(() => {
-      // Guard against PID reuse (review P5): if the child already exited the
+      // Guard against PID reuse (review P5, fork 增量): if the child already exited the
       // exitCode is set — escalating would SIGKILL whatever unrelated process
       // the OS handed the recycled PID. (The exit handler normally clears
       // this timer; this covers the not-yet-delivered window.)
@@ -718,31 +748,30 @@ export class AudioPlayer extends EventEmitter {
       if (loopSessionId !== this.sessionId || !this.frameLoopRunning) return;
 
       const framesBeforeTick = this.framesPlayed;
-      if (this.state === "playing") this.sendNextFrame();
-      else if (this.state === "paused") {
-        // 末 5 帧淡出 + 0.5s 静音尾，随后停止发包（外部模式由 sidecar 管理）
-        if (this.fadeOutRemaining > 0) {
-          const k = AudioPlayer.FADE_FRAMES - this.fadeOutRemaining;
-          if (!this.externalMode && this.pcmBuffer.length >= PCM_FRAME_BYTES) {
-            const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
-            this.pcmBuffer = this.pcmBuffer.subarray(PCM_FRAME_BYTES);
-            this.sendFrame(
-              pcmFrame,
-              (AudioPlayer.FADE_FRAMES - k) / AudioPlayer.FADE_FRAMES,
-              (AudioPlayer.FADE_FRAMES - k - 1) / AudioPlayer.FADE_FRAMES,
-            );
-          } else {
+      if (this.state === "paused") {
+        if (this.pauseFrames > 0) {
+          this.pauseFrames--;
+          if (this.pauseFrames > 3) this.sendNextFrame();
+          else this.emitSilenceFrame(false);
+        } else {
+          this.nextFrameTime = performance.now();
+          if (this.stopAfterPauseTail) {
+            this.stop();
+            return;
+          }
+          // 暂停 0.5s 静音尾（包流断流前平滑收尾，fork 增量）：
+          // 淡出帧走完后继续补静音帧，随后帧环空转。
+          if (!this.externalMode && performance.now() - this.pausedAt < AudioPlayer.PAUSE_SILENCE_MS) {
             this.emitSilenceFrame(false);
           }
-          this.fadeOutRemaining--;
-        } else if (
-          !this.externalMode &&
-          performance.now() - this.pausedAt < AudioPlayer.PAUSE_SILENCE_MS
-        ) {
-          this.emitSilenceFrame(false);
         }
-        this.nextFrameTime = performance.now();
       }
+      else if (this.state === "idle" && this.transitionSilence) this.emitSilenceFrame(false);
+      else if (this.state === "playing" && this.resumeSilenceFrames > 0) {
+        this.resumeSilenceFrames--;
+        this.emitSilenceFrame(false);
+      }
+      else if (this.state === "playing") this.sendNextFrame();
       const frameSent = this.framesPlayed > framesBeforeTick;
 
       // 检测pcmBuffer不足PCM_FRAME_BYTES导致连续循环卡死：
@@ -814,7 +843,7 @@ export class AudioPlayer extends EventEmitter {
 
       // R3-4: likewise gated on state==="playing" — a drained/EOF'd stream must
       // not emit trackEnd while paused; end-detection resumes on resume().
-      if (this.state === "playing" && !this.externalMode && !this.ffmpeg && this.pcmBuffer.length < PCM_FRAME_BYTES) {
+      if (this.state === "playing" && !this.externalMode && !this.ffmpeg && !this.downloader && this.pcmBuffer.length < PCM_FRAME_BYTES) {
         this.frameLoopRunning = false;
         // Outer gate guarantees state==="playing"; end directly (no !=="idle" guard).
         this.state = "idle";
@@ -830,12 +859,12 @@ export class AudioPlayer extends EventEmitter {
 
   private sendNextFrame(): void {
     if (this.pcmBuffer.length < PCM_FRAME_BYTES) {
-      // 欠载/seek 空窗期补静音帧，保持 20ms 语音时间线连续（直接 return
-      // 会在 TS 端留下序列空洞）。空窗不计入播放进度；看门狗在循环层照常
-      // 累计，ffmpeg 真死仍会触发 trackEnd。
-      this.emitSilenceFrame(this.externalMode);
+      // Keep the voice timeline continuous while the source is preparing/stalled.
+      // URL silence must not advance elapsed time or hide the stall watchdog.
+      if (this.externalMode || this.ffmpeg || this.downloader || this.transitionSilence) this.emitSilenceFrame(this.externalMode);
       return;
     }
+    this.transitionSilence = false;
     const pcmFrame = this.pcmBuffer.subarray(0, PCM_FRAME_BYTES);
     this.pcmBuffer = this.pcmBuffer.subarray(PCM_FRAME_BYTES);
 
@@ -849,7 +878,7 @@ export class AudioPlayer extends EventEmitter {
       }
     }
 
-    // 会话/恢复首个 5 帧 100ms 淡入（0→自然增益），消除起播硬切
+    // 会话/恢复首个 5 帧 100ms 淡入（0→自然增益），消除起播硬切（fork 增量）
     let startScale: number | null = null;
     let endScale: number | null = null;
     if (this.fadeInRemaining > 0) {
@@ -882,12 +911,11 @@ export class AudioPlayer extends EventEmitter {
     }
   }
 
-  /** 静音帧：桥接 seek/起播空窗与暂停静音尾。不推进播放进度（外部模式除外）。 */
-  private emitSilenceFrame(incrementPlayed = true): void {
+  private emitSilenceFrame(advanceTimeline = true): void {
     try {
       const opusFrame = this.encoder.encode(Buffer.alloc(PCM_FRAME_BYTES));
       this.emit("frame", opusFrame);
-      if (incrementPlayed) this.framesPlayed++;
+      if (advanceTimeline) this.framesPlayed++;
     } catch (err) {
       this.emit("error", err as Error);
     }
@@ -902,10 +930,12 @@ export class AudioPlayer extends EventEmitter {
     const now = performance.now();
     const startDuckingGain = this.duckingGainAt(now);
     const endDuckingGain = this.duckingGainAt(now + FRAME_DURATION_MS);
+    const startTransportGain = this.transportGainAt(now);
+    const endTransportGain = this.transportGainAt(now + FRAME_DURATION_MS);
     // 边界淡入/淡出：scale 乘子作用于自然增益（首帧 0→自然、末帧 自然→0），
-    // 乘子优先于 ducking
-    const startFactor = baseFactor * startDuckingGain * (startScale ?? 1);
-    const endFactor = baseFactor * endDuckingGain * (endScale ?? 1);
+    // 与 ducking/transport 渐变相乘（fork 增量）
+    const startFactor = baseFactor * startDuckingGain * startTransportGain * (startScale ?? 1);
+    const endFactor = baseFactor * endDuckingGain * endTransportGain * (endScale ?? 1);
 
     if (startFactor >= 1 && endFactor >= 1) {
       return Buffer.from(pcm);
@@ -914,9 +944,9 @@ export class AudioPlayer extends EventEmitter {
     const out = Buffer.allocUnsafe(pcm.length);
     // PCM is s16le: operate through Int16Array views instead of per-sample
     // Buffer.readInt16LE/writeInt16LE calls (each a V8→C++ boundary crossing,
-    // ~4x slower on this hot 96k-samples/sec loop). Node's pooled Buffers are
-    // 8-byte aligned and frames are even-sized, but guard anyway and fall
-    // back to the Buffer path if an odd offset ever slips through.
+    // ~4x slower on this hot 96k-samples/sec loop, fork 增量). Node's pooled
+    // Buffers are 8-byte aligned and frames are even-sized, but guard anyway
+    // and fall back to the Buffer path if an odd offset ever slips through.
     if (pcm.byteOffset % 2 === 0 && out.byteOffset % 2 === 0) {
       const src = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length / 2);
       const dst = new Int16Array(out.buffer, out.byteOffset, out.length / 2);
@@ -954,6 +984,9 @@ export class AudioPlayer extends EventEmitter {
       }
       return out;
     }
+
+    // PCM is fixed at stereo s16le. Use one gain for each L/R pair so a ramp
+    // never creates a tiny channel imbalance, and span the whole 20 ms frame.
     const stereoFrames = Math.max(1, Math.ceil(pcm.length / 4));
     for (let i = 0; i < pcm.length; i += 2) {
       const frameIndex = Math.floor(i / 4);
@@ -963,6 +996,25 @@ export class AudioPlayer extends EventEmitter {
       out.writeInt16LE(Math.max(-32768, Math.min(32767, sample)), i);
     }
     return out;
+  }
+
+  private setTransportRamp(target: number, delayFrames = 0, durationFrames = 3): void {
+    const now = performance.now();
+    const from = this.transportGainAt(now);
+    this.transportRampStart = now + FRAME_DURATION_MS * delayFrames;
+    this.transportRampEnd = this.transportRampStart + FRAME_DURATION_MS * durationFrames;
+    this.transportRampFrom = from;
+    this.transportRampTo = target;
+  }
+
+  private transportGainAt(at: number): number {
+    if (this.transportRampStart === null || this.transportRampEnd === null) return this.transportRampTo;
+    const progress = Math.max(0, Math.min(1, (at - this.transportRampStart) / (this.transportRampEnd - this.transportRampStart)));
+    if (progress >= 1) {
+      this.transportRampStart = null;
+      this.transportRampEnd = null;
+    }
+    return this.transportRampFrom + (this.transportRampTo - this.transportRampFrom) * progress;
   }
 
   private duckingGainAt(at: number): number {
@@ -991,48 +1043,47 @@ export class AudioPlayer extends EventEmitter {
     if (this.currentUrl && Number.isFinite(seconds) && seconds >= 0) {
       // Preserve the paused intent (review F3): play() resets state to
       // "playing", so a seek while paused would silently resume playback.
-      const wasPaused = this.state === "paused";
+      const paused = this.state === "paused";
       this.play(this.currentUrl, seconds, this.currentSongDuration);
-      if (wasPaused) this.pause();
+      if (paused && this.state === "playing") this.pause();
     }
   }
   pause(immediate = false): void {
     if (this.state === "playing") {
       this.state = "paused";
       if (this.externalMode) return;
-      // 末 5 帧淡出，之后 0.5s 静音尾（包流断流前平滑收尾）。
-      // immediate（语音传输故障）：跳过听感收尾——连接已不可用，静音帧
-      // 无处送达，且传输故障后帧循环必须立刻停发（上游 voice-failure 契约）。
+      // immediate（语音传输故障，fork 增量）：跳过听感收尾——连接已不可用，
+      // 静音帧无处送达，且传输故障后帧循环必须立刻停发（上游 voice-failure 契约）。
       if (immediate) {
-        this.fadeOutRemaining = 0;
+        this.pauseFrames = 0;
         this.pausedAt = performance.now() - AudioPlayer.PAUSE_SILENCE_MS;
-      } else {
-        this.fadeOutRemaining = AudioPlayer.FADE_FRAMES;
-        this.pausedAt = performance.now();
+        return;
       }
+      // 末 5 帧随 transportRamp 渐降到 0（防暂停爆音），之后 0.5s 静音尾
+      // （包流断流前平滑收尾，fork 增量）。
+      this.pauseFrames = 9;
+      this.setTransportRamp(0, 0, 5);
+      this.pausedAt = performance.now();
     }
   }
-
   resume(): void {
     if (this.state !== "paused") return;
     // 长暂停期间 CDN 可能已掐断阻塞中的连接：ffmpeg 已死（或已卸载）时，
     // 残余缓冲只够几秒，播完就会触发断流切歌、丢掉没听完的部分——改为
-    // 以暂停位置为偏移重启当前曲（Spotify 走 sidecar，不适用）。
+    // 以暂停位置为偏移重启当前曲（Spotify 走 sidecar，不适用）。fork 增量。
     if (!this.externalMode && !this.ffmpeg && this.currentUrl) {
       const offset = this.getElapsed();
       this.logger.info({ offset: Math.round(offset) }, "Resuming with pipeline restart at pause position");
       this.play(this.currentUrl, offset, this.currentSongDuration);
       return;
     }
+    // 3 帧静音桥 + 3 帧后 5 帧渐升回自然增益（防恢复爆音，上游 v1.15.4）。
+    // 与新轨道起播淡入互斥：本路径不做 fadeIn，避免双重渐变。
+    this.pauseFrames = 0;
+    this.resumeSilenceFrames = 3;
+    this.setTransportRamp(1, 3, 5);
     this.state = "playing";
-    this.nextFrameTime = performance.now();
-    // 重新衔接时间线：取消淡出，恢复后首 5 帧淡入
-    if (!this.externalMode) {
-      this.fadeOutRemaining = 0;
-      this.fadeInRemaining = AudioPlayer.FADE_FRAMES;
-    }
   }
-
   resetFailures(): void { this.consecutiveFailures = 0; }
   setVolume(vol: number): void { this.volume = Math.max(0, Math.min(100, vol)); }
   getVolume(): number { return this.volume; }
