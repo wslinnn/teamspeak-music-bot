@@ -4,6 +4,8 @@
 @theme {
   /* Colors */
   --color-primary: #335eea;
+  /* primary 之上的文字色（accent 可切换；App 根节点注入时覆盖此值） */
+  --color-on-primary: #ffffff;
   --color-primary-bg: #eaeffd;
   --color-success: #22c55e;
   --color-warning: #eab308;

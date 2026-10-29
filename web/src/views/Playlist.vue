@@ -26,7 +26,7 @@
             {{ songs.length }} 首歌曲
           </div>
           <div v-if="canPlayAll || canAddQueue" class="flex flex-wrap items-center gap-3">
-            <button v-if="canPlayAll" class="flex items-center gap-1.5 px-7 py-2.5 bg-primary text-white rounded-[var(--radius-lg)] text-sm font-semibold transition-transform hover:scale-[1.04] active:scale-[0.96]" @click="playAll">
+            <button v-if="canPlayAll" class="flex items-center gap-1.5 px-7 py-2.5 bg-primary text-on-primary rounded-[var(--radius-lg)] text-sm font-semibold transition-transform hover:scale-[1.04] active:scale-[0.96]" @click="playAll">
               <Icon icon="mdi:play" />
               播放全部
             </button>
@@ -61,7 +61,7 @@
     <div v-else class="text-center py-[60px]">
       <Icon icon="mdi:playlist-remove" class="text-4xl text-text-tertiary mb-3" />
       <p class="text-text-secondary text-sm">{{ kind === 'album' ? '专辑' : '歌单' }}不存在或加载失败</p>
-      <button class="mt-4 px-5 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-primary text-white cursor-pointer transition-colors hover:brightness-110" @click="retryLoad">重试</button>
+      <button class="mt-4 px-5 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-primary text-on-primary cursor-pointer transition-colors hover:brightness-110" @click="retryLoad">重试</button>
     </div>
   </div>
 </template>

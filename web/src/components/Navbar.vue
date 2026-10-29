@@ -122,7 +122,7 @@
         <Icon icon="mdi:server" />
       </button>
       <!-- 登录：仅移动端（桌面走下方 Desktop-only 区）；游客已认证则给退出入口 -->
-      <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="md:hidden text-sm font-semibold px-3 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
+      <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="md:hidden text-sm font-semibold px-3 py-1.5 rounded-[var(--radius-md)] bg-primary text-on-primary transition-colors duration-[var(--transition-fast)] hover:brightness-110">
         登录
       </RouterLink>
       <button
@@ -136,10 +136,11 @@
       </button>
       <!-- Desktop-only auth controls -->
       <div class="hidden md:flex items-center gap-4">
-        <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-white transition-colors duration-[var(--transition-fast)] hover:brightness-110">
+        <RouterLink v-if="!authStore.isAuthenticated" to="/login" class="text-sm font-semibold px-4 py-1.5 rounded-[var(--radius-md)] bg-primary text-on-primary transition-colors duration-[var(--transition-fast)] hover:brightness-110">
           登录
         </RouterLink>
-        <RouterLink v-if="!authStore.isGuest" to="/settings" class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 flex items-center justify-center min-h-[44px] min-w-[44px]">
+        <!-- 设置入口对游客开放（仅外观），标题提示外观设置 -->
+        <RouterLink to="/settings" class="text-[22px] opacity-60 transition-opacity duration-[var(--transition-fast)] hover:opacity-100 flex items-center justify-center min-h-[44px] min-w-[44px]" title="设置">
           <Icon icon="mdi:cog" />
         </RouterLink>
         <div v-if="authStore.isAuthenticated" class="flex items-center gap-2 ml-1 pl-3 border-l border-border-color">

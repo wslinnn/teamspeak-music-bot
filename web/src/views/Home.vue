@@ -10,7 +10,7 @@
       <RouterLink
         v-if="authStore.isAdmin"
         to="/settings?tab=bots"
-        class="mt-1 flex items-center gap-1.5 px-6 py-2.5 bg-primary text-white rounded-[var(--radius-lg)] text-sm font-semibold transition-transform hover:scale-[1.04] active:scale-[0.96]"
+        class="mt-1 flex items-center gap-1.5 px-6 py-2.5 bg-primary text-on-primary rounded-[var(--radius-lg)] text-sm font-semibold transition-transform hover:scale-[1.04] active:scale-[0.96]"
       >
         <Icon icon="mdi:plus" />
         去创建机器人

@@ -28,7 +28,7 @@
           <p v-if="artist.description" class="text-[13px] text-text-secondary mb-4 max-w-[640px] line-clamp-3">{{ artist.description }}</p>
           <div v-if="canPlayAll" class="flex flex-wrap items-center gap-3">
             <button
-              class="flex items-center gap-1.5 px-7 py-2.5 bg-primary text-white rounded-[var(--radius-lg)] text-sm font-semibold transition-transform hover:scale-[1.04] active:scale-[0.96]"
+              class="flex items-center gap-1.5 px-7 py-2.5 bg-primary text-on-primary rounded-[var(--radius-lg)] text-sm font-semibold transition-transform hover:scale-[1.04] active:scale-[0.96]"
               title="播放该歌手的全部歌曲"
               @click="playAll"
             >
@@ -96,7 +96,7 @@
     <div v-else class="text-center py-[60px]">
       <Icon icon="mdi:account-music-outline" class="text-4xl text-text-tertiary mb-3" />
       <p class="text-text-secondary text-sm">歌手不存在或加载失败</p>
-      <button class="mt-4 px-5 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-primary text-white cursor-pointer transition-colors hover:brightness-110" @click="loadArtist">重试</button>
+      <button class="mt-4 px-5 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-primary text-on-primary cursor-pointer transition-colors hover:brightness-110" @click="loadArtist">重试</button>
     </div>
   </div>
 </template>

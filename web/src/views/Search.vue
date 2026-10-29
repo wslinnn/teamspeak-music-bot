@@ -59,7 +59,7 @@
         :key="tab.key"
         class="rounded-full px-4 py-1.5 text-sm font-medium transition-all"
         :class="activePlatform === tab.key
-          ? 'bg-primary text-white'
+          ? 'bg-primary text-on-primary'
           : 'bg-surface-card text-foreground-muted hover:bg-interactive-hover hover:text-foreground'"
         @click="activePlatform = tab.key"
       >

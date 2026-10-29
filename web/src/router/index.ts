@@ -58,7 +58,8 @@ const router = createRouter({
       path: '/settings',
       name: 'settings',
       component: () => import('../views/Settings.vue'),
-      meta: { blockGuest: true },
+      // 游客可进（仅外观页签，本地偏好）；管理语义由页签权限继续禁止
+      meta: {},
     },
     {
       path: '/first-run',

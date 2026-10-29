@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { http } from '../utils/http';
 import { useToast } from '../composables/useToast';
 import { useAuthStore } from './auth';
+import { DEFAULT_ACCENT, normalizeAccent, readGuestAccent, saveGuestAccent } from '../styles/accent';
 
 export interface Song {
   id: string;
@@ -117,6 +118,8 @@ export const usePlayerStore = defineStore('player', {
     theme: 'auto' as 'auto' | 'dark' | 'light',
     /** 系统深浅色偏好（AUTO 主题的解析依据），loadTheme 时初始化并持续监听 */
     systemPrefersDark: false,
+    /** 主题强调色（按钮/选中态/进度条），账号同步、游客存 cookie */
+    accentColor: DEFAULT_ACCENT,
 
     // Home page cache
     recommendPlaylists: [] as PlaylistItem[],
@@ -324,6 +327,26 @@ export const usePlayerStore = defineStore('player', {
     setTheme(theme: 'auto' | 'dark' | 'light') {
       this.theme = theme;
       localStorage.setItem('theme', theme);
+    },
+
+    // ── 主题强调色（上游 v1.15.4 语义）：账号走 PUT /api/session/preferences，
+    // 游客走本地 cookie。setAccentColor 只改内存（预览），持久化由调用方显式保存。 ──
+    setAccentColor(value: string) {
+      const color = normalizeAccent(value);
+      if (!color) return;
+      this.accentColor = color;
+    },
+
+    loadAccentColor(value?: string | null) {
+      const auth = useAuthStore();
+      const guest = auth.isGuest;
+      this.accentColor = !auth.user || guest
+        ? readGuestAccent()
+        : normalizeAccent(value ?? '') ?? DEFAULT_ACCENT;
+    },
+
+    saveGuestAccentColor() {
+      saveGuestAccent(this.accentColor);
     },
 
     loadTheme() {

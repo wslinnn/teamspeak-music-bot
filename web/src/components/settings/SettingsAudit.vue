@@ -31,13 +31,13 @@
 
     <div v-if="hasMore || offset > 0" class="flex items-center justify-between pt-1">
       <button
-        class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-interactive-hover disabled:hover:text-inherit"
+        class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors disabled:opacity-40 disabled:hover:bg-interactive-hover disabled:hover:text-inherit"
         :disabled="offset === 0 || loading"
         @click="page(-1)"
       >上一页</button>
       <span class="text-xs text-text-tertiary">第 {{ offset / PAGE_SIZE + 1 }} 页</span>
       <button
-        class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-interactive-hover disabled:hover:text-inherit"
+        class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors disabled:opacity-40 disabled:hover:bg-interactive-hover disabled:hover:text-inherit"
         :disabled="!hasMore || loading"
         @click="page(1)"
       >下一页</button>

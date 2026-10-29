@@ -9,7 +9,7 @@
       <CoverArt :url="song.coverUrl" :fill="true" :radius="0" />
       <!-- Hover play overlay -->
       <div v-if="showPlay" class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-        <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-white shadow-lg">
+        <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-on-primary shadow-lg">
           <Icon icon="mdi:play" class="text-2xl" />
         </div>
       </div>

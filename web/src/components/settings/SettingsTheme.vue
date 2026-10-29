@@ -10,12 +10,68 @@
           v-for="opt in THEME_OPTIONS"
           :key="opt.value"
           class="px-2.5 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium transition-colors"
-          :class="store.theme === opt.value ? 'bg-primary text-white' : 'bg-interactive-hover opacity-70 hover:opacity-100'"
+          :class="store.theme === opt.value ? 'bg-primary text-on-primary' : 'bg-interactive-hover opacity-70 hover:opacity-100'"
           @click="store.setTheme(opt.value)"
         >
           {{ opt.label }}
         </button>
       </div>
+    </div>
+
+    <!-- 主题强调色：预设色板（自定义取色器二期） -->
+    <div>
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2 text-sm font-medium">
+          <Icon icon="mdi:palette-outline" class="text-lg opacity-60" />
+          主题色
+        </div>
+        <button
+          type="button"
+          class="text-xs text-text-secondary hover:text-text-primary transition-colors"
+          @click="chooseAccent(DEFAULT_ACCENT)"
+        >
+          恢复默认
+        </button>
+      </div>
+      <p class="text-xs text-text-secondary mt-1 leading-relaxed">
+        设置按钮、选中状态和进度条的强调色，点击即可预览，保存后多端同步。
+      </p>
+      <div class="flex flex-wrap gap-2.5 mt-3" role="group" aria-label="预设主题色">
+        <button
+          v-for="preset in ACCENT_PRESETS"
+          :key="preset.color"
+          type="button"
+          class="flex flex-col items-center gap-1.5 px-2 py-1.5 rounded-[var(--radius-md)] transition-colors"
+          :class="store.accentColor === preset.color ? 'bg-interactive-hover' : 'hover:bg-interactive-hover'"
+          :aria-pressed="store.accentColor === preset.color"
+          :aria-label="preset.name"
+          @click="chooseAccent(preset.color)"
+        >
+          <span
+            class="grid place-items-center w-8 h-8 rounded-full border border-white/10"
+            :style="{ background: preset.color, color: accentTokens(preset.color)['--color-on-primary'] }"
+          >
+            <Icon v-if="store.accentColor === preset.color" icon="mdi:check" class="text-lg" />
+          </span>
+          <span class="text-[11px]" :class="store.accentColor === preset.color ? 'text-text-primary' : 'text-text-secondary'">
+            {{ preset.name }}
+          </span>
+        </button>
+      </div>
+      <div class="flex items-center gap-3 mt-4 flex-wrap">
+        <button
+          type="button"
+          class="px-4 py-1.5 rounded-[var(--radius-sm)] text-[12px] font-medium bg-primary text-on-primary disabled:opacity-50 disabled:cursor-default"
+          :disabled="accentSaving || !accentDirty"
+          @click="saveAccent"
+        >
+          {{ accentSaving ? '保存中…' : '保存' }}
+        </button>
+        <span class="text-[11px] text-text-secondary" aria-live="polite">
+          {{ accentDirty ? '有未保存的修改' : '已保存' }}
+        </span>
+      </div>
+      <p v-if="accentSaveError" class="text-xs text-danger mt-1.5">{{ accentSaveError }}</p>
     </div>
 
     <div class="flex items-center justify-between">
@@ -28,7 +84,7 @@
           v-for="opt in FONT_OPTIONS"
           :key="opt.value"
           class="px-2.5 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium transition-colors"
-          :class="fontScale === opt.value ? 'bg-primary text-white' : 'bg-interactive-hover opacity-70 hover:opacity-100'"
+          :class="fontScale === opt.value ? 'bg-primary text-on-primary' : 'bg-interactive-hover opacity-70 hover:opacity-100'"
           @click="setFontScale(opt.value)"
         >
           {{ opt.label }}
@@ -54,11 +110,15 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed } from 'vue';
 import { Icon } from '@iconify/vue';
 import { usePlayerStore } from '../../stores/player';
+import { useAuthStore } from '../../stores/auth';
 import { useLyricsFontScale } from '../../composables/useLyricsFontScale';
+import { ACCENT_PRESETS, DEFAULT_ACCENT, accentTokens, readGuestAccent, normalizeAccent } from '../../styles/accent';
 
 const store = usePlayerStore();
+const authStore = useAuthStore();
 const { fontScale, setFontScale } = useLyricsFontScale();
 
 // 主题：AUTO 跟随系统深浅色（store 内监听 prefers-color-scheme 实时解析）
@@ -67,6 +127,42 @@ const THEME_OPTIONS = [
   { label: '深色', value: 'dark' },
   { label: '跟随系统', value: 'auto' },
 ] as const;
+
+// ── 主题强调色 ──
+const accentSaving = ref(false);
+const accentSaveError = ref('');
+/** 游客的已保存基线：保存成功 cookie 后才更新，用于脏状态判断 */
+const guestSavedAccent = ref(readGuestAccent());
+const accentDirty = computed(() => {
+  const saved = authStore.isGuest
+    ? guestSavedAccent.value
+    : normalizeAccent(authStore.user?.accentColor ?? '') ?? DEFAULT_ACCENT;
+  return store.accentColor !== saved;
+});
+
+function chooseAccent(color: string) {
+  store.setAccentColor(color);
+  accentSaveError.value = '';
+}
+
+async function saveAccent() {
+  if (accentSaving.value || !accentDirty.value) return;
+  const color = store.accentColor;
+  accentSaving.value = true;
+  accentSaveError.value = '';
+  try {
+    if (authStore.isGuest) {
+      store.saveGuestAccentColor();
+      guestSavedAccent.value = color;
+    } else {
+      await authStore.saveAccentColor(color);
+    }
+  } catch (error) {
+    accentSaveError.value = (error as Error).message || '主题色保存失败，请稍后重试。';
+  } finally {
+    accentSaving.value = false;
+  }
+}
 
 // 歌词字号：纯本地显示偏好（与主题同级），三档缩放正文/活跃行/译文
 const FONT_OPTIONS = [

@@ -32,7 +32,7 @@ const props = withDefaults(
 const variantClasses = computed(() => {
   switch (props.variant) {
     case 'primary':
-      return 'bg-primary text-white hover:brightness-110 active:scale-[0.98]';
+      return 'bg-primary text-on-primary hover:brightness-110 active:scale-[0.98]';
     case 'secondary':
       return 'bg-interactive-hover text-foreground hover:bg-border-default active:scale-[0.98]';
     case 'danger':

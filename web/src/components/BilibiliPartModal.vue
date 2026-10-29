@@ -25,7 +25,7 @@
       >
         <span
           class="shrink-0 min-w-[2.2rem] text-center text-xs font-semibold rounded-md px-1.5 py-0.5"
-          :class="selectedPart?.part === part.part ? 'bg-primary text-white' : 'bg-surface-card text-text-secondary'"
+          :class="selectedPart?.part === part.part ? 'bg-primary text-on-primary' : 'bg-surface-card text-text-secondary'"
         >P{{ part.part }}</span>
         <span class="flex-1 text-sm truncate" :title="part.title">{{ part.title }}</span>
         <span class="shrink-0 text-xs text-text-tertiary tabular-nums">{{ formatDuration(part.duration) }}</span>

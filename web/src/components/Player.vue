@@ -53,7 +53,7 @@
         <button v-if="canControl" aria-label="上一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.prev()">
           <Icon icon="mdi:skip-previous" />
         </button>
-        <button v-if="canTransport" :aria-label="store.isPlaying ? '暂停' : '播放'" class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-lg text-white transition-transform duration-[var(--transition-fast)] hover:scale-[1.08] active:scale-95" @click="togglePlay">
+        <button v-if="canTransport" :aria-label="store.isPlaying ? '暂停' : '播放'" class="w-8 h-8 bg-primary rounded-full flex items-center justify-center text-lg text-on-primary transition-transform duration-[var(--transition-fast)] hover:scale-[1.08] active:scale-95" @click="togglePlay">
           <Icon :icon="store.isPlaying ? 'mdi:pause' : 'mdi:play'" />
         </button>
         <button v-if="canSkip" aria-label="下一首" class="text-xl opacity-70 transition-opacity duration-[var(--transition-fast)] hover:opacity-100" @click="store.next()">

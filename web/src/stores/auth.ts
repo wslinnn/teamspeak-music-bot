@@ -12,6 +12,8 @@ export interface SessionUser {
   bots?: 'all' | string[];
   /** 游客模式逐项开关（仅 role=guest 时有值） */
   guest?: Record<string, boolean> | null;
+  /** 主题强调色（仅非 guest 账号由服务端同步；游客为 null，本地存 cookie） */
+  accentColor?: string | null;
 }
 
 const ROLE_LABELS: Record<SessionUser['role'], string> = {
@@ -78,6 +80,17 @@ export const useAuthStore = defineStore('auth', () => {
   function guestCan(flag: string): boolean {
     const u = user.value;
     return !!u && u.role === 'guest' && u.guest?.[flag] === true;
+  }
+
+  /** 保存主题强调色到账号（游客由调用方走本地 cookie，不走此接口） */
+  async function saveAccentColor(accentColor: string): Promise<void> {
+    const current = user.value;
+    const userId = current?.id;
+    const res = await http.put('/api/session/preferences', { accentColor });
+    // 保存期间会话若被切换/登出，不回写旧用户的偏好
+    if (user.value && user.value.id === userId && current) {
+      user.value = { ...current, accentColor: (res.data as { accentColor: string }).accentColor };
+    }
   }
 
   /** 是否可控制指定 bot（bot 白名单） */
@@ -217,5 +230,6 @@ export const useAuthStore = defineStore('auth', () => {
     can,
     guestCan,
     canControlBot,
+    saveAccentColor,
   };
 });

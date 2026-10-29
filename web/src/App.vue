@@ -1,5 +1,5 @@
 <template>
-  <div class="app">
+  <div class="app" :style="accentStyle">
     <Navbar v-if="!route.meta.hideNavbar" />
     <ConnectionBanner v-if="wsStarted" :state="connectionState" @reconnect="reconnect" />
     <main class="main-content">
@@ -19,7 +19,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { accentTokens } from './styles/accent.js';
 import { useRoute, useRouter } from 'vue-router';
 import { usePlayerStore } from './stores/player.js';
 import { useAuthStore } from './stores/auth';
@@ -58,6 +59,18 @@ watch(() => playerStore.resolvedTheme, (t) => {
   document.querySelector('meta[name="theme-color"]')
     ?.setAttribute('content', t === 'dark' ? '#222222' : '#ffffff');
 }, { immediate: true });
+
+// 主题强调色：单 hex 派生全套 CSS 变量（--color-primary / --color-on-primary 等）
+// 注入 .app 根节点，覆盖 index.css @theme 的静态默认值；accentColor 预览改动
+// 也经 playerStore.accentColor 全站实时生效。
+const accentStyle = computed(() => accentTokens(playerStore.accentColor));
+
+// 会话水合：登录/轮询刷新/登出后，按账号（服务端）或游客（cookie）来源重读强调色
+const stopAccentHydration = watch(
+  () => authStore.user,
+  (u) => playerStore.loadAccentColor(u?.accentColor),
+  { immediate: true },
+);
 
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 let pausedTicks = 0;
@@ -136,6 +149,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  stopAccentHydration();
   stopSyncTimer();
   document.removeEventListener('visibilitychange', onVisibilityChange);
 });

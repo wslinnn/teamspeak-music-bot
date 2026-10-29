@@ -150,10 +150,10 @@
                 {{ sq.songCount }} 首<template v-if="sq.ownerName"> · 创建人 {{ sq.ownerName }}</template>
               </div>
             </div>
-          <button class="text-sm px-2 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium bg-interactive-hover hover:bg-primary hover:text-white transition-colors" title="替换当前队列并播放" @click="loadQueue(sq, 'replace')">
+          <button class="text-sm px-2 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors" title="替换当前队列并播放" @click="loadQueue(sq, 'replace')">
             加载
           </button>
-          <button class="text-sm px-2 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium bg-interactive-hover hover:bg-primary hover:text-white transition-colors" title="追加到队列末尾" @click="loadQueue(sq, 'append')">
+          <button class="text-sm px-2 py-1 rounded-[var(--radius-sm)] text-[12px] font-medium bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors" title="追加到队列末尾" @click="loadQueue(sq, 'append')">
             追加
           </button>
           <button v-if="sq.canDelete" class="text-base opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity text-text-tertiary hover:text-danger" title="删除" @click="deleteQueue(sq)">

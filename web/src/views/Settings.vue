@@ -4,6 +4,9 @@
 
     <SettingsLayout v-model:active-tab="activeTab" :tabs="tabs">
       <template #default="{ activeTab }">
+        <!-- 游客专属外观页签：仅主题 + 主题色 -->
+        <SettingsTheme v-if="activeTab === 'appearance'" />
+
         <SettingsTheme v-if="activeTab === 'general'" />
 
         <SettingsQuality v-if="activeTab === 'general'" class="mt-6" />
@@ -119,7 +122,7 @@
             <div class="flex flex-col gap-1.5">
               <button
                 type="button"
-                class="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors"
+                class="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors"
                 @click="avatarInput?.click()"
               >上传图片（png/jpg/webp，≤200KB）</button>
               <button
@@ -218,6 +221,10 @@ const route = useRoute();
 const router = useRouter();
 
 const tabs = computed<TabDef[]>(() => {
+  // 游客仅可进外观页签（主题模式 + 主题色，存本地 cookie）；管理语义保持禁止
+  if (authStore.isGuest) {
+    return [{ key: 'appearance', label: '外观', icon: 'mdi:palette-outline' }];
+  }
   // 页签按能力显隐（对齐后端权限）：机器人管理/行为设置写 bot 设置需 bot.manage，
   // 音乐账号登录需 platform.auth；通用页签人人可见（主题/音质/改密码），内部区块再细分
   const list: TabDef[] = [
@@ -596,6 +603,8 @@ async function saveCookie(platform: string, cookie: string) {
 }
 
 onMounted(() => {
+  // 游客只看外观（本地偏好），一切管理数据拉取都跳过
+  if (authStore.isGuest) return;
   store.fetchBots();
   checkAuthStatus();
 });

@@ -1,5 +1,5 @@
 // 自动生成：npm run icons:build —— 请勿手改。
-// 数据来源 @iconify-json/mdi，仅含源码实际引用的 98 个图标；经 main.ts 的 addCollection 注册后 Iconify 完全离线渲染。
+// 数据来源 @iconify-json/mdi，仅含源码实际引用的 99 个图标；经 main.ts 的 addCollection 注册后 Iconify 完全离线渲染。
 export default {
   prefix: 'mdi',
   width: 24,
@@ -58,6 +58,7 @@ export default {
     'music-note-outline': { body: "<path fill=\"currentColor\" d=\"M12 3v10.55A4 4 0 1 0 14 17V7h4V3m-8 16a2 2 0 1 1 2-2a2 2 0 0 1-2 2\"/>" },
     'music-off': { body: "<path fill=\"currentColor\" d=\"M2 5.27L3.28 4L20 20.72L18.73 22L9 12.27v5.23A3.5 3.5 0 0 1 5.5 21A3.5 3.5 0 0 1 2 17.5A3.5 3.5 0 0 1 5.5 14c.54 0 1.05.12 1.5.34v-4.07zM21 3v12.5c0 1-.43 1.92-1.12 2.56l-4.94-4.94c.64-.69 1.56-1.12 2.56-1.12c.54 0 1.05.12 1.5.34V6.47l-8.83 1.88l-2.51-2.51z\"/>" },
     'open-in-new': { body: "<path fill=\"currentColor\" d=\"M14 3v2h3.59l-9.83 9.83l1.41 1.41L19 6.41V10h2V3m-2 16H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2z\"/>" },
+    'palette-outline': { body: "<path fill=\"currentColor\" d=\"M12 22A10 10 0 0 1 2 12A10 10 0 0 1 12 2c5.5 0 10 4 10 9a6 6 0 0 1-6 6h-1.8c-.3 0-.5.2-.5.5c0 .1.1.2.1.3c.4.5.6 1.1.6 1.7c.1 1.4-1 2.5-2.4 2.5m0-18a8 8 0 0 0-8 8a8 8 0 0 0 8 8c.3 0 .5-.2.5-.5c0-.2-.1-.3-.1-.4c-.4-.5-.6-1-.6-1.6c0-1.4 1.1-2.5 2.5-2.5H16a4 4 0 0 0 4-4c0-3.9-3.6-7-8-7m-5.5 6c.8 0 1.5.7 1.5 1.5S7.3 13 6.5 13S5 12.3 5 11.5S5.7 10 6.5 10m3-4c.8 0 1.5.7 1.5 1.5S10.3 9 9.5 9S8 8.3 8 7.5S8.7 6 9.5 6m5 0c.8 0 1.5.7 1.5 1.5S15.3 9 14.5 9S13 8.3 13 7.5S13.7 6 14.5 6m3 4c.8 0 1.5.7 1.5 1.5s-.7 1.5-1.5 1.5s-1.5-.7-1.5-1.5s.7-1.5 1.5-1.5\"/>" },
     'pause': { body: "<path fill=\"currentColor\" d=\"M14 19h4V5h-4M6 19h4V5H6z\"/>" },
     'pencil': { body: "<path fill=\"currentColor\" d=\"M20.71 7.04c.39-.39.39-1.04 0-1.41l-2.34-2.34c-.37-.39-1.02-.39-1.41 0l-1.84 1.83l3.75 3.75M3 17.25V21h3.75L17.81 9.93l-3.75-3.75z\"/>" },
     'play': { body: "<path fill=\"currentColor\" d=\"M8 5.14v14l11-7z\"/>" },

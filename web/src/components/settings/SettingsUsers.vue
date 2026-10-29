@@ -42,24 +42,24 @@
         >
           <button
             v-if="u.role === 'member'"
-            class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors"
+            class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors"
             title="编辑细粒度权限（能力 + 机器人白名单）"
             @click="openPerms(u)"
           >权限</button>
           <button
             v-if="u.role === 'member'"
-            class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors"
+            class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors"
             title="提升为管理员"
             @click="setRole(u, 'admin')"
           >提升</button>
           <button
             v-else-if="u.username !== authStore.username"
-            class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors"
+            class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors"
             title="降为成员"
             @click="setRole(u, 'member')"
           >降级</button>
           <button
-            class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-white transition-colors"
+            class="text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-interactive-hover hover:bg-primary hover:text-on-primary transition-colors"
             title="重置密码"
             @click="openReset(u)"
           >重置密码</button>
