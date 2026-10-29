@@ -28,11 +28,13 @@
 
 ## 与上游的差异
 
-本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。以下覆盖 v2.0.0（Fork 首个独立版本）与 v2.3.0（当前版）的全部差异要点。
+本仓库是上游 [ZHANGTIANYAO1/teamspeak-music-bot](https://github.com/ZHANGTIANYAO1/teamspeak-music-bot) 的 fork：**后端与上游同源**（保留 `git merge upstream/main` 的持续同步能力），**前端由本 fork 完全接管**（Tailwind CSS 4 重写，上游为 SCSS）。同步策略与维护说明见 [FORK.md](FORK.md)，前端逐项对照见 [docs/frontend-diff-vs-upstream.md](docs/frontend-diff-vs-upstream.md)。以下覆盖 v2.0.0（Fork 首个独立版本）到 v2.3.0（当前版）的全部差异要点，以及后续合并上游 v1.15.3–v1.15.4 带来的增量。
 
 **前端与体验**
 
-- **Tailwind CSS 4 全新界面** — 深浅主题（含跟随系统）、移动端适配（底部胶囊播放器 + 底部导航 + 抽屉式队列）、自建通用组件库（BaseModal / BaseButton 等）、PWA Service Worker 离线缓存与安装引导
+- **Tailwind CSS 4 全新界面** — 深浅主题（含跟随系统，启动期先行解析防闪屏）、移动端适配（底部胶囊播放器 + 底部导航 + 抽屉式队列）、自建通用组件库（BaseModal / BaseButton 等）、PWA Service Worker 离线缓存与安装引导
+- **主题强调色**（合并上游 v1.15.4）— 设置页 6 预设强调色一键切换（按钮/选中态/进度条跟随），`--color-on-primary` 语义 token 按亮度自动保文字对比；账号保存云端同步，游客存本地 cookie；自定义取色器二期
+- **外观设置对游客开放**（合并上游 v1.15.4）— 游客可进设置页外观区（主题模式 + 主题色，仅本地偏好），管理语义照旧禁止
 - **TS 服务器频道树** — WebUI 侧边抽屉浏览完整频道树与在线用户，管理员点击频道一键移动机器人
 - **播放队列拖拽重排序** — 鼠标 / 触屏拖拽，配合 `!reorder <from> <to>` 聊天命令；队列抽屉打开自动定位当前播放行；行内显示点歌人，「正在播放」高亮按播放实例精确匹配（上游按歌曲 id 匹配，同名重复曲目会全部点亮）
 - **歌词页重构** — 单轴原生滚动（跟手，已播歌词可回滚）；手动浏览时暂停自动跟随，分割线 + ▶时间胶囊指示视口位置、点击即跳转（无播放权限时给出提示）；上下留白随视口高度动态计算；译文开关、三档字号
@@ -60,6 +62,7 @@
 - **重启忠实恢复播放状态** — 关机前在播 → 重启后续播；关机前暂停 → 恢复为暂停（上游总是续播）
 - **播放互斥锁全覆盖** — 聊天命令 / WebUI / 队列恢复全部入口串行化，杜绝并发操作下可听轨道与队列错位
 - **播放转场静音桥接**（v2.1.1）— 暂停 / 恢复 / seek 时语音包流不再原地硬切：淡入淡出（各 100ms）+ 暂停期短静音尾平滑过渡，本地源 seek 改为 FFmpeg 输入侧定位、起播空窗由静音帧桥接；经实际部署验证转场爆音基本消除
+- **音频防爆音体系并轨**（合并上游 v1.15.3–v1.15.4）— 采纳上游 time-based transportRamp 渐变增益 / pauseFrames / stopWithFade / 切歌 `stop(keepAlive)` 时间线桥接 / 欠载补帧门控，与 fork 增量（语音故障 `immediate` 即停、暂停 0.5s 静音尾、resume 死管道重启、起播首帧淡入、旧流末帧 buffer 淡出）在同一播放器内并轨生效；今后上游音频改动可直接合并
 - **权限操作有反馈**（v2.1.0）— 歌词页所有人可看；歌词行跳转、进度条 seek 等控制操作在无权限时给出 toast 提示，而非静默无效
 - **稳定性修复**（v2.1.0）— 二维码登录（B站 / 酷狗恢复渲染、本地生成兜底、轮询服务端 TTL 兜底）、游客点歌失败提示、鉴权错误文案中文化等
 - **Web 端 seek 补发 stateChange**（v2.2.0）— WebUI 拖动进度条后服务端立即向全部 WS 客户端广播，桌面端歌词即时收敛（不再等下一轮轮询）

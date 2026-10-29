@@ -69,11 +69,13 @@ git config merge.ours.driver true
 | 功能 | 入口 |
 |------|------|
 | 歌曲收藏 | `src/web/api/song-favorites.ts`（路由）、`src/data/database.ts` 的 `addSongFavorite` 等、WS 事件 `favoritesChanged` |
+| 主题强调色（账号同步 + 游客 cookie，上游 v1.15.4 移植） | `web/src/styles/accent.ts`（单 hex → CSS 变量派生）、`stores/player.ts` 的 accent 状态、`stores/auth.ts` 的 `saveAccentColor`（PUT `/api/session/preferences`）、`SettingsTheme.vue` 预设色板；游客存 cookie `tsmb_accent` |
+| 播放边界防爆音（v1.15.4 起并轨） | 上游 transportRamp/pauseFrames/stop(keepAlive)/stopWithFade ⊕ fork 起播淡入 `fadeInRemaining`、暂停 0.5s 静音尾 `PAUSE_SILENCE_MS`、`pause(immediate)` 语音故障即停、resume 死管道重启、stop() 旧流末帧 buffer 淡出——统一在 `src/audio/player.ts`，两条机制经 `applyVolume` 的 scale × transportGain 合成 |
 | 频道树 | `src/web/api/bot.ts` 的 `/:id/server-tree` 与 `/:id/join-channel`、`src/bot/instance.ts` 的 `getServerTree()/joinChannelById()` |
 | 队列重排序 | `src/audio/queue.ts` 的 `reorder()`、`!reorder` 命令、`POST /api/player/:botId/queue/reorder` |
 | WebSocket 广播扩展 | `src/web/websocket.ts` 的 `controller.broadcast`（fork 暴露） |
 | Docker 预构建发布 | `.github/workflows/release-docker.yml`、`scripts/docker/docker-compose.prod.yml` |
-| 播放可靠性双机制（v1.15.2 合并起并存） | 长暂停防链接过期 `instance.ts tryResumeAgedUrl`（resume 路径、全平台）⊕ B站断流续播 `resumeInterruptedStream`（trackEnd、仅 bilibili）；占用判定 ChannelView（`channel-view.ts`）⊕ 上游围栏查询 `refreshOccupancy`；cmdResume/cmdPause 的恢复让位与 immediate 语义见各函数注释 |
+| 播放可靠性双机制（v1.15.2 合并起并存） | 长暂停防链接过期 `instance.ts tryResumeAgedUrl`（resume 路径、全平台）⊕ B站断流续播 `resumeInterruptedStream`（trackEnd、仅 bilibili）；占用判定 ChannelView（`channel-view.ts`）⊕ 上游围栏查询 `refreshOccupancy`；cmdResume/cmdPause 的恢复让位与 immediate 语义见各函数注释；音频渐变体系见上表「播放边界防爆音」行（v1.15.4 起） |
 
 ## PR 回上游候选
 
