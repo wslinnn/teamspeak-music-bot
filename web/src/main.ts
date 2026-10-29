@@ -7,6 +7,11 @@ import router from './router/index.js';
 // Iconify 不再向 api.iconify.design 发起任何运行时请求
 import iconsMdi from './assets/icons-mdi';
 import './styles/index.css';
+// 启动期先应用主题（createApp 之前）：保存过浅色/系统浅色的用户不再闪深色
+// 首帧；此后 App.vue watcher 响应 AUTO 跟随系统的切换
+import { applyDocumentTheme, readThemePreference, resolveTheme } from './styles/theme.js';
+
+applyDocumentTheme(resolveTheme(readThemePreference()));
 
 addCollection(iconsMdi as unknown as Parameters<typeof addCollection>[0]);
 

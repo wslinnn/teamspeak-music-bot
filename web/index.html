@@ -16,7 +16,9 @@
   <!-- iOS 主屏图标（iOS 自己切圆角，用全尺寸方图）；Android 走 manifest。 -->
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <!-- 与深色主题 --bg-primary 一致（应用默认从深色启动）。 -->
+  <!-- 与深色主题 --bg-primary 一致（应用默认从深色启动）；浅色由启动期脚本
+       （main.ts → applyDocumentTheme）先行替换，避免闪屏。深浅两值均声明支持。 -->
+  <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#222222">
   <!-- Barlow 自托管（public/fonts/，SW 预缓存）：googleapis 在目标用户网络不可达，且随包分发无第三方依赖 -->
 </head>

@@ -27,6 +27,7 @@ import { useAuthStore } from './stores/auth';
 import { useFavoritesStore } from './stores/favorites';
 import { useWebSocket } from './composables/useWebSocket.js';
 import { useToast } from './composables/useToast';
+import { applyDocumentTheme } from './styles/theme.js';
 import Navbar from './components/Navbar.vue';
 import Player from './components/Player.vue';
 import MiniPlayer from './components/MiniPlayer.vue';
@@ -52,12 +53,10 @@ function reconnect() {
 }
 
 // 主题消费的是解析结果：AUTO 模式下 store 内部跟随系统深浅色，
-// OS 切换时 resolvedTheme 变化会自动触发本 watcher
+// OS 切换时 resolvedTheme 变化会自动触发本 watcher（colorScheme/theme-color
+// 一并由 applyDocumentTheme 统一处理；启动期的首次应用在 main.ts）
 watch(() => playerStore.resolvedTheme, (t) => {
-  document.documentElement.setAttribute('data-theme', t);
-  // 手机状态栏/PWA 标题栏颜色跟随主题（index.html 里的静态值只是初始深色）
-  document.querySelector('meta[name="theme-color"]')
-    ?.setAttribute('content', t === 'dark' ? '#222222' : '#ffffff');
+  applyDocumentTheme(t);
 }, { immediate: true });
 
 // 主题强调色：单 hex 派生全套 CSS 变量（--color-primary / --color-on-primary 等）
