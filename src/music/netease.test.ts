@@ -99,6 +99,43 @@ describe("NetEase adapter", () => {
     // 异常 end<=start
     expect(parseNeteaseTrial({ freeTrialInfo: { start: 0, end: 0 } })).toBeUndefined();
   });
+
+  it("getSongUrl requests /song/url/v1 with crypto=api (eapi is risk-blocked)", async () => {
+    const p = new NeteaseProvider("http://x");
+    p.setCookie("MUSIC_U=abc");
+    const get = vi.fn().mockResolvedValue({
+      data: { code: 200, data: [{ url: "http://cdn/x.mp3", freeTrialInfo: { start: 0, end: 30 } }] },
+    });
+    (p as any).api = { get };
+
+    const out = await p.getSongUrl("123", "exhigh");
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get.mock.calls[0][0]).toBe("/song/url/v1");
+    // 网易风控只针对 eapi 的该接口：显式 api 加密是修复的关键
+    expect(get.mock.calls[0][1].params).toMatchObject({
+      id: "123",
+      level: "exhigh",
+      crypto: "api",
+      cookie: "MUSIC_U=abc",
+    });
+    expect(out).toEqual({ url: "http://cdn/x.mp3", trialDuration: 30 });
+  });
+
+  it("getSongUrl returns null when NetEase yields no url", async () => {
+    const p = new NeteaseProvider("http://x");
+    (p as any).api = { get: vi.fn().mockResolvedValue({ data: { code: 200, data: [{ url: null }] } }) };
+    expect(await p.getSongUrl("123")).toBeNull();
+  });
+
+  it("getSongUrl falls back to the provider quality when none is passed", async () => {
+    const p = new NeteaseProvider("http://x");
+    p.setQuality("lossless");
+    const get = vi.fn().mockResolvedValue({ data: { code: 200, data: [{ url: "http://cdn/y.flac" }] } });
+    (p as any).api = { get };
+    await p.getSongUrl("9");
+    expect(get.mock.calls[0][1].params.level).toBe("lossless");
+  });
 });
 
 describe("NeteaseProvider.search pagination", () => {

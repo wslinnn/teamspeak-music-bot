@@ -215,8 +215,10 @@ export class NeteaseProvider implements MusicProvider {
 
   async getSongUrl(songId: string, quality?: string): Promise<SongUrlResult | null> {
     const level = quality ?? this.quality;
+    // 默认 eapi 加密的 /song/url/v1 已被网易风控标记（-460「检测到您的网络环境
+    // 存在风险」），改用 api 加密可正常取链接；其余接口不受影响，勿全局改。
     const res = await this.api.get("/song/url/v1", {
-      params: { id: songId, level, ...this.cookieParams },
+      params: { id: songId, level, crypto: "api", ...this.cookieParams },
     });
     const item = res.data?.data?.[0];
     const url = item?.url;
