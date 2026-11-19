@@ -15,6 +15,9 @@
 
         <SettingsNeteaseAccount v-if="activeTab === 'general'" class="mt-6" />
 
+        <!-- 成员视角的账号范围选择；管理员另见「权限」页的账号池管理 -->
+        <SettingsMusicAccountScope v-if="activeTab === 'general'" class="mt-6" />
+
         <SettingsApiKeys v-if="activeTab === 'general'" class="mt-6" />
 
         <SettingsBots
@@ -45,6 +48,9 @@
         <SettingsPermissions v-if="activeTab === 'permissions'" />
 
         <SettingsUsers v-if="activeTab === 'users'" />
+
+        <!-- 管理员：账号池维护与分配 -->
+        <SettingsMusicAccounts v-if="activeTab === 'permissions'" class="mt-6" />
 
         <SettingsAudit v-if="activeTab === 'audit'" />
       </template>
@@ -201,6 +207,8 @@ import SettingsLayout, { type TabDef } from '../components/settings/SettingsLayo
 import SettingsTheme from '../components/settings/SettingsTheme.vue';
 import SettingsAccount from '../components/settings/SettingsAccount.vue';
 import SettingsNeteaseAccount from '../components/settings/SettingsNeteaseAccount.vue';
+import SettingsMusicAccountScope from '../components/settings/SettingsMusicAccountScope.vue';
+import SettingsMusicAccounts from '../components/settings/SettingsMusicAccounts.vue';
 import SettingsApiKeys from '../components/settings/SettingsApiKeys.vue';
 import SettingsQuality from '../components/settings/SettingsQuality.vue';
 import SettingsBots from '../components/settings/SettingsBots.vue';

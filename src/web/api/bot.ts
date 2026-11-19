@@ -77,6 +77,7 @@ export function createBotRouter(
       localAudioEnabled: config.localAudioEnabled,
       savedQueuesEnabled: config.savedQueuesEnabled,
       playKeepsQueue: config.playKeepsQueue,
+      perUserMusicAccounts: config.perUserMusicAccounts === true,
       adminGroups: config.adminGroups ?? [],
       guestMode: config.guestMode,
       enabledProviders: config.enabledProviders,
@@ -103,6 +104,7 @@ export function createBotRouter(
       idleTimeoutMinutes,
       autoPauseOnEmpty,
       localAudioEnabled,
+      perUserMusicAccounts,
       voiceDucking,
       guestMode,
       adminGroups,
@@ -128,6 +130,10 @@ export function createBotRouter(
     if (hasIdle) config.idleTimeoutMinutes = idleTimeoutMinutes;
     if (hasAutoPause) config.autoPauseOnEmpty = autoPauseOnEmpty;
     if (hasLocalAudioEnabled) config.localAudioEnabled = localAudioEnabled;
+    // Strict boolean: a truthy string must never flip account isolation on.
+    if (typeof perUserMusicAccounts === "boolean") {
+      config.perUserMusicAccounts = perUserMusicAccounts;
+    }
 
     // Voice ducking is a partial settings block. Merge only known, strictly
     // valid fields so malformed JSON cannot replace the object or inject NaN /
@@ -309,6 +315,7 @@ export function createBotRouter(
       localAudioEnabled: config.localAudioEnabled,
       savedQueuesEnabled: config.savedQueuesEnabled,
       playKeepsQueue: config.playKeepsQueue,
+      perUserMusicAccounts: config.perUserMusicAccounts === true,
       adminGroups: config.adminGroups ?? [],
       guestMode: config.guestMode,
       spotify: maskedSpotify(),

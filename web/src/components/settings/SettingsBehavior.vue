@@ -22,6 +22,11 @@
           label="单曲直接播放不清空队列"
           hint="直接播放一首歌时插入到当前歌曲之后，播完继续原队列，而不是清空整个队列"
         />
+        <BaseToggle
+          v-model="form.perUserMusicAccounts"
+          label="启用音乐账号池（多用户账号）"
+          hint="开启后成员可用自己的平台账号或你分配的账号浏览搜索与推荐；房间播放始终使用共享账号。关闭时全员使用共享登录"
+        />
       </div>
       <SkeletonLoader v-else v-for="n in 3" :key="n" height="48px" class="mb-2" />
     </div>
@@ -127,6 +132,7 @@ const form = reactive({
   localAudioEnabled: false,
   savedQueuesEnabled: false,
   playKeepsQueue: false,
+  perUserMusicAccounts: false,
   voiceDuckingEnabled: false,
   voiceDuckingVolume: 30,
 });
@@ -143,6 +149,7 @@ async function reload(): Promise<void> {
   form.localAudioEnabled = res.data.localAudioEnabled === true;
   form.savedQueuesEnabled = res.data.savedQueuesEnabled === true;
   form.playKeepsQueue = res.data.playKeepsQueue === true;
+  form.perUserMusicAccounts = res.data.perUserMusicAccounts === true;
   form.voiceDuckingEnabled = res.data.voiceDucking?.enabled === true;
   form.voiceDuckingVolume = res.data.voiceDucking?.volumePercent ?? 30;
   savedPrefix.value = res.data.commandPrefix ?? '!';
@@ -184,6 +191,7 @@ function snapshot(): string {
     form.localAudioEnabled,
     form.savedQueuesEnabled,
     form.playKeepsQueue,
+    form.perUserMusicAccounts,
     form.voiceDuckingEnabled,
     Math.min(100, Math.max(0, form.voiceDuckingVolume || 0)),
   ]);
@@ -197,6 +205,7 @@ async function persist() {
       localAudioEnabled: form.localAudioEnabled,
       savedQueuesEnabled: form.savedQueuesEnabled,
       playKeepsQueue: form.playKeepsQueue,
+      perUserMusicAccounts: form.perUserMusicAccounts,
       voiceDucking: {
         enabled: form.voiceDuckingEnabled,
         volumePercent: Math.min(100, Math.max(0, form.voiceDuckingVolume || 0)),
