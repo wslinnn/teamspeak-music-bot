@@ -94,6 +94,17 @@ function stableHash(s: string): number {
   return h >>> 0;
 }
 
+/** Hostname of a playback URL (no trailing dot), or undefined for a local path
+ *  or a malformed URL. Used to record a dead CDN edge during stream recovery. */
+function hostOfUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname.replace(/\.$/, "");
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * STABLE per-bot go-librespot ports derived from the bot id, kept fixed across
  * restarts. The two ranges (37xx / 87xx) are disjoint so a single bot's API and
@@ -225,7 +236,19 @@ export class BotInstance extends EventEmitter {
    *  更新；seek/普通恢复不重签链接故不改。0 表示尚未解析过。 */
   private lastUrlResolvedAt = 0;
   /** Resume attempts for the current song's stream (#161); see resumeInterruptedStream. */
-  private streamRecovery: { song: QueuedSong; attempts: number; position: number; session: number; generation: number; pauseRequested: boolean; inFlight: boolean } | null = null;
+  private streamRecovery: {
+    song: QueuedSong;
+    attempts: number;
+    position: number;
+    session: number;
+    generation: number;
+    pauseRequested: boolean;
+    inFlight: boolean;
+    /** CDN hosts that already died for this recovery attempt. A re-resolve on
+     *  the same dead edge just reconnects to it, so each attempt must avoid the
+     *  hosts that already failed. */
+    failedHosts: Set<string>;
+  } | null = null;
   private playGate: Promise<unknown> = Promise.resolve();
   /** Per-bot Jellyfin playback-report session (start / ~10s progress / stop).
    *  null when the wired provider has no reporting capability. */
@@ -1568,7 +1591,16 @@ export class BotInstance extends EventEmitter {
       recovery.generation !== generation ||
       position - recovery.position > BotInstance.STREAM_END_TOLERANCE_S
     ) {
-      this.streamRecovery = { song, attempts: 0, position, session: endedSession, generation, pauseRequested: false, inFlight: false };
+      this.streamRecovery = {
+        song,
+        attempts: 0,
+        position,
+        session: endedSession,
+        generation,
+        pauseRequested: false,
+        inFlight: false,
+        failedHosts: new Set<string>(),
+      };
     }
     const state = this.streamRecovery!;
     if (state.inFlight) return true;
@@ -1603,8 +1635,15 @@ export class BotInstance extends EventEmitter {
         }
         let result: Awaited<ReturnType<MusicProvider["getSongUrl"]>> = null;
         let reason = "no-url";
+        // Remember which CDN edge just died so the next lookup picks a
+        // different mirror instead of reconnecting to the same dead host.
+        const deadHost = hostOfUrl(song.url);
+        if (deadHost) state.failedHosts.add(deadHost);
         try {
-          result = await this.getProviderFor(song.platform).getSongUrl(song.id);
+          result = await this.getProviderFor(song.platform).getSongUrl(song.id, undefined, {
+            avoidHosts: state.failedHosts,
+            refresh: true,
+          });
         } catch {
           reason = "lookup-error";
         }

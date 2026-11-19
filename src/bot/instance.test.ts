@@ -2052,9 +2052,23 @@ describe("resumeInterruptedStream — long B站 streams dying mid-play (#161)", 
   it("re-resolves the URL and resumes at the current position when a B站 stream ends early", async () => {
     const ctx = makeCtx({ elapsed: 1000, duration: 10_000 });
     expect(await resumeInterruptedStream.call(ctx)).toBe(true);
-    expect(ctx.provider.getSongUrl).toHaveBeenCalledWith("BV1abc");
+    // Third argument carries the recovery options; the dead host is recorded so
+    // the re-resolve can pick a different CDN edge.
+    expect(ctx.provider.getSongUrl).toHaveBeenCalledWith(
+      "BV1abc",
+      undefined,
+      expect.objectContaining({ refresh: true, avoidHosts: expect.any(Set) }),
+    );
     expect(ctx.player.play).toHaveBeenCalledWith("https://fresh.test/a.m4s", 1000, 10_000);
     expect(ctx.song.url).toBe("https://fresh.test/a.m4s");
+  });
+
+  it("records the dead CDN host so recovery avoids it", async () => {
+    const ctx = makeCtx({ elapsed: 1000, duration: 10_000 });
+    ctx.song.url = "https://upos-sz-mirrorcos.bilivideo.com/a.m4s?deadline=1";
+    expect(await resumeInterruptedStream.call(ctx)).toBe(true);
+    const avoid = (ctx.provider.getSongUrl as any).mock.calls[0][2].avoidHosts as Set<string>;
+    expect(avoid.has("upos-sz-mirrorcos.bilivideo.com")).toBe(true);
   });
 
   it("does nothing near the real end of the track (normal EOF)", async () => {

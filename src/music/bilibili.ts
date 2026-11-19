@@ -5,6 +5,7 @@ import type {
   MusicProvider,
   Song,
   SongUrlResult,
+  SongUrlRequestOptions,
   Playlist,
   LyricLine,
   SearchResult,
@@ -53,25 +54,44 @@ const BILI_PCDN_HOST = /\.mcdn\.bilivideo\.cn$|\.szbdyd\.com$/i;
 /**
  * Pick the audio URL least likely to die mid-stream: the first upos/cos
  * mirror among baseUrl + backupUrl, else the baseUrl as before.
+ *
+ * `avoidHosts` carries the CDN hosts that already failed around the current
+ * playback position (stream recovery). Exhaust untried hosts before reusing a
+ * failed one — a re-signed URL on a dead edge reconnects to the same dead edge,
+ * which is exactly what the recovery loop is trying to escape.
  */
-export function pickStableAudioUrl(stream: {
-  baseUrl?: string;
-  base_url?: string;
-  backupUrl?: string[];
-  backup_url?: string[];
-}): string | undefined {
+export function pickStableAudioUrl(
+  stream: {
+    baseUrl?: string;
+    base_url?: string;
+    backupUrl?: string[];
+    backup_url?: string[];
+  },
+  avoidHosts?: ReadonlySet<string>,
+): string | undefined {
   const primary = stream.baseUrl ?? stream.base_url;
-  const candidates = [primary, ...(stream.backupUrl ?? stream.backup_url ?? [])].filter(
-    (u): u is string => typeof u === "string" && u.length > 0,
+  const candidates = [primary, ...(stream.backupUrl ?? stream.backup_url ?? [])]
+    .filter((u): u is string => typeof u === "string" && u.length > 0)
+    .map((url) => ({ url, host: hostnameOf(url) }));
+
+  const stable = candidates.filter(({ host }) => host && !BILI_PCDN_HOST.test(host));
+  const isUntried = ({ host }: { host: string | undefined }) => host && !avoidHosts?.has(host);
+
+  return (
+    stable.find(isUntried)?.url ??
+    candidates.find(isUntried)?.url ??
+    stable[0]?.url ??
+    primary
   );
-  const stable = candidates.find((u) => {
-    try {
-      return !BILI_PCDN_HOST.test(new URL(u).hostname);
-    } catch {
-      return false;
-    }
-  });
-  return stable ?? primary;
+}
+
+/** Hostname without a trailing dot, or undefined for a malformed URL. */
+function hostnameOf(url: string): string | undefined {
+  try {
+    return new URL(url).hostname.replace(/\.$/, "");
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -362,7 +382,11 @@ export class BiliBiliProvider implements MusicProvider {
     return this.cidCache.get(key) ?? this.cidCache.get(`${bvid}?p=${page}`) ?? this.cidCache.get(bvid) ?? null;
   }
 
-  async getSongUrl(songId: string, _quality?: string): Promise<SongUrlResult | null> {
+  async getSongUrl(
+    songId: string,
+    _quality?: string,
+    options?: SongUrlRequestOptions,
+  ): Promise<SongUrlResult | null> {
     const { bvid, page } = parseBilibiliId(songId);
     const cid = await this.getCid(bvid, page);
     if (!cid) return null;
@@ -385,7 +409,9 @@ export class BiliBiliProvider implements MusicProvider {
         (b.bandwidth ?? 0) > (a.bandwidth ?? 0) ? b : a
       );
 
-      const biliUrl = pickStableAudioUrl(best);
+      // `avoidHosts` is populated by stream recovery with the edges that just
+      // died, so a re-resolve actually moves to a different mirror.
+      const biliUrl = pickStableAudioUrl(best, options?.avoidHosts);
       return biliUrl ? { url: biliUrl } : null;
     } catch {
       return null;

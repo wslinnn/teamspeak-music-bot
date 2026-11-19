@@ -254,11 +254,19 @@ export interface AuthStatus {
   avatarUrl?: string;
 }
 
+export interface SongUrlRequestOptions {
+  /** CDN hosts that already failed around this playback position (where
+   *  supported). Providers without a host choice ignore it. */
+  avoidHosts?: ReadonlySet<string>;
+  /** Resolve after an interruption without reusing a cached playback URL. */
+  refresh?: boolean;
+}
+
 export interface MusicProvider {
   readonly platform: Platform;
 
   search(query: string, limit?: number, offset?: number): Promise<SearchResult>;
-  getSongUrl(songId: string, quality?: string): Promise<SongUrlResult | null>;
+  getSongUrl(songId: string, quality?: string, options?: SongUrlRequestOptions): Promise<SongUrlResult | null>;
   setQuality(quality: string): void;
   getQuality(): string;
   getSongDetail(songId: string): Promise<Song | null>;

@@ -202,4 +202,49 @@ describe("pickStableAudioUrl (#161 long streams dying mid-play)", () => {
     };
     expect((await p.getSongUrl("BV1abc"))?.url).toBe(upos);
   });
+
+  describe("avoidHosts (stream recovery must change CDN)", () => {
+    it("skips the host that just died and moves to the next stable mirror", () => {
+      const avoid = new Set(["upos-sz-mirrorcos.bilivideo.com"]);
+      expect(pickStableAudioUrl({ baseUrl: upos, backupUrl: [upos2] }, avoid)).toBe(upos2);
+    });
+
+    it("prefers an untried stable mirror over the failed one", () => {
+      const avoid = new Set(["upos-sz-mirrorcos.bilivideo.com"]);
+      expect(pickStableAudioUrl({ baseUrl: upos, backupUrl: [szbdyd, upos2] }, avoid)).toBe(upos2);
+    });
+
+    it("falls back to an untried PCDN host before reusing a dead stable host", () => {
+      const avoid = new Set(["upos-sz-mirrorcos.bilivideo.com", "upos-sz-mirror08c.bilivideo.com"]);
+      expect(pickStableAudioUrl({ baseUrl: upos, backupUrl: [upos2, pcdn] }, avoid)).toBe(pcdn);
+    });
+
+    it("reuses a failed host only when every candidate was tried", () => {
+      const avoid = new Set([
+        "upos-sz-mirrorcos.bilivideo.com",
+        "upos-sz-mirror08c.bilivideo.com",
+      ]);
+      expect(pickStableAudioUrl({ baseUrl: upos, backupUrl: [upos2] }, avoid)).toBe(upos);
+    });
+
+    it("behaves exactly as before when nothing failed yet", () => {
+      expect(pickStableAudioUrl({ baseUrl: pcdn, backupUrl: [upos] })).toBe(
+        pickStableAudioUrl({ baseUrl: pcdn, backupUrl: [upos] }, new Set()),
+      );
+    });
+
+    it("passes avoidHosts through getSongUrl to the picked mirror", async () => {
+      const p = new BiliBiliProvider();
+      (p as any).cidCache.set("BV1abc", 42);
+      (p as any).api = {
+        get: vi.fn().mockResolvedValue({
+          data: { data: { dash: { audio: [
+            { bandwidth: 320000, baseUrl: upos, backupUrl: [upos2] },
+          ] } } },
+        }),
+      };
+      const avoid = new Set(["upos-sz-mirrorcos.bilivideo.com"]);
+      expect((await p.getSongUrl("BV1abc", undefined, { avoidHosts: avoid }))?.url).toBe(upos2);
+    });
+  });
 });
