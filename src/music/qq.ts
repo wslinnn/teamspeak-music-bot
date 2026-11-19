@@ -175,8 +175,10 @@ export class QQMusicProvider implements MusicProvider {
   private cookie = "";
   private quality = "exhigh";
   private radarPage = 1;
+  private readonly baseUrl: string;
 
   constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
     this.api = axios.create({
       baseURL: baseUrl,
       timeout: 10000,
@@ -824,6 +826,18 @@ export class QQMusicProvider implements MusicProvider {
     // Reset radar pagination so a re-login (different account) starts from the
     // first page rather than inheriting the previous account's cursor.
     this.radarPage = 1;
+  }
+
+  /**
+   * A view of this provider logged in as another account (per-user music
+   * accounts). The shared instance is untouched, so the bot's own login keeps
+   * driving room playback.
+   */
+  withCookie(cookie: string): QQMusicProvider {
+    const view = new QQMusicProvider(this.baseUrl);
+    view.setQuality(this.quality);
+    view.setCookie(cookie);
+    return view;
   }
 
   getCookie(): string {

@@ -492,6 +492,14 @@ export class BiliBiliProvider implements MusicProvider {
     this.cookie = normalizeCookie(cookie);
   }
 
+  /** A view logged in as another account (per-user music accounts). */
+  withCookie(cookie: string): BiliBiliProvider {
+    const view = new BiliBiliProvider();
+    view.setQuality(this.quality);
+    view.setCookie(cookie);
+    return view;
+  }
+
   getCookie(): string {
     return this.cookie;
   }

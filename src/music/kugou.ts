@@ -464,6 +464,14 @@ export class KugouProvider implements MusicProvider {
       .join("; ");
   }
 
+  /** A view logged in as another account (per-user music accounts). */
+  withCookie(cookie: string): KugouProvider {
+    const view = new KugouProvider();
+    view.setQuality(this.quality);
+    view.setCookie(cookie);
+    return view;
+  }
+
   setQuality(quality: string): void {
     this.quality = QUALITY_MAP[quality] ?? "128";
   }
