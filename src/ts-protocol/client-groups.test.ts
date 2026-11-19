@@ -22,16 +22,29 @@ function makeClient(): TS3Client {
   );
 }
 
-/** Inject a fake low-level client carrying a canned clientinfo response. */
+/** Inject a fake low-level client carrying a canned clientinfo response.
+ *
+ *  SDK 1.x talks to a connection through `client.send({command, params})`,
+ *  which is what the typed helpers (getClientProperties, listClients, …) call
+ *  internally — 0.2.x exposed execCommandWithResponse instead. The stub speaks
+ *  the new shape and records the command name so the query itself stays
+ *  asserted. */
 function withFakeClient(
   ts: TS3Client,
-  respond: (cmd: string) => Record<string, string>[] | Promise<Record<string, string>[]>,
+  respond: (command: string) => Record<string, string>[] | Promise<Record<string, string>[]>,
 ): string[] {
   const calls: string[] = [];
   const fake = {
-    execCommandWithResponse: vi.fn(async (cmd: string) => {
+    send: vi.fn(async (request: { command: string; params?: unknown }) => {
+      calls.push(request.command);
+      return respond(request.command);
+    }),
+    exec: vi.fn(async (cmd: string) => {
       calls.push(cmd);
       return respond(cmd);
+    }),
+    execNoWait: vi.fn(async (cmd: string) => {
+      calls.push(cmd);
     }),
   };
   (ts as unknown as { client: unknown }).client = fake;
@@ -48,8 +61,8 @@ describe("TS3Client.getClientServerGroups — live query + parse smoke test", ()
     const groups = await ts.getClientServerGroups(5);
 
     expect(groups).toEqual(["6", "8"]);
-    // Exact query the bot sends to resolve a sender's groups, by client id.
-    expect(calls[0]).toBe("clientinfo clid=5");
+    // The typed helper issues `clientinfo` with clid as a parameter.
+    expect(calls[0]).toBe("clientinfo");
   });
 
   it("parses a single-group response", async () => {

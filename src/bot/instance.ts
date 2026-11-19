@@ -2795,15 +2795,18 @@ export class BotInstance extends EventEmitter {
         id: String(ch.id),
         parentId: ch.parentID === 0n ? null : String(ch.parentID),
         name: ch.name,
-        description: ch.description,
+        // The SDK marks it optional; the web tree renders "" the same way.
+        description: ch.description ?? "",
       })),
       clients: clients.map((c) => ({
         id: String(c.id),
         nickname: c.nickname,
-        uid: c.uid,
+        // A client can have no uid; normalise to "" so the wire type stays
+        // a plain string for the frontend.
+        uid: c.uid ?? "",
         channelId: String(c.channelID),
         isBot: String(c.id) === String(currentClientId),
-        serverGroups: c.serverGroups,
+        serverGroups: [...(c.serverGroups ?? [])].map(String),
         type: c.type,
       })),
       botChannelId: String(currentChannelId),

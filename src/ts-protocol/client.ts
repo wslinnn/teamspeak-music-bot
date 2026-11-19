@@ -1,25 +1,35 @@
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import {
-  Client as TS3FullClient,
-  generateIdentity as genTS3Identity,
-  getUidFromPublicKey,
-  identityFromString,
-  sendTextMessage,
+  asChannelID,
+  asClientID,
+  Codec,
+  deleteFile,
+  getClientProperties,
+  initFileUpload,
   listChannels,
   listClients,
-  clientMove,
-  getClientInfo,
-  fileTransferDeleteFile,
-  type Identity,
-  type TextMessage,
-  type ClientInfo,
-  type ChannelInfo,
-  type ClientLeftViewEvent,
+  moveClient,
+  sendChannelMessage,
+  sendPrivateMessage,
+  type Channel,
+  type ChannelID,
+  type ClientEnterEvent,
+  type ClientEntry,
+  type ClientLeaveEvent,
   type ClientMovedEvent,
-  type VoiceData,
+  type ClientID,
+  type TextMessageEvent,
+  type VoiceDataEvent,
   type FileUploadInfo,
-} from "@honeybbq/teamspeak-client";
+} from "@honeybbq/teamspeak";
+import {
+  Client as TS3FullClient,
+  generateIdentitySync as genTS3Identity,
+  parseIdentity,
+  UIDAlgorithm,
+  type Identity,
+} from "@honeybbq/teamspeak/client";
 import type { Logger } from "../logger.js";
 import {
   detectServerProtocol,
@@ -33,7 +43,7 @@ import {
 
 export { CODEC_OPUS_MUSIC } from "./voice.js";
 export type { ServerProtocol } from "./protocol-detect.js";
-export type { FileUploadInfo } from "@honeybbq/teamspeak-client";
+export type { FileUploadInfo } from "@honeybbq/teamspeak";
 
 /** Escape a string for use in TS3 ServerQuery-style commands. */
 export function escapeTS3(str: string): string {
@@ -61,6 +71,9 @@ export interface TS3ClientOptions {
   serverProtocol?: ServerProtocol;
   /** API key for TS6 HTTP Query authentication. */
   ts6ApiKey?: string;
+  /** @internal Test seam: substitute the underlying SDK Client instance so the
+   *  protocol layer can be exercised without a live TeamSpeak server. */
+  sdkClientFactory?: (identity: Identity, addr: string, nickname: string, options: any) => any;
 }
 
 export interface TS3TextMessage {
@@ -121,14 +134,23 @@ const VISIBLE_CLIENT_UID_RELEASE_GRACE_MS = 1_000;
  * is in the bot's client-view cache; otherwise it is []. Used by the chat
  * command permission gate.
  */
-export function toTS3TextMessage(msg: TextMessage): TS3TextMessage {
+/**
+ * Map the library's TextMessageEvent to our wrapper. Some fields only exist
+ * when the protocol command actually carried them (a channel message has no
+ * target mode), so fall back rather than emitting undefined.
+ */
+export function toTS3TextMessage(msg: TextMessageEvent): TS3TextMessage {
+  const raw = msg as unknown as {
+    targetMode?: number;
+    invokerGroups?: string[];
+  };
   return {
     invokerName: msg.invokerName,
     invokerId: String(msg.invokerID),
     invokerUid: msg.invokerUID,
     message: msg.message,
-    targetMode: msg.targetMode,
-    invokerGroups: msg.invokerGroups ?? [],
+    targetMode: raw.targetMode ?? 2,
+    invokerGroups: raw.invokerGroups ?? [],
   };
 }
 
@@ -164,11 +186,28 @@ export class TS3Client extends EventEmitter {
     this.logger = logger;
 
     if (options.identity) {
-      this.identity = identityFromString(options.identity);
+      try {
+        this.identity = parseIdentity(options.identity);
+      } catch (err) {
+        // An identity persisted by @honeybbq/teamspeak-client 0.2.x may not be
+        // in the 1.x export format. Generating a fresh one keeps the bot
+        // connectable (the only cost is a new server-side identity) instead of
+        // crash-looping on startup with no way to recover from the UI.
+        this.logger.warn(
+          { err },
+          "Stored identity could not be parsed — generating a new one (the bot will appear as a new client)",
+        );
+        this.identity = genTS3Identity(8);
+      }
     } else {
       this.identity = genTS3Identity(8);
     }
-    this.clientUid = getUidFromPublicKey(this.identity.publicKeyBase64());
+    // The identity's uid needs the server's hash algorithm (SHA-1 for TS3,
+    // SHA-256 for TS6). The constructor cannot know it yet — the protocol is
+    // detected during connect — so this is refreshed once the server family
+    // is known (see refreshClientUid). SHA-1 is the TS3 default and matches
+    // the pre-migration behaviour.
+    this.clientUid = this.identity.uid(UIDAlgorithm.SHA1);
   }
 
   /** The detected (or forced) server protocol after connect(). */
@@ -286,41 +325,45 @@ export class TS3Client extends EventEmitter {
       this.logger.warn(msg);
     };
 
-    sdkClient = new TS3FullClient(this.identity, addr, this.options.nickname, {
+    const sdkOptions = {
       // Forward server password to the protocol library so it can be
       // included in clientinit for password-protected servers
       serverPassword: this.options.serverPassword,
       resolver: voiceEndpointResolver,
       logger: {
-        debug: (msg) => { if (isCurrent()) this.logger.debug(msg); },
-        info: (msg) => { if (isCurrent()) this.logger.info(msg); },
+        debug: (msg: string) => { if (isCurrent()) this.logger.debug(msg); },
+        info: (msg: string) => { if (isCurrent()) this.logger.info(msg); },
         warn: throttledWarn,
-        error: (msg) => { if (isCurrent()) this.logger.error(msg); },
+        error: (msg: string) => { if (isCurrent()) this.logger.error(msg); },
       },
-    });
+    };
+    const created: TS3FullClient = this.options.sdkClientFactory
+      ? this.options.sdkClientFactory(this.identity, addr, this.options.nickname, sdkOptions)
+      : new TS3FullClient(this.identity, addr, this.options.nickname, sdkOptions);
+    sdkClient = created;
     this.client = sdkClient;
 
-    sdkClient.on("textMessage", (msg: TextMessage) => {
+    sdkClient.on("textMessage", (msg: TextMessageEvent) => {
       if (!isCurrent()) return;
-      if (msg.invokerID === this.clientId) return;
+      if (Number(msg.invokerID) === this.clientId) return;
       this.emit("textMessage", toTS3TextMessage(msg));
     });
 
-    sdkClient.on("voiceData", (voice: VoiceData) => {
+    sdkClient.on("voiceData", (voice: VoiceDataEvent) => {
       if (!isCurrent()) return;
       // The library normally suppresses our own packets; retain the explicit
-      // guard so a future protocol change cannot make a bot duck itself.
-      if (voice.clientId === this.clientId) return;
-      const clientUid = this.visibleClientUids.get(voice.clientId);
+      // guard so a future protocol change cannot make the bot duck itself.
+      if (Number(voice.clientID) === this.clientId) return;
+      const clientUid = this.visibleClientUids.get(Number(voice.clientID));
       const activity: TS3VoiceActivity = {
-        clientId: voice.clientId,
+        clientId: Number(voice.clientID),
         codec: voice.codec,
         ...(clientUid ? { clientUid } : {}),
       };
       this.emit("voiceActivity", activity);
     });
 
-    sdkClient.on("disconnected", (err) => {
+    sdkClient.on("disconnected", (err: unknown) => {
       if (!isCurrent()) return;
       const code = safeSocketErrorCode(err);
       this.logger.warn(code ? { code } : {}, "Connection closed");
@@ -333,37 +376,62 @@ export class TS3Client extends EventEmitter {
       this.emit("disconnected");
     });
 
-    sdkClient.on("clientEnter", (info: ClientInfo) => {
+    sdkClient.on("clientEnter", (info: ClientEnterEvent) => {
       if (!isCurrent()) return;
-      this.rememberVisibleClientUid(info.id, info.uid);
+      const id = Number(info.id);
+      this.rememberVisibleClientUid(id, info.uid ?? "");
       this.logger.debug(
-        { nickname: info.nickname, id: info.id },
+        { nickname: info.nickname, id },
         "Client entered"
       );
-      this.emit("clientEnter", info);
+      // Downstream consumers (channelView, resume filters) speak the fork's
+      // simple { id, uid, channelID } shape, not the SDK's branded entry.
+      // `uid` is optional in the SDK (a client can have none), so normalise it
+      // to "" rather than leaking undefined into the UID cache.
+      this.emit("clientEnter", {
+        id,
+        uid: info.uid ?? "",
+        channelID: info.channelID,
+        nickname: info.nickname,
+        clientType: info.type,
+      });
     });
 
-    sdkClient.on("clientLeave", (ev: ClientLeftViewEvent) => {
+    sdkClient.on("clientLeave", (ev: ClientLeaveEvent) => {
       if (!isCurrent()) return;
-      this.releaseVisibleClientUid(ev.id);
-      this.logger.debug({ id: ev.id }, "Client left");
-      this.emit("clientLeave", ev);
+      const id = Number(ev.clientID);
+      this.releaseVisibleClientUid(id);
+      this.logger.debug({ id }, "Client left");
+      this.emit("clientLeave", {
+        id,
+        // A leave event carries no uid (the SDK removed it); an empty string
+        // keeps the downstream shape stable.
+        uid: "",
+        channelID: ev.fromChannelID,
+        reason: ev.reason,
+        reasonMessage: ev.reasonMessage,
+      });
     });
 
     sdkClient.on("clientMoved", (ev: ClientMovedEvent) => {
       if (!isCurrent()) return;
+      const id = Number(ev.clientID);
       this.logger.debug(
-        { id: ev.id, targetChannelID: ev.targetChannelID.toString() },
+        { id, targetChannelID: ev.targetChannelID.toString() },
         "Client moved"
       );
-      this.emit("clientMoved", ev);
+      this.emit("clientMoved", {
+        id,
+        targetChannelID: ev.targetChannelID,
+        invokerName: ev.invokerName,
+      });
     });
 
     await sdkClient.connect();
     if (!isCurrent()) {
       // DNS/socket setup may finish after disconnect() closed the transport.
       // Close it again without waiting on command replies from a stale session.
-      sdkClient.handler.close();
+      sdkClient.disconnect();
       return;
     }
     // Note: @honeybbq/teamspeak-client 0.2.x ships a universal clientinit
@@ -372,9 +440,9 @@ export class TS3Client extends EventEmitter {
     // patch on handler.sendPacket was removed when we bumped to 0.2.1 — it
     // would have replaced the library's new correct version with a stale
     // signature and made TS6 handshakes fail.
-    await sdkClient.waitConnected();
+    // connect() resolves only after the handshake completes; there is no separate wait step.
     if (!isCurrent()) return;
-    this.clientId = sdkClient.clientID();
+    this.clientId = Number(sdkClient.clientID);
     this.voiceFramesSent = 0;
 
     // Join channel by numeric ID (takes precedence) or by name
@@ -403,8 +471,8 @@ export class TS3Client extends EventEmitter {
     this.resolvedChannelId = null;
     if (!this.client || this.clientId <= 0) return;
     try {
-      const info = await getClientInfo(this.client, this.clientId);
-      const cid = BigInt(info.cid ?? "0");
+      const props = await getClientProperties(this.client, asClientID(this.clientId));
+      const cid = BigInt(props.cid ?? "0");
       if (cid > 0n) this.resolvedChannelId = cid;
     } catch (err) {
       this.logger.warn({ err }, "Failed to resolve self channel via clientinfo");
@@ -422,7 +490,8 @@ export class TS3Client extends EventEmitter {
     const isNumeric = /^\d+$/.test(channelName);
     if (isNumeric) {
       try {
-        await clientMove(client, clientId, BigInt(channelName), password);
+        await moveClient(client, asClientID(clientId), asChannelID(BigInt(channelName)),
+          password ? { password } : undefined);
         if (!isCurrent()) return;
         this.resolvedChannelId = BigInt(channelName);
         this.logger.info({ channelName }, "Joined channel");
@@ -442,7 +511,8 @@ export class TS3Client extends EventEmitter {
         return;
       }
 
-      await clientMove(client, clientId, channel.id, password);
+      await moveClient(client, asClientID(clientId), channel.id,
+        password ? { password } : undefined);
       if (!isCurrent()) return;
       this.resolvedChannelId = channel.id;
       this.logger.info(
@@ -456,15 +526,20 @@ export class TS3Client extends EventEmitter {
 
   async sendTextMessage(
     message: string,
-    targetMode: number = 2
+    targetMode: number = 2,
+    targetClientId?: number,
   ): Promise<void> {
     if (!this.client) return;
-    // targetMode 2 = channel, target 0 = current channel
-    const target = targetMode === 2 ? BigInt(0) : BigInt(this.clientId);
-    await sendTextMessage(this.client, targetMode, target, message);
+    // Mode 1 = private message to one client; everything else is the channel.
+    if (targetMode === 1) {
+      if (targetClientId === undefined || targetClientId <= 0) return;
+      await sendPrivateMessage(this.client, asClientID(targetClientId), message);
+      return;
+    }
+    await sendChannelMessage(this.client, message);
   }
 
-  async getClientsInChannel(): Promise<ClientInfo[]> {
+  async getClientsInChannel(): Promise<ClientEntry[]> {
     if (!this.client) return [];
     try {
       const allClients = await listClients(this.client);
@@ -487,10 +562,8 @@ export class TS3Client extends EventEmitter {
   async getClientServerGroups(clid: number): Promise<string[]> {
     if (!this.client) return [];
     try {
-      const info = await getClientInfo(this.client, clid);
-      // `client_servergroups`: comma-separated server-group ids (verified in
-      // @honeybbq/teamspeak-client dist/index.mjs; listClients parses the same).
-      const raw = info.client_servergroups ?? "";
+      const props = await getClientProperties(this.client, asClientID(clid));
+      const raw = props.client_servergroups ?? "";
       return raw ? raw.split(",") : [];
     } catch {
       return [];
@@ -501,29 +574,32 @@ export class TS3Client extends EventEmitter {
 
   async execCommand(cmd: string): Promise<void> {
     if (!this.client) throw new Error("Not connected");
-    await this.client.execCommand(cmd);
+    await this.client.exec(cmd);
   }
 
   /** Fire a command without waiting for the server's response. */
   async sendCommandNoWait(cmd: string): Promise<void> {
     if (!this.client) throw new Error("Not connected");
-    await this.client.sendCommandNoWait(cmd);
+    await this.client.execNoWait(cmd);
   }
 
   async execCommandWithResponse(cmd: string): Promise<Record<string, string>[]> {
     if (!this.client) throw new Error("Not connected");
-    return this.client.execCommandWithResponse(cmd);
+    return this.client.exec(cmd);
   }
 
   async fileTransferInitUpload(
-    channelID: bigint,
+    channelID: bigint | ChannelID,
     path: string,
     password: string,
     size: bigint,
     overwrite = true,
   ): Promise<FileUploadInfo> {
     if (!this.client) throw new Error("Not connected");
-    return this.client.fileTransferInitUpload(channelID, path, password, size, overwrite);
+    return initFileUpload(this.client, asChannelID(channelID), path, size, {
+      ...(password ? { password } : {}),
+      overwrite,
+    });
   }
 
   async uploadFileData(host: string, info: FileUploadInfo, data: Readable): Promise<void> {
@@ -531,9 +607,9 @@ export class TS3Client extends EventEmitter {
     await this.client.uploadFileData(host, info, data);
   }
 
-  async fileTransferDeleteFile(channelID: bigint, paths: string[]): Promise<void> {
+  async fileTransferDeleteFile(channelID: bigint | ChannelID, paths: string[]): Promise<void> {
     if (!this.client) throw new Error("Not connected");
-    await fileTransferDeleteFile(this.client, channelID, paths);
+    await deleteFile(this.client, asChannelID(channelID), paths);
   }
 
   /** The server host (needed for file transfer TCP connections). */
@@ -546,11 +622,11 @@ export class TS3Client extends EventEmitter {
     // 显式解析值优先：库的 channelID() 因自机不在其映射表里恒为 0n
     if (this.resolvedChannelId !== null) return this.resolvedChannelId;
     if (!this.client) return 0n;
-    return this.client.channelID();
+    return BigInt(this.client.channelID);
   }
 
   /** Fork: full channel list for the server-tree view. */
-  async getChannelList(): Promise<ChannelInfo[]> {
+  async getChannelList(): Promise<Channel[]> {
     if (!this.client) return [];
     try {
       return await listChannels(this.client);
@@ -560,7 +636,7 @@ export class TS3Client extends EventEmitter {
   }
 
   /** Fork: full client list for the server-tree view. */
-  async getClientList(): Promise<ClientInfo[]> {
+  async getClientList(): Promise<ClientEntry[]> {
     if (!this.client) return [];
     try {
       return await listClients(this.client);
@@ -570,10 +646,15 @@ export class TS3Client extends EventEmitter {
   }
 
   /** Fork: move this client to a channel by numeric ID. */
-  async joinChannelById(channelId: bigint, password?: string): Promise<void> {
+  async joinChannelById(channelId: bigint | ChannelID, password?: string): Promise<void> {
     if (!this.client) throw new Error("Not connected");
-    await clientMove(this.client, this.clientId, channelId, password);
-    this.resolvedChannelId = channelId;
+    await moveClient(
+      this.client,
+      asClientID(this.clientId),
+      asChannelID(channelId),
+      password ? { password } : undefined,
+    );
+    this.resolvedChannelId = BigInt(channelId);
     this.logger.info({ channelId: channelId.toString() }, "Moved to channel by ID");
   }
 
@@ -583,7 +664,7 @@ export class TS3Client extends EventEmitter {
     const client = this.client;
     if (!client || this.disconnecting) return "unavailable";
     try {
-      client.sendVoice(opusFrame, 5);
+      client.sendVoice(opusFrame, Codec.OpusMusic);
     } catch (err) {
       if (this.voiceFailure) {
         this.voiceFailure.consecutiveFailures++;
@@ -644,7 +725,10 @@ export class TS3Client extends EventEmitter {
   }
 
   getIdentityExport(): string {
-    return this.identity.toString();
+    // export() is the secret form parseIdentity() reads. toString() only
+    // describes the identity by its UID, so using it here would silently
+    // persist an unusable value and every reconnect would get a new identity.
+    return this.identity.export();
   }
 
   getClientId(): number {

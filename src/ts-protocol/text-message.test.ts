@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { toTS3TextMessage } from "./client.js";
-import type { TextMessage } from "@honeybbq/teamspeak-client";
+import type { TextMessageEvent } from "@honeybbq/teamspeak";
 
-function makeMsg(over: Partial<TextMessage> = {}): TextMessage {
+/** The SDK's event carries branded ids; tests only need the shape. */
+function makeMsg(over: Record<string, unknown> = {}): TextMessageEvent {
   return {
     invokerName: "Alice",
     invokerUID: "uid-abc",
@@ -12,7 +13,7 @@ function makeMsg(over: Partial<TextMessage> = {}): TextMessage {
     targetID: 0n,
     invokerID: 5,
     ...over,
-  };
+  } as unknown as TextMessageEvent;
 }
 
 describe("toTS3TextMessage", () => {
@@ -37,7 +38,7 @@ describe("toTS3TextMessage", () => {
       targetMode: 1,
       targetID: 0n,
       invokerID: 7,
-    } as unknown as TextMessage;
+    } as unknown as TextMessageEvent;
     expect(toTS3TextMessage(partial).invokerGroups).toEqual([]);
   });
 });
