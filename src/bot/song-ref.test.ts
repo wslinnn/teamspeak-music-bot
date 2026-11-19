@@ -101,6 +101,47 @@ describe("parseSongRef (#90 exact-song selection)", () => {
     expect(parseSongRef("https://www.bilibili.com/video/BV1yxHQeYEuE")).toEqual({ id: "BV1yxHQeYEuE", platform: "bilibili" });
     expect(parseSongRef("https://b23.tv/BV1yxHQeYEuE")).toEqual({ id: "BV1yxHQeYEuE", platform: "bilibili" });
   });
+
+  it("keeps the ?p=N page of a pasted BiliBili link", () => {
+    expect(parseSongRef("https://www.bilibili.com/video/BV1yxHQeYEuE?p=2")).toEqual({
+      id: "BV1yxHQeYEuE?p=2",
+      platform: "bilibili",
+    });
+    // p= alongside other params still resolves
+    expect(parseSongRef("https://www.bilibili.com/video/BV1yxHQeYEuE?spm_id_from=333&p=3")).toEqual({
+      id: "BV1yxHQeYEuE?p=3",
+      platform: "bilibili",
+    });
+    // trailing slash form
+    expect(parseSongRef("https://www.bilibili.com/video/BV1yxHQeYEuE/?p=5")).toEqual({
+      id: "BV1yxHQeYEuE?p=5",
+      platform: "bilibili",
+    });
+  });
+
+  it("ignores a p= that is not the page selector of this video", () => {
+    // BBCode wrapper: the global "find p=" bug would grab the wrong value here
+    expect(parseSongRef("[URL=https://www.bilibili.com/video/BV1yxHQeYEuE]x[/URL]?p=9")).toEqual({
+      id: "BV1yxHQeYEuE",
+      platform: "bilibili",
+    });
+    // a p= inside the path (not a query) is not a page selector
+    expect(parseSongRef("https://www.bilibili.com/video/BV1yxHQeYEuE/x?p=4")).toEqual({
+      id: "BV1yxHQeYEuE",
+      platform: "bilibili",
+    });
+  });
+
+  it("drops an invalid or zero page number", () => {
+    expect(parseSongRef("https://www.bilibili.com/video/BV1yxHQeYEuE?p=0")).toEqual({
+      id: "BV1yxHQeYEuE",
+      platform: "bilibili",
+    });
+    expect(parseSongRef("https://www.bilibili.com/video/BV1yxHQeYEuE?p=abc")).toEqual({
+      id: "BV1yxHQeYEuE",
+      platform: "bilibili",
+    });
+  });
 });
 
 describe("parseSelectionIndex (#90 pick from last search)", () => {

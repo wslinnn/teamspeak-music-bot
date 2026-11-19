@@ -34,6 +34,26 @@ function looksLikeSongId(token: string): boolean {
 }
 
 /**
+ * Keep the `?p=N` page selector of a pasted BiliBili link.
+ *
+ * A multi-part video's audio belongs to one part, so dropping the page silently
+ * plays part 1 instead of the one the user linked. Only a query that starts
+ * immediately after the BVID counts: a naive "find p= anywhere" picks up
+ * unrelated params (verified against `[URL=https://…?p=2]` BBCode wrappers and
+ * multi-line pastes, where it grabbed the wrong number).
+ */
+function appendBilibiliPage(bvid: string, text: string, afterBv: number): string {
+  const rest = text.slice(afterBv);
+  const m = /^\/?\?([^#\s[\]]*)/.exec(rest);
+  if (!m) return bvid;
+  const page = /(?:^|&)p=(\d+)/.exec(m[1]);
+  if (!page) return bvid;
+  const n = Number(page[1]);
+  if (!Number.isInteger(n) || n < 1) return bvid;
+  return `${bvid}?p=${n}`;
+}
+
+/**
  * Detect an explicit song reference in a query. Recognizes:
  *   - `id <id>` / `id:<id>`             → platform from flags/default
  *   - NetEase song URL                  → music.163.com/song?id=N (also /#/song?id=N, /song/N)
@@ -69,7 +89,7 @@ export function parseSongRef(raw: string): SongRef | null {
   // a "BV..." token never collides with them).
   const bv = /BV[0-9A-Za-z]{8,12}/.exec(q);
   if (bv && (/^BV[0-9A-Za-z]{8,12}$/.test(q) || /bilibili\.com|b23\.tv/i.test(q))) {
-    return { id: bv[0], platform: "bilibili" };
+    return { id: appendBilibiliPage(bv[0], q, bv.index + bv[0].length), platform: "bilibili" };
   }
 
   // NetEase song URL. Only treat `id=N` as a SONG id when the URL is not a
