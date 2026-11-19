@@ -49,7 +49,7 @@ import { computed, onMounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { http } from '../../utils/http';
 import { useToast } from '../../composables/useToast';
-import { getPlatformLabel } from '../../utils/platform';
+import { getProviderLabel } from '../../utils/platform';
 
 interface PlatformRow {
   platform: string;
@@ -67,13 +67,10 @@ const visible = ref(false);
 const rows = ref<PlatformRow[]>([]);
 const saving = ref<string | null>(null);
 
+// getProviderLabel covers all eight sources (getPlatformLabel only knows the
+// four legacy ones, so kugou would render as the raw key "kugou").
 function platformLabel(platform: string): string {
-  // Reuse the shared label map; unknown platforms fall back to the raw id.
-  try {
-    return getPlatformLabel(platform as never);
-  } catch {
-    return platform;
-  }
+  return getProviderLabel(platform);
 }
 
 function describe(p: PlatformRow): string {
