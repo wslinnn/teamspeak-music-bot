@@ -14,6 +14,9 @@ export interface Song {
   platform: 'netease' | 'qq' | 'bilibili' | 'youtube';
   /** 由谁点歌（TS 聊天取发言者昵称，WebUI 取用户名；历史与队列接口均返回） */
   requestedBy?: string;
+  /** 播放历史行主键，仅 GET /history 返回。删除单条历史时用它——`id` 是
+   *  平台歌曲 id，同一首歌播两次会有两行，不能用来定位。 */
+  rowId?: number;
 }
 
 export interface BotStatus {

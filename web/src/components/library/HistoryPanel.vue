@@ -73,12 +73,7 @@ const toast = useToast();
 const PAGE_SIZE = 50;
 const MAX_HISTORY = 1000;
 
-/** A history row plus the play_history primary key needed to delete it. The
- *  backend returns it as `rowId`; `id` remains the platform song id so the
- *  player store keeps working unchanged. */
-type HistoryRow = Song & { rowId?: number };
-
-const history = ref<HistoryRow[]>([]);
+const history = ref<Song[]>([]);
 const loading = ref(true);
 const loadingMore = ref(false);
 const hasMore = ref(false);
@@ -122,18 +117,18 @@ const filteredHistory = computed(() => {
 });
 
 /** Rows can repeat (same song played twice), so the platform id is not unique. */
-function rowKey(song: HistoryRow, i: number): string {
+function rowKey(song: Song, i: number): string {
   return `${song.rowId ?? song.id}-${song.platform}-${i}`;
 }
 
-async function fetchHistory(limit: number): Promise<HistoryRow[]> {
+async function fetchHistory(limit: number): Promise<Song[]> {
   const version = historyVersion;
   const res = await http.get(`/api/player/${store.activeBotId}/history`, {
     params: { limit },
   });
   // A delete happened while this was in flight — drop the stale response.
   if (version !== historyVersion) return history.value;
-  const list: HistoryRow[] = res.data.history ?? [];
+  const list: Song[] = res.data.history ?? [];
   // 返回条数达到请求上限且未到渲染上限时，可能还有更早的记录
   hasMore.value = list.length >= limit && limit < MAX_HISTORY;
   return list;
@@ -169,7 +164,7 @@ async function loadMore() {
   }
 }
 
-async function removeOne(song: HistoryRow) {
+async function removeOne(song: Song) {
   if (!store.activeBotId || song.rowId === undefined || deleting.value) return;
   deleting.value = true;
   try {
