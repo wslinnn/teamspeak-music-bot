@@ -32,6 +32,7 @@ import type {
   Song,
   SongUrlResult,
 } from "./provider.js";
+import { SongUrlUnavailable, playbackRequestFailure } from "./provider.js";
 
 // ---------------------------------------------------------------------------
 // Constants (util/config.json + util/helper.js salts)
@@ -647,7 +648,14 @@ export class KugouProvider implements MusicProvider {
   // --- Play URL --------------------------------------------------------------
   async getSongUrl(songId: string, quality?: string): Promise<SongUrlResult | null> {
     const { hash, albumAudioId, albumId } = parseId(songId);
-    if (!hash) return null;
+    if (!hash) {
+      throw new SongUrlUnavailable({
+        platform: "kugou",
+        songId,
+        code: "no_copyright",
+        message: "无法解析该酷狗曲目 ID",
+      });
+    }
     await this.ensureDfid();
     const q = quality ? (QUALITY_MAP[quality] ?? this.quality) : this.quality;
     try {
@@ -682,10 +690,20 @@ export class KugouProvider implements MusicProvider {
       const urls: string[] = Array.isArray(data?.url) ? data.url : [];
       const backup: string[] = Array.isArray(data?.backupUrl) ? data.backupUrl : [];
       const url = urls.find(Boolean) || backup.find(Boolean);
-      if (!url) return null;
+      // The upstream answered without any url: a per-track/quality restriction,
+      // not a transport failure. Say which one instead of returning null.
+      if (!url) {
+        throw new SongUrlUnavailable({
+          platform: "kugou",
+          songId,
+          code: "quality_denied",
+          message: `当前音质无播放权限（${q}）`,
+        });
+      }
       return { url };
-    } catch {
-      return null;
+    } catch (err) {
+      if (err instanceof SongUrlUnavailable) throw err;
+      throw playbackRequestFailure("kugou", songId, err);
     }
   }
 

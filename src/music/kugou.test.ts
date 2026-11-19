@@ -222,3 +222,42 @@ describe("KugouProvider.search pagination", () => {
     expect(searchParams(get).page).toBe(1);
   });
 });
+
+describe("KugouProvider.getSongUrl — failure classification", () => {
+  function providerWith(request: unknown): KugouProvider {
+    const p = new KugouProvider();
+    (p as any).request = request;
+    (p as any).ensureDfid = async () => {};
+    return p;
+  }
+
+  it("throws no_copyright when the id has no hash", async () => {
+    const p = providerWith(async () => ({}));
+    const err = await p.getSongUrl("").catch((e) => e);
+    expect(err.name).toBe("SongUrlUnavailable");
+    expect(err.failure.code).toBe("no_copyright");
+  });
+
+  it("throws quality_denied when the upstream answers with no url", async () => {
+    const p = providerWith(async () => ({ url: [], backupUrl: [] }));
+    const err = await p.getSongUrl("HASH123|32100650|966846", "320").catch((e) => e);
+    expect(err.failure.code).toBe("quality_denied");
+    expect(err.failure.message).toContain("320");
+  });
+
+  it("throws upstream_request_failed with the status when the request rejects", async () => {
+    const p = providerWith(async () => {
+      throw Object.assign(new Error("boom"), { response: { status: 503 } });
+    });
+    const err = await p.getSongUrl("HASH123|32100650|966846").catch((e) => e);
+    expect(err.failure.code).toBe("upstream_request_failed");
+    expect(err.failure.message).toContain("503");
+  });
+
+  it("returns the url when one is present", async () => {
+    const p = providerWith(async () => ({ url: ["http://cdn/k.mp3"] }));
+    await expect(p.getSongUrl("HASH123|32100650|966846")).resolves.toEqual({
+      url: "http://cdn/k.mp3",
+    });
+  });
+});
