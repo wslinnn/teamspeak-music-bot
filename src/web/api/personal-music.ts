@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { BotDatabase } from "../../data/database.js";
 import type { MusicProvider, QrCodeResult } from "../../music/provider.js";
 import type { Logger } from "../../logger.js";
+import { SCOPED_PLATFORMS } from "./provider-scope.js";
 
 /**
  * A provider that can log a web user into their OWN account without touching
@@ -89,6 +90,82 @@ export function createPersonalMusicRouter(
     database.deleteUserMusicCookie(req.user!.id, platform);
     logger.info({ userId: req.user!.id, platform }, "Personal music account unlinked");
     res.json({ ok: true });
+  });
+
+  return router;
+}
+
+/**
+ * Member-facing view of THEIR OWN account scope (per-user music accounts).
+ *
+ * Every route acts on req.user only: a member never sees another member's link
+ * or an admin's assignment of accounts to others. The one exception is the
+ * label of an account assigned TO THEM, which they need in order to understand
+ * where their recommendations come from — that is their own grant, not someone
+ * else's.
+ */
+export function createMyMusicAccountsRouter(
+  database: BotDatabase,
+  getPerUserEnabled: () => boolean,
+  logger: Logger,
+): Router {
+  const router = Router();
+
+  router.get("/status", (req, res) => {
+    const userId = req.user!.id;
+    const enabled = getPerUserEnabled();
+    const platforms = SCOPED_PLATFORMS.map((platform) => {
+      const own = database.getUserMusicCookie(userId, platform);
+      const grant = database.getMusicAccountGrant(userId, platform);
+      const account = grant ? database.getMusicAccount(grant.accountId) : null;
+      const preferShared = database.getMusicPref(userId, platform);
+
+      // Which credential actually drives metadata reads right now.
+      let active: "shared" | "own" | "granted" = "shared";
+      if (enabled && !preferShared) {
+        if (own) active = "own";
+        else if (account?.enabled) active = "granted";
+      }
+
+      return {
+        platform,
+        enabled,
+        linked: Boolean(own),
+        preferShared,
+        active,
+        granted: account
+          ? {
+              label: account.label,
+              enabled: account.enabled,
+              // A member cannot unlink an admin's assignment.
+              canUnlink: false,
+            }
+          : null,
+      };
+    });
+    res.json({ perUserMusicAccounts: enabled, platforms });
+  });
+
+  router.put("/:platform/preference", (req, res) => {
+    const platform = req.params.platform;
+    if (!(SCOPED_PLATFORMS as readonly string[]).includes(platform)) {
+      res.status(404).json({ error: "unsupported platform" });
+      return;
+    }
+    if (!getPerUserEnabled()) {
+      res.status(409).json({ error: "per-user music accounts are disabled", code: "per_user_accounts_disabled" });
+      return;
+    }
+    if (typeof req.body?.preferShared !== "boolean") {
+      res.status(400).json({ error: "preferShared must be a boolean" });
+      return;
+    }
+    database.setMusicPref(req.user!.id, platform, req.body.preferShared);
+    logger.info(
+      { userId: req.user!.id, platform, preferShared: req.body.preferShared },
+      "Music account preference changed",
+    );
+    res.json({ ok: true, preferShared: req.body.preferShared });
   });
 
   return router;

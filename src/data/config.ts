@@ -135,6 +135,13 @@ export interface BotConfig {
    */
   savedQueuesEnabled: boolean;
   /**
+   * Per-user music accounts (admin-controlled, default false). When on, a web
+   * user who linked their own platform account, or holds an admin-assigned
+   * pool account, reads search results / playlists / recommendations through
+   * that account. Room playback ALWAYS uses the shared login.
+   */
+  perUserMusicAccounts: boolean;
+  /**
    * When true, a single-song immediate !play (chat) / play-song (web) inserts
    * after the current track and jumps to it instead of clearing the queue, so
    * the rest of the queue survives and continues afterwards. Default false
@@ -196,6 +203,9 @@ export function getDefaultConfig(): BotConfig {
     idleTimeoutMinutes: 0,
     localAudioEnabled: true,
     savedQueuesEnabled: false,
+    // Opt-in isolation: a legacy config without the key, or a hand-edited
+    // "yes"/1, must never turn per-user accounts on by accident.
+    perUserMusicAccounts: false,
     playKeepsQueue: false,
     publicUrl: "",
     trustProxy: false,
@@ -402,6 +412,9 @@ export function loadConfig(path: string): BotConfig {
     // them (`"yes"`, `1`, `null` → false; only a literal `true` enables).
     const savedQueuesEnabled = partial.savedQueuesEnabled === true;
     const playKeepsQueue = partial.playKeepsQueue === true;
+    // Same strict-coercion rule: account isolation must be opted into with a
+    // literal `true`, never inferred from a truthy legacy value.
+    const perUserMusicAccounts = partial.perUserMusicAccounts === true;
 
     // Voice ducking is opt-in and the retained-volume percentage is consumed
     // directly by the audio path. Only a plain-object block with correctly
@@ -464,6 +477,7 @@ export function loadConfig(path: string): BotConfig {
       audioQuality,
       enabledProviders,
       savedQueuesEnabled,
+      perUserMusicAccounts,
       playKeepsQueue,
       voiceDucking,
       defaultPlatform: defaultPlatformPref,
