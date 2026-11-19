@@ -1,5 +1,11 @@
 import axios, { type AxiosInstance } from "axios";
 import { normalizeCookie } from "./cookie-normalize.js";
+import {
+  RISK_CONTROL_CODE,
+  RiskControlError,
+  SongUrlUnavailable,
+  type PlayFailure,
+} from "./provider.js";
 import type {
   MusicProvider,
   Song,
@@ -143,6 +149,82 @@ export const NETEASE_QUALITY_LEVELS = [
   { value: "jymaster", label: "超清母带", bitrate: 4000 },
 ] as const;
 
+/**
+ * Recognise NetEase's IP risk control inside an axios error. The status alone
+ * is not enough — axios reports every 4xx as ERR_BAD_REQUEST — so the body has
+ * to be read.
+ */
+export function riskControlFrom(err: unknown): RiskControlError | null {
+  const e = err as { response?: { status?: number; data?: { code?: number } } } | null;
+  if (e?.response?.status === 400 && e.response.data?.code === RISK_CONTROL_CODE) {
+    return new RiskControlError("网易云请求被风控拦截 (-460)");
+  }
+  return null;
+}
+
+/**
+ * Classify a 200-with-no-URL answer.
+ *
+ * `/song/url/v1` reports "no URL here" for at least four unrelated reasons, and
+ * they need different fixes: open a membership, pick another track, drop the
+ * quality, or just wait. The response does carry enough to tell them apart
+ * (`code`, `fee`, `payed`, `level`).
+ *
+ * Field meanings (NetEase):
+ *   fee 0 = free, 1 = VIP, 4 = album-only purchase, 8 = free / low quality
+ *   payed 1 = this account already paid for it
+ *   code 404 on the item = the id does not resolve to a playable track
+ */
+export function diagnoseNeteaseMiss(
+  songId: string,
+  level: string,
+  item: Record<string, any> | undefined,
+  body: Record<string, any> | undefined
+): PlayFailure {
+  const upstream = {
+    code: item?.code ?? body?.code,
+    fee: item?.fee,
+    payed: item?.payed,
+    level: item?.level ?? level,
+    br: item?.br,
+    freeTrial: Boolean(item?.freeTrialInfo),
+  };
+  const suffix = `（${String(upstream.level)}）`;
+  const base = { platform: "netease" as const, songId, upstream };
+
+  if (!item) {
+    return {
+      ...base,
+      code: "unknown",
+      message: `音源没有返回该曲目${suffix}`,
+    };
+  }
+  if (upstream.code === 404) {
+    return {
+      ...base,
+      code: "no_copyright",
+      message: `无版权或已下架${suffix}`,
+    };
+  }
+  const fee = typeof upstream.fee === "number" ? upstream.fee : -1;
+  if ((fee === 1 || fee === 4) && !upstream.payed) {
+    return {
+      ...base,
+      code: "vip_required",
+      message: fee === 4 ? `需要购买该专辑${suffix}` : `需要会员${suffix}`,
+    };
+  }
+  // Everything else that has the track but no URL is a per-level restriction:
+  // the same id often plays at another level (measured: 192k OK while both
+  // 320k and 128k returned null).
+  return {
+    ...base,
+    code: "quality_denied",
+    message: `当前音质无播放权限${suffix}`,
+  };
+}
+
+
 export class NeteaseProvider implements MusicProvider {
   readonly platform = "netease" as const;
   private api: AxiosInstance;
@@ -216,14 +298,27 @@ export class NeteaseProvider implements MusicProvider {
 
   async getSongUrl(songId: string, quality?: string): Promise<SongUrlResult | null> {
     const level = quality ?? this.quality;
-    // 默认 eapi 加密的 /song/url/v1 已被网易风控标记（-460「检测到您的网络环境
-    // 存在风险」），改用 api 加密可正常取链接；其余接口不受影响，勿全局改。
-    const res = await this.api.get("/song/url/v1", {
-      params: { id: songId, level, crypto: "api", ...this.cookieParams },
-    });
+    let res;
+    try {
+      // 默认 eapi 加密的 /song/url/v1 已被网易风控标记（-460「检测到您的网络环境
+      // 存在风险」），改用 api 加密可正常取链接；其余接口不受影响，勿全局改。
+      res = await this.api.get("/song/url/v1", {
+        params: { id: songId, level, crypto: "api", ...this.cookieParams },
+      });
+    } catch (err) {
+      // -460 arrives as HTTP 400, and left as-is it looks like "this track is
+      // unavailable" to every caller. Surface it as its own type so callers can
+      // name the real cause instead of guessing at a region block.
+      const risk = riskControlFrom(err);
+      if (risk) throw risk;
+      throw err;
+    }
     const item = res.data?.data?.[0];
     const url = item?.url;
-    if (!url) return null;
+    // A bare `null` forced every caller to invent an explanation, and the one
+    // they invented was 「区域/版权限制」— wrong for a lapsed membership, for a
+    // delisted track, and for a quality the account cannot stream.
+    if (!url) throw new SongUrlUnavailable(diagnoseNeteaseMiss(songId, level, item, res.data));
     return { url, trialDuration: parseNeteaseTrial(item) };
   }
 

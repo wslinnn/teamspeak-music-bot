@@ -5,8 +5,16 @@ import {
   mapNeteaseSongs,
   mapNeteaseArtists,
   parseNeteaseTrial,
+  diagnoseNeteaseMiss,
+  riskControlFrom,
   NeteaseProvider,
 } from "./netease.js";
+import {
+  SongUrlUnavailable,
+  RiskControlError,
+  toPlayFailure,
+  summarizePlayFailures,
+} from "./provider.js";
 
 describe("NetEase adapter", () => {
   it("parses LRC format lyrics", () => {
@@ -122,10 +130,10 @@ describe("NetEase adapter", () => {
     expect(out).toEqual({ url: "http://cdn/x.mp3", trialDuration: 30 });
   });
 
-  it("getSongUrl returns null when NetEase yields no url", async () => {
+  it("getSongUrl throws SongUrlUnavailable naming the cause when there is no url", async () => {
     const p = new NeteaseProvider("http://x");
-    (p as any).api = { get: vi.fn().mockResolvedValue({ data: { code: 200, data: [{ url: null }] } }) };
-    expect(await p.getSongUrl("123")).toBeNull();
+    (p as any).api = { get: vi.fn().mockResolvedValue({ data: { code: 200, data: [{ url: null, fee: 0, code: 200 }] } }) };
+    await expect(p.getSongUrl("123")).rejects.toBeInstanceOf(SongUrlUnavailable);
   });
 
   it("getSongUrl falls back to the provider quality when none is passed", async () => {
@@ -135,6 +143,120 @@ describe("NetEase adapter", () => {
     (p as any).api = { get };
     await p.getSongUrl("9");
     expect(get.mock.calls[0][1].params.level).toBe("lossless");
+  });
+});
+
+describe("diagnoseNeteaseMiss (naming the real cause)", () => {
+  it("maps a VIP track with no entitlement to vip_required", () => {
+    const f = diagnoseNeteaseMiss("1", "exhigh", { fee: 1, payed: 0 }, { code: 200 });
+    expect(f.code).toBe("vip_required");
+    expect(f.message).toContain("需要会员");
+    expect(f.platform).toBe("netease");
+    expect(f.songId).toBe("1");
+  });
+
+  it("distinguishes an album-only purchase from a membership", () => {
+    const f = diagnoseNeteaseMiss("1", "exhigh", { fee: 4, payed: 0 }, { code: 200 });
+    expect(f.code).toBe("vip_required");
+    expect(f.message).toContain("购买该专辑");
+  });
+
+  it("treats a paid account as playable-elsewhere, not vip_required", () => {
+    const f = diagnoseNeteaseMiss("1", "exhigh", { fee: 1, payed: 1 }, { code: 200 });
+    expect(f.code).toBe("quality_denied");
+  });
+
+  it("maps upstream 404 to no_copyright", () => {
+    const f = diagnoseNeteaseMiss("1", "exhigh", { code: 404 }, { code: 200 });
+    expect(f.code).toBe("no_copyright");
+    expect(f.message).toContain("无版权");
+  });
+
+  it("falls back to quality_denied for a free track that has no url", () => {
+    const f = diagnoseNeteaseMiss("1", "exhigh", { fee: 0, url: null }, { code: 200 });
+    expect(f.code).toBe("quality_denied");
+    expect(f.message).toContain("当前音质无播放权限");
+  });
+
+  it("reports unknown when the item is missing entirely", () => {
+    const f = diagnoseNeteaseMiss("1", "exhigh", undefined, { code: 200 });
+    expect(f.code).toBe("unknown");
+  });
+
+  it("carries non-secret upstream diagnostics for logs", () => {
+    const f = diagnoseNeteaseMiss("1", "exhigh", { fee: 1, payed: 0, level: "exhigh", br: 320000 }, { code: 200 });
+    expect(f.upstream).toMatchObject({ fee: 1, payed: 0, level: "exhigh", br: 320000 });
+  });
+});
+
+describe("riskControlFrom", () => {
+  it("recognises -460 in the body (axios reports every 4xx as ERR_BAD_REQUEST)", () => {
+    const err = { isAxiosError: true, response: { status: 400, data: { code: -460 } } };
+    expect(riskControlFrom(err)).toBeInstanceOf(RiskControlError);
+  });
+
+  it("ignores a 400 with a different body code", () => {
+    expect(riskControlFrom({ response: { status: 400, data: { code: 301 } } })).toBeNull();
+  });
+
+  it("ignores a -460 body that arrives with a non-400 status", () => {
+    expect(riskControlFrom({ response: { status: 200, data: { code: -460 } } })).toBeNull();
+  });
+
+  it("ignores non-error values", () => {
+    expect(riskControlFrom(null)).toBeNull();
+    expect(riskControlFrom(new Error("x"))).toBeNull();
+  });
+});
+
+describe("getSongUrl error propagation", () => {
+  it("rethrows -460 as RiskControlError so callers can name it", async () => {
+    const p = new NeteaseProvider("http://x");
+    (p as any).api = {
+      get: vi.fn().mockRejectedValue({ isAxiosError: true, response: { status: 400, data: { code: -460 } } }),
+    };
+    const err = await p.getSongUrl("1").catch((e) => e);
+    expect(err).toBeInstanceOf(RiskControlError);
+    expect(toPlayFailure("netease", "1", err).code).toBe("risk_control");
+  });
+
+  it("rethrows unrelated transport errors untouched", async () => {
+    const p = new NeteaseProvider("http://x");
+    const boom = new Error("ECONNREFUSED");
+    (p as any).api = { get: vi.fn().mockRejectedValue(boom) };
+    await expect(p.getSongUrl("1")).rejects.toBe(boom);
+  });
+
+  it("exposes the classified failure on the thrown SongUrlUnavailable", async () => {
+    const p = new NeteaseProvider("http://x");
+    (p as any).api = { get: vi.fn().mockResolvedValue({ data: { code: 200, data: [{ url: null, fee: 1, payed: 0 }] } }) };
+    const err = await p.getSongUrl("1", "exhigh").catch((e) => e);
+    expect(err).toBeInstanceOf(SongUrlUnavailable);
+    expect(err.failure.code).toBe("vip_required");
+  });
+});
+
+describe("toPlayFailure / summarizePlayFailures", () => {
+  it("passes a SongUrlUnavailable's own failure through", () => {
+    const failure = { platform: "netease", songId: "1", code: "no_copyright" as const, message: "无版权" };
+    expect(toPlayFailure("netease", "1", new SongUrlUnavailable(failure))).toBe(failure);
+  });
+
+  it("maps a bare error to unknown", () => {
+    expect(toPlayFailure("qq", "2", new Error("x"))).toMatchObject({ code: "unknown", songId: "2" });
+  });
+
+  it("summarizes the dominant causes for a batch action", () => {
+    const mk = (code: any): any => ({ platform: "netease", songId: "1", code, message: "" });
+    const text = summarizePlayFailures([
+      mk("vip_required"), mk("vip_required"), mk("vip_required"), mk("no_copyright"),
+    ]);
+    expect(text).toContain("3 首需会员");
+    expect(text).toContain("1 首无版权");
+  });
+
+  it("returns an empty string when nothing failed", () => {
+    expect(summarizePlayFailures([])).toBe("");
   });
 });
 

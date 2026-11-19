@@ -34,6 +34,145 @@ export interface SongUrlResult {
   trialDuration?: number;
 }
 
+/** NetEase upstream risk-control response code. */
+export const RISK_CONTROL_CODE = -460;
+
+/** Upstream refused the caller's address. Transient by nature — retrying the
+ *  same request later usually works, and the quality asked for is irrelevant. */
+export class RiskControlError extends Error {
+  readonly code: number = RISK_CONTROL_CODE;
+  constructor(message: string) {
+    super(message);
+    this.name = "RiskControlError";
+  }
+}
+
+/**
+ * Why a track could not be turned into a playable URL.
+ *
+ * Every one of these used to reach the user as the same string —
+ * 「无法播放（区域/版权限制）」 — which is why a genuine -460, a lapsed membership
+ * and a delisted track were indistinguishable. Naming the cause is the whole
+ * point of this type.
+ */
+export type PlayFailureCode =
+  /** Upstream refused the caller's IP (-460). Transient by nature. */
+  | "risk_control"
+  /** Paid track with no entitlement on the account (NetEase fee=1 VIP / fee=4). */
+  | "vip_required"
+  /** Delisted, region-blocked, or the id no longer resolves (upstream 404). */
+  | "no_copyright"
+  /** The track exists, but this quality level is not ours to serve. */
+  | "quality_denied"
+  /** The upstream HTTP request failed or the expected API was unreachable. */
+  | "upstream_request_failed"
+  /** The music service explicitly asked the user to complete verification. */
+  | "provider_verification_required"
+  /** 200 with no URL and nothing that explains why. */
+  | "unknown";
+
+export interface PlayFailure {
+  platform: string;
+  songId: string;
+  code: PlayFailureCode;
+  /** One short line in the UI's language — safe to render as-is. */
+  message: string;
+  /** Selected non-secret diagnostic fields. Logs only, never shown directly. */
+  upstream?: Record<string, unknown>;
+}
+
+/**
+ * Thrown when a provider knows *why* no URL came back.
+ *
+ * Callers that only need "did it play" keep using the boolean/null contract;
+ * callers that explain the outcome read `failure` instead of guessing.
+ */
+export class SongUrlUnavailable extends Error {
+  readonly failure: PlayFailure;
+  constructor(failure: PlayFailure) {
+    super(failure.message);
+    this.name = "SongUrlUnavailable";
+    this.failure = failure;
+  }
+}
+
+/** Preserve typed status for troubleshooting without forwarding request or
+ *  response data (the axios config carries the account cookie). */
+export function playbackRequestFailure(
+  platform: "qq" | "kugou",
+  songId: string,
+  error: unknown
+): SongUrlUnavailable {
+  const raw = error as { code?: unknown; response?: { status?: unknown } } | null;
+  const status = raw?.response?.status;
+  const httpStatus =
+    typeof status === "number" && Number.isInteger(status) && status >= 100 && status < 600
+      ? status
+      : undefined;
+  const name = platform === "qq" ? "QQ 音乐 API" : "酷狗";
+  const message = httpStatus
+    ? `${name}播放请求失败（HTTP ${httpStatus}）`
+    : raw?.code === "QQ_API_PORT_CONFLICT" && platform === "qq"
+      ? "QQ 音乐 API 端口被其他服务占用，请检查 qqMusicApiPort"
+      : raw?.code === "ECONNREFUSED" && platform === "qq"
+        ? "无法连接 QQ 音乐 API，请检查服务启动与端口"
+        : raw?.code === "ECONNABORTED" || raw?.code === "ETIMEDOUT"
+          ? `${name}播放请求超时`
+          : `${name}播放请求失败，请检查服务与网络连接`;
+  return new SongUrlUnavailable({
+    platform,
+    songId,
+    code: "upstream_request_failed",
+    message,
+    upstream: httpStatus ? { httpStatus } : undefined,
+  });
+}
+
+export function toPlayFailure(platform: string, songId: string, error: unknown): PlayFailure {
+  if (error instanceof SongUrlUnavailable) return error.failure;
+  if (error instanceof RiskControlError) {
+    return {
+      platform,
+      songId,
+      code: "risk_control",
+      message: "网易云暂时拒绝播放请求（-460），请稍后重试",
+    };
+  }
+  return { platform, songId, code: "unknown", message: "解析播放地址失败" };
+}
+
+/**
+ * Collapse many per-track failures into one line for a batch action
+ * (load playlist / album / artist). Counts by cause so the user learns the
+ * dominant reason instead of the old catch-all 「区域/版权限制」.
+ */
+export function summarizePlayFailures(failures: PlayFailure[]): string {
+  if (failures.length === 0) return "";
+
+  const counts = new Map<PlayFailureCode, number>();
+  for (const f of failures) counts.set(f.code, (counts.get(f.code) ?? 0) + 1);
+  const ranked = [...counts].sort((a, b) => b[1] - a[1]);
+
+  const label: Record<PlayFailureCode, string> = {
+    risk_control: "被风控拦截",
+    vip_required: "需会员或购买",
+    no_copyright: "无版权",
+    quality_denied: "当前音质无权限",
+    upstream_request_failed: "音源请求失败",
+    provider_verification_required: "需完成验证",
+    unknown: "原因未知",
+  };
+
+  // One cause reads better as a plain sentence; several are worth itemising.
+  const top = ranked.slice(0, 2).map(([code, n]) => `${n} 首${label[code]}`);
+  return top.join("、");
+}
+
+export function isRiskControlError(error: unknown): error is RiskControlError {
+  return error instanceof RiskControlError;
+}
+
+
 export interface Playlist {
   id: string;
   name: string;
