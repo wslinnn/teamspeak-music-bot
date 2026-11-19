@@ -35,12 +35,12 @@ describe("music router GET /search offset pagination", () => {
 
   beforeEach(() => {
     netease = fakeProvider("netease");
-    const router = createMusicRouter(
-      netease,
-      fakeProvider("qq"),
-      fakeProvider("bilibili"),
-      pino({ level: "silent" })
-    );
+    const router = createMusicRouter({
+      neteaseProvider: netease,
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+    });
     app = express();
     app.use("/api/music", router);
   });
@@ -68,13 +68,13 @@ describe("music router GET /search empty q — local list-all", () => {
   it("lets an empty q through for the local provider, still 400 for others", async () => {
     const local = fakeProvider("local");
     const netease = fakeProvider("netease");
-    const router = createMusicRouter(
-      netease,
-      fakeProvider("qq"),
-      fakeProvider("bilibili"),
-      pino({ level: "silent" }),
-      local
-    );
+    const router = createMusicRouter({
+      neteaseProvider: netease,
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+      localProvider: local,
+    });
     const app = express();
     app.use("/api/music", router);
 
@@ -106,17 +106,17 @@ describe("music router provider gating (enabledProviders) + jellyfin endpoints",
   function mount(config: BotConfig) {
     const netease = fakeProvider("netease");
     const jellyfin = jellyfinFake();
-    const router = createMusicRouter(
-      netease,
-      fakeProvider("qq"),
-      fakeProvider("bilibili"),
-      pino({ level: "silent" }),
-      undefined,
+    const router = createMusicRouter({
+      neteaseProvider: netease,
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+      localProvider: undefined,
       config,
-      fakeProvider("kugou"),
-      fakeProvider("spotify"),
-      jellyfin,
-    );
+      kugouProvider: fakeProvider("kugou"),
+      spotifyProvider: fakeProvider("spotify"),
+      jellyfinProvider: jellyfin,
+    });
     const app = express();
     app.use("/api/music", router);
     return { app, netease, jellyfin };
@@ -294,10 +294,16 @@ describe("music router POST /quality — persistence (#125)", () => {
     app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
     app.use(
       "/api/music",
-      createMusicRouter(
-        providers.netease, providers.qq, providers.bilibili, pino({ level: "silent" }),
-        undefined, config, providers.kugou, undefined, providers.jellyfin, configPath,
-      ),
+      createMusicRouter({
+        neteaseProvider: providers.netease,
+        qqProvider: providers.qq,
+        bilibiliProvider: providers.bilibili,
+        logger: pino({ level: "silent" }),
+        config,
+        kugouProvider: providers.kugou,
+        jellyfinProvider: providers.jellyfin,
+        configPath,
+      }),
     );
   });
 
@@ -380,10 +386,14 @@ describe("music router POST /local/upload — content types and size cap (#149)"
     app.use(express.json());
     app.use(cookieParser());
     app.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
-    app.use("/api/music", createMusicRouter(
-      fakeProvider("netease"), fakeProvider("qq"), fakeProvider("bilibili"),
-      pino({ level: "silent" }), local, getDefaultConfig(),
-    ));
+    app.use("/api/music", createMusicRouter({
+      neteaseProvider: fakeProvider("netease"),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+      localProvider: local,
+      config: getDefaultConfig(),
+    }));
   });
 
   afterEach(() => botDb.close());
@@ -481,11 +491,14 @@ describe("music router POST /local/upload — content types and size cap (#149)"
     const app2 = express();
     app2.use(cookieParser());
     app2.use("/api", createRequireAuth(sessions, createClientTokenStore(botDb.db), createPermissionStore(botDb.db), () => getDefaultConfig().guestMode));
-    app2.use("/api/music", createMusicRouter(
-      fakeProvider("netease"), fakeProvider("qq"), fakeProvider("bilibili"),
-      pino({ level: "silent" }),
-      { platform: "local", search: vi.fn(), uploadAudio } as unknown as MusicProvider, off,
-    ));
+    app2.use("/api/music", createMusicRouter({
+      neteaseProvider: fakeProvider("netease"),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+      localProvider: { platform: "local", search: vi.fn(), uploadAudio } as unknown as MusicProvider,
+      config: off,
+    }));
     const res = await request(app2)
       .post("/api/music/local/upload")
       .set("Cookie", c2)
@@ -509,14 +522,13 @@ describe("POST /local/upload — concurrency gate (review P2)", () => {
         return { id: "u1", name: "n", platform: "local" };
       }),
     } as unknown as MusicProvider;
-    const router = createMusicRouter(
-      fakeProvider("netease"),
-      fakeProvider("qq"),
-      fakeProvider("bilibili"),
-      pino({ level: "silent" }),
-      local,
-      undefined,
-    );
+    const router = createMusicRouter({
+      neteaseProvider: fakeProvider("netease"),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+      localProvider: local,
+    });
     const app = express();
     app.use((req, _res, next) => {
       (req as unknown as { user: unknown }).user = {
@@ -553,12 +565,12 @@ describe("POST /local/upload — concurrency gate (review P2)", () => {
 
 describe("GET /search/all — rate limit (review P4)", () => {
   it("serves normal traffic and 429s a flood", async () => {
-    const router = createMusicRouter(
-      fakeProvider("netease"),
-      fakeProvider("qq"),
-      fakeProvider("bilibili"),
-      pino({ level: "silent" }),
-    );
+    const router = createMusicRouter({
+      neteaseProvider: fakeProvider("netease"),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+    });
     const app = express();
     app.use("/api/music", router);
     const first = await request(app).get("/api/music/search/all?q=hi");
@@ -575,12 +587,12 @@ describe("GET /search/all — rate limit (review P4)", () => {
 describe("GET /lyrics/:id — content cache + route rate limit", () => {
   it("serves repeated requests from the provider cache (one upstream call)", async () => {
     const netease = fakeProvider("netease");
-    const router = createMusicRouter(
-      withContentCache(netease, new TtlLruCache(50)),
-      fakeProvider("qq"),
-      fakeProvider("bilibili"),
-      pino({ level: "silent" })
-    );
+    const router = createMusicRouter({
+      neteaseProvider: withContentCache(netease, new TtlLruCache(50)),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+    });
     const app = express();
     app.use("/api/music", router);
 
@@ -593,12 +605,13 @@ describe("GET /lyrics/:id — content cache + route rate limit", () => {
   });
 
   it("rate limits /lyrics to the bucket capacity then 429s with Retry-After", async () => {
-    const router = createMusicRouter(
-      fakeProvider("netease"),
-      fakeProvider("qq"),
-      fakeProvider("bilibili"),
-      pino({ level: "silent" })
-    );
+    const router = createMusicRouter({
+      neteaseProvider: fakeProvider("netease"),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" })
+    });
+
     const app = express();
     app.use("/api/music", router);
 
@@ -615,12 +628,13 @@ describe("GET /lyrics/:id — content cache + route rate limit", () => {
 
 describe("music router GET /bilibili/parts", () => {
   it("returns 400 when bvid is missing", async () => {
-    const router = createMusicRouter(
-      fakeProvider("netease"),
-      fakeProvider("qq"),
-      fakeProvider("bilibili"),
-      pino({ level: "silent" })
-    );
+    const router = createMusicRouter({
+      neteaseProvider: fakeProvider("netease"),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" })
+    });
+
     const app = express();
     app.use("/api/music", router);
 
@@ -642,12 +656,13 @@ describe("music router GET /bilibili/parts", () => {
         ],
       }),
     };
-    const router = createMusicRouter(
-      fakeProvider("netease"),
-      fakeProvider("qq"),
-      mockBilibili as unknown as MusicProvider,
-      pino({ level: "silent" })
-    );
+    const router = createMusicRouter({
+      neteaseProvider: fakeProvider("netease"),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: mockBilibili as unknown as MusicProvider,
+      logger: pino({ level: "silent" })
+    });
+
     const app = express();
     app.use("/api/music", router);
 
@@ -664,12 +679,13 @@ describe("music router GET /bilibili/parts", () => {
       search: vi.fn(),
       getVideoParts: vi.fn().mockResolvedValue(null),
     };
-    const router = createMusicRouter(
-      fakeProvider("netease"),
-      fakeProvider("qq"),
-      mockBilibili as unknown as MusicProvider,
-      pino({ level: "silent" })
-    );
+    const router = createMusicRouter({
+      neteaseProvider: fakeProvider("netease"),
+      qqProvider: fakeProvider("qq"),
+      bilibiliProvider: mockBilibili as unknown as MusicProvider,
+      logger: pino({ level: "silent" })
+    });
+
     const app = express();
     app.use("/api/music", router);
 
@@ -702,7 +718,12 @@ describe("music router GET /artist/:id", () => {
 
   function mount(netease: MusicProvider, qq: MusicProvider = fakeProvider("qq")) {
     const app = express();
-    app.use("/api/music", createMusicRouter(netease, qq, fakeProvider("bilibili"), pino({ level: "silent" })));
+    app.use("/api/music", createMusicRouter({
+      neteaseProvider: netease,
+      qqProvider: qq,
+      bilibiliProvider: fakeProvider("bilibili"),
+      logger: pino({ level: "silent" }),
+    }));
     return app;
   }
 
@@ -775,12 +796,12 @@ describe("music router GET /search/all artist aggregation", () => {
     const app = express();
     app.use(
       "/api/music",
-      createMusicRouter(
-        searchProvider("netease", [{ id: "1", name: "N", avatarUrl: "", platform: "netease" }]),
-        searchProvider("qq", [{ id: "2", name: "Q", avatarUrl: "", platform: "qq" }]),
-        fakeProvider("bilibili"),
-        pino({ level: "silent" })
-      )
+      createMusicRouter({
+        neteaseProvider: searchProvider("netease", [{ id: "1", name: "N", avatarUrl: "", platform: "netease" }]),
+        qqProvider: searchProvider("qq", [{ id: "2", name: "Q", avatarUrl: "", platform: "qq" }]),
+        bilibiliProvider: fakeProvider("bilibili"),
+        logger: pino({ level: "silent" }),
+      })
     );
 
     const res = await request(app).get("/api/music/search/all?q=adele");

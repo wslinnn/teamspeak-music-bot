@@ -78,7 +78,12 @@ function makeApp(user: any, database?: any) {
     ),
   );
   app.use("/api/auth", createAuthRouter(provider, provider, provider, logger));
-  app.use("/api/music", createMusicRouter(provider, provider, provider, logger));
+  app.use("/api/music", createMusicRouter({
+    neteaseProvider: provider,
+    qqProvider: provider,
+    bilibiliProvider: provider,
+    logger,
+  }));
 
   return app;
 }

@@ -228,7 +228,19 @@ export function createWebServer(options: WebServerOptions): WebServer {
   );
   app.use(
     "/api/music",
-    createMusicRouter(options.neteaseProvider, options.qqProvider, options.bilibiliProvider, logger, options.localProvider, options.config, options.kugouProvider, options.spotifyProvider, options.jellyfinProvider, options.configPath)
+    createMusicRouter({
+      neteaseProvider: options.neteaseProvider,
+      qqProvider: options.qqProvider,
+      bilibiliProvider: options.bilibiliProvider,
+      logger,
+      localProvider: options.localProvider,
+      config: options.config,
+      kugouProvider: options.kugouProvider,
+      spotifyProvider: options.spotifyProvider,
+      jellyfinProvider: options.jellyfinProvider,
+      configPath: options.configPath,
+      database: options.database,
+    })
   );
   app.use("/api/player", createPlayerRouter(
     options.botManager, logger, options.database,

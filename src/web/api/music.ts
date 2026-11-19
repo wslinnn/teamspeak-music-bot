@@ -8,6 +8,8 @@ import { requirePermission } from "../middleware/requirePermission.js";
 import { requireNotGuest } from "../middleware/requireNotGuest.js";
 import { authorize } from "../middleware/authorize.js";
 import { createRateLimit } from "../middleware/rateLimit.js";
+import type { BotDatabase } from "../../data/database.js";
+import { resolveProviderForRequest } from "./provider-scope.js";
 
 /**
  * Body cap for a local upload. express.raw buffers the whole body in memory,
@@ -107,20 +109,39 @@ class TtlCache<V> {
   }
 }
 
-export function createMusicRouter(
-  neteaseProvider: MusicProvider,
-  qqProvider: MusicProvider,
-  bilibiliProvider: MusicProvider,
-  logger: Logger,
-  localProvider?: MusicProvider,
-  config?: BotConfig,
-  kugouProvider?: MusicProvider,
-  spotifyProvider?: MusicProvider,
-  jellyfinProvider?: MusicProvider,
-  // When set (alongside config), a quality change is persisted to config.json so
-  // it survives a restart (#125). Omitted by unit-test routers → no persistence.
-  configPath?: string,
-): Router {
+export interface MusicRouterOptions {
+  neteaseProvider: MusicProvider;
+  qqProvider: MusicProvider;
+  bilibiliProvider: MusicProvider;
+  logger: Logger;
+  localProvider?: MusicProvider;
+  config?: BotConfig;
+  kugouProvider?: MusicProvider;
+  spotifyProvider?: MusicProvider;
+  jellyfinProvider?: MusicProvider;
+  /** When set (alongside config), a quality change is persisted to config.json
+   *  so it survives a restart (#125). Omitted by unit-test routers → no
+   *  persistence. */
+  configPath?: string;
+  /** Per-user music accounts. Omitted by unit-test routers → every request
+   *  reads through the shared login, exactly as before the feature existed. */
+  database?: BotDatabase;
+}
+
+export function createMusicRouter(options: MusicRouterOptions): Router {
+  const {
+    neteaseProvider,
+    qqProvider,
+    bilibiliProvider,
+    logger,
+    localProvider,
+    config,
+    kugouProvider,
+    spotifyProvider,
+    jellyfinProvider,
+    configPath,
+    database,
+  } = options;
   const router = Router();
   const youtubeProvider: MusicProvider = new YouTubeProvider();
 
