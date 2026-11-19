@@ -15,6 +15,7 @@ import type {
   ArtistDetail,
   ArtistSongPage,
 } from "./provider.js";
+import { SongUrlUnavailable, playbackRequestFailure } from "./provider.js";
 import { parseLyrics } from "./netease.js";
 
 // Primary search client: u.y.qq.com/cgi-bin/musicu.fcg (JSON sub-request
@@ -355,25 +356,43 @@ export class QQMusicProvider implements MusicProvider {
   }
 
   async getSongUrl(songId: string, quality?: string): Promise<SongUrlResult | null> {
+    const level = quality ?? this.quality;
+    // Two request shapes are tried because the sidecar accepts either a
+    // songmid or a songid for the same track. Keep the first transport error:
+    // if both attempts fail, "the API is unreachable" and "this track has no
+    // url" are completely different problems for the user.
+    let lastError: unknown;
+
     try {
       const res = await this.api.get("/getMusicPlay", {
-        params: { songmid: songId, quality: quality ?? this.quality, ...this.cookieParams },
+        params: { songmid: songId, quality: level, ...this.cookieParams },
       });
       const playUrl = res.data?.data?.playUrl?.[songId];
       if (playUrl?.url) return { url: playUrl.url, trialDuration: parseQqTrial(playUrl) };
-    } catch {
-      // try with songid
+    } catch (err) {
+      lastError = err;
       try {
         const res = await this.api.get("/getMusicPlay", {
-          params: { songid: songId, quality: quality ?? this.quality, ...this.cookieParams },
+          params: { songid: songId, quality: level, ...this.cookieParams },
         });
         const playUrl = res.data?.data?.playUrl?.[songId];
         if (playUrl?.url) return { url: playUrl.url, trialDuration: parseQqTrial(playUrl) };
-      } catch {
-        // ignore
+      } catch (retryErr) {
+        lastError = retryErr;
       }
     }
-    return null;
+
+    // The sidecar answered but had no url for this track/quality: a per-track
+    // restriction, not a transport failure.
+    if (lastError === undefined) {
+      throw new SongUrlUnavailable({
+        platform: "qq",
+        songId,
+        code: "quality_denied",
+        message: `当前音质无播放权限（${level}）`,
+      });
+    }
+    throw playbackRequestFailure("qq", songId, lastError);
   }
 
   /**

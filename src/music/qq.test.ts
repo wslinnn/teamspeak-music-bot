@@ -637,3 +637,58 @@ describe("QQMusicProvider.getArtistAllSongs (album aggregation)", () => {
     expect(full.total).toBe(2);
   });
 });
+
+describe("QQMusicProvider.getSongUrl — failure classification", () => {
+  beforeEach(() => {
+    mockGet.mockReset();
+    mockPost.mockReset();
+  });
+
+  it("throws quality_denied when the sidecar answers with no url", async () => {
+    mockGet.mockResolvedValue({ data: { data: { playUrl: {} } } });
+    const p = new QQMusicProvider("http://x");
+    const err = await p.getSongUrl("mid1", "exhigh").catch((e) => e);
+    expect(err.name).toBe("SongUrlUnavailable");
+    expect(err.failure.code).toBe("quality_denied");
+    expect(err.failure.platform).toBe("qq");
+    expect(err.failure.message).toContain("exhigh");
+  });
+
+  it("throws upstream_request_failed with the HTTP status when transport fails", async () => {
+    mockGet.mockRejectedValue(
+      Object.assign(new Error("Request failed"), {
+        isAxiosError: true,
+        response: { status: 502, data: {} },
+      }),
+    );
+    const p = new QQMusicProvider("http://x");
+    const err = await p.getSongUrl("mid1").catch((e) => e);
+    expect(err.name).toBe("SongUrlUnavailable");
+    expect(err.failure.code).toBe("upstream_request_failed");
+    expect(err.failure.message).toContain("502");
+    // The axeios config is never forwarded (it carries the account cookie).
+    expect(JSON.stringify(err.failure)).not.toContain("cookie");
+  });
+
+  it("names a connection refusal as a service problem, not a rights problem", async () => {
+    mockGet.mockRejectedValue(Object.assign(new Error("refused"), { code: "ECONNREFUSED" }));
+    const p = new QQMusicProvider("http://x");
+    const err = await p.getSongUrl("mid1").catch((e) => e);
+    expect(err.failure.code).toBe("upstream_request_failed");
+    expect(err.failure.message).toContain("无法连接");
+  });
+
+  it("still succeeds via the songid fallback when the first shape throws", async () => {
+    mockGet
+      .mockRejectedValueOnce(new Error("bad songmid"))
+      .mockResolvedValueOnce({ data: { data: { playUrl: { mid1: { url: "http://cdn/x.mp3" } } } } });
+    const p = new QQMusicProvider("http://x");
+    expect((await p.getSongUrl("mid1"))?.url).toBe("http://cdn/x.mp3");
+  });
+
+  it("does not throw for a successful resolve", async () => {
+    mockGet.mockResolvedValue({ data: { data: { playUrl: { mid1: { url: "http://cdn/y.mp3" } } } } });
+    const p = new QQMusicProvider("http://x");
+    await expect(p.getSongUrl("mid1")).resolves.toMatchObject({ url: "http://cdn/y.mp3" });
+  });
+});
