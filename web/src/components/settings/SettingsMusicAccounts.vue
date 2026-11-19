@@ -7,15 +7,25 @@
       <div class="min-w-0 flex-1">
         <div class="text-sm font-semibold">音乐账号池</div>
         <div class="text-xs mt-0.5 text-text-tertiary">
-          集中管理可分配给成员的平台账号（{{ accounts.length }} 个）
+          <template v-if="disabled">
+            功能未启用 — 先在 设置 → 行为设置 打开「音乐账号池」
+          </template>
+          <template v-else>集中管理可分配给成员的平台账号（{{ accounts.length }} 个）</template>
         </div>
       </div>
-      <BaseButton variant="secondary" size="sm" @click="openCreate">
+      <BaseButton v-if="!disabled" variant="secondary" size="sm" @click="openCreate">
         <Icon icon="mdi:plus" />
         添加账号
       </BaseButton>
     </div>
 
+    <!-- The server 403s every route while the feature is off; say so instead of
+         rendering an empty pool with a toast that reads like a network error. -->
+    <div v-if="disabled" class="mt-4 rounded-[var(--radius-md)] bg-surface-elevated px-4 py-3 text-xs text-text-secondary">
+      账号池的后端接口在功能关闭时不可用。打开开关后本区块会自动刷新。
+    </div>
+
+    <template v-else>
     <p class="text-xs text-text-tertiary mt-3 leading-relaxed">
       成员可在自己的账号、此处分配的账号、或共享账号之间选择；<strong class="text-text-secondary">房间播放永远使用共享账号</strong>。
       容量 0=不限、1=独占、N=最多分配 N 人。凭据仅存服务器，界面只显示掩码。
@@ -27,7 +37,7 @@
         <label class="flex flex-col gap-1 text-xs">
           平台
           <select v-model="form.platform" :disabled="form.id !== null" class="rounded-[var(--radius-sm)] bg-surface-card px-3 py-2 text-sm text-foreground">
-            <option v-for="p in platforms" :key="p" :value="p">{{ p }}</option>
+            <option v-for="p in platforms" :key="p" :value="p">{{ platformLabel(p) }}</option>
           </select>
         </label>
         <label class="flex flex-col gap-1 text-xs">
@@ -70,7 +80,7 @@
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-sm font-medium">{{ a.label || '(未命名)' }}</span>
-            <span class="text-[10px] px-[5px] py-px rounded-[3px] bg-primary/15 text-primary">{{ a.platform }}</span>
+            <span class="text-[10px] px-[5px] py-px rounded-[3px] bg-primary/15 text-primary">{{ platformLabel(a.platform) }}</span>
             <span v-if="!a.enabled" class="text-[10px] px-[5px] py-px rounded-[3px] bg-danger/15 text-danger">已停用</span>
           </div>
           <div class="text-xs text-text-tertiary mt-0.5">
@@ -98,7 +108,7 @@
           :key="a.id"
           class="flex flex-wrap items-center gap-2 rounded-[var(--radius-md)] bg-surface-elevated px-4 py-3"
         >
-          <span class="text-xs shrink-0">{{ a.label || `#${a.id}` }}（{{ a.platform }}）</span>
+          <span class="text-xs shrink-0">{{ a.label || `#${a.id}` }}（{{ platformLabel(a.platform) }}）</span>
           <input
             v-model="a.assignTo"
             class="flex-1 min-w-[140px] rounded-[var(--radius-sm)] bg-surface-card px-3 py-1.5 text-xs text-foreground"
@@ -111,11 +121,12 @@
       <div v-if="grants.length > 0" class="mt-3 flex flex-col gap-1">
         <div v-for="g in grants" :key="`${g.userId}-${g.platform}`" class="flex items-center gap-2 text-xs text-text-tertiary">
           <Icon icon="mdi:account-arrow-right" />
-          <span>{{ g.userId }} → #{{ g.accountId }}（{{ g.platform }}）</span>
+          <span>{{ g.userId }} → #{{ g.accountId }}（{{ platformLabel(g.platform) }}）</span>
           <button class="text-danger hover:underline" @click="revoke(g)">撤销</button>
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
@@ -124,6 +135,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { http } from '../../utils/http';
 import { useToast } from '../../composables/useToast';
+import { getProviderLabel } from '../../utils/platform';
 import BaseButton from '../common/BaseButton.vue';
 
 interface AccountRow {
@@ -148,6 +160,12 @@ const accounts = ref<AccountRow[]>([]);
 const grants = ref<GrantRow[]>([]);
 const platforms = ref<string[]>(['netease', 'qq', 'kugou', 'bilibili']);
 const assigning = ref<number | null>(null);
+/** The server 403s this whole router while perUserMusicAccounts is off. */
+const disabled = ref(false);
+
+function platformLabel(platform: string): string {
+  return getProviderLabel(platform);
+}
 
 const form = reactive({
   open: false,
@@ -167,7 +185,16 @@ async function refresh() {
     const res = await http.get('/api/music-accounts');
     accounts.value = res.data?.accounts ?? [];
     grants.value = res.data?.grants ?? [];
-  } catch {
+    disabled.value = false;
+  } catch (err: any) {
+    // 403 + this code means the feature flag is off, which is a normal state —
+    // not a load failure, and definitely not an empty pool.
+    if (err?.response?.status === 403 && err.response?.data?.code === 'per_user_accounts_disabled') {
+      disabled.value = true;
+      accounts.value = [];
+      grants.value = [];
+      return;
+    }
     toast.error('加载账号池失败');
   }
 }
