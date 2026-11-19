@@ -156,6 +156,11 @@ export interface BotDatabase {
   db: Database.Database;
   addPlayHistory(entry: PlayHistoryEntry): void;
   getPlayHistory(botId: string, limit: number): PlayHistoryRecord[];
+  /** Delete specific rows by their play_history primary key, scoped to one bot.
+   *  Returns how many rows were actually removed. */
+  deletePlayHistory(botId: string, ids: number[]): number;
+  /** Delete every history row for one bot. Returns the removed row count. */
+  clearPlayHistory(botId: string): number;
   saveBotInstance(instance: BotInstance): void;
   getBotInstances(): BotInstance[];
   deleteBotInstance(id: string): boolean;
@@ -547,6 +552,16 @@ export function createDatabase(dbPath: string): BotDatabase {
     SELECT * FROM play_history WHERE botId = ? ORDER BY id DESC LIMIT ?
   `);
 
+  // Every delete carries the botId predicate: one bot must never be able to
+  // remove another bot's rows, even with a guessed primary key.
+  const deleteHistoryRows = db.prepare(`
+    DELETE FROM play_history WHERE botId = ? AND id = ?
+  `);
+
+  const clearHistoryRows = db.prepare(`
+    DELETE FROM play_history WHERE botId = ?
+  `);
+
   const upsertInstance = db.prepare(`
     INSERT INTO bot_instances (id, name, serverAddress, serverPort, nickname, defaultChannel, channelId, channelPassword, autoStart, serverProtocol, ts6ApiKey, serverPassword, identity)
     VALUES (@id, @name, @serverAddress, @serverPort, @nickname, @defaultChannel, @channelId, @channelPassword, @autoStart, @serverProtocol, @ts6ApiKey, @serverPassword, @identity)
@@ -722,6 +737,22 @@ export function createDatabase(dbPath: string): BotDatabase {
 
     getPlayHistory(botId, limit) {
       return selectHistory.all(botId, limit) as PlayHistoryRecord[];
+    },
+
+    deletePlayHistory(botId, ids) {
+      if (ids.length === 0) return 0;
+      let removed = 0;
+      const run = db.transaction((rowIds: number[]) => {
+        for (const id of rowIds) {
+          removed += deleteHistoryRows.run(botId, id).changes;
+        }
+      });
+      run(ids);
+      return removed;
+    },
+
+    clearPlayHistory(botId) {
+      return clearHistoryRows.run(botId).changes;
     },
 
     saveBotInstance(instance) {

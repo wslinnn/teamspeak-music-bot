@@ -16,6 +16,25 @@ import { supportsPersonalLogin } from "./personal-music.js";
 const MAX_ARTIST_QUEUE = 500;
 const ARTIST_QUEUE_PAGE = 100;
 
+/** Upper bound on one batch history delete — mirrors the read limit. */
+const MAX_HISTORY_DELETE = 500;
+
+/**
+ * Parse a play_history primary key.
+ *
+ * Strict on purpose: `parseInt("12x")` used to pass as 12, which would delete a
+ * row the caller never named. Only a plain decimal that stays a safe integer is
+ * accepted.
+ */
+function parseHistoryRowId(raw: unknown): number | null {
+  if (typeof raw === "number") {
+    return Number.isSafeInteger(raw) && raw > 0 ? raw : null;
+  }
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 /** Walks every page of an artist's catalogue (best-first, de-duplicated). */
 export async function collectArtistSongs(
   fetchPage: (artistId: string, offset?: number, limit?: number) => Promise<ArtistSongPage>,
@@ -917,6 +936,9 @@ export function createPlayerRouter(
     const limit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 50;
     const records = database.getPlayHistory(req.params.botId as string, limit);
     const history = records.map((r) => ({
+      // `id` stays the platform song id (existing clients depend on it);
+      // `rowId` is the play_history primary key, needed to delete one row.
+      rowId: r.id,
       id: r.songId,
       name: r.songName,
       artist: r.artist,
@@ -930,6 +952,80 @@ export function createPlayerRouter(
     }));
     res.json({ history });
   });
+
+  // Delete one history row. `requireNotGuest` matches GET: a caller who cannot
+  // see the history must not be able to delete from it either.
+  router.delete(
+    "/:botId/history/:rowId",
+    requireNotGuest,
+    authorize({ capability: "player.queue", guestFlag: "removeClear" }),
+    (req, res) => {
+      if (!database) {
+        res.status(404).json({ error: "history unavailable" });
+        return;
+      }
+      const rowId = parseHistoryRowId(req.params.rowId);
+      if (rowId === null) {
+        res.status(400).json({ error: "invalid rowId" });
+        return;
+      }
+      const removed = database.deletePlayHistory(req.params.botId as string, [rowId]);
+      if (removed === 0) {
+        res.status(404).json({ error: "history row not found" });
+        return;
+      }
+      res.json({ ok: true, removed });
+    }
+  );
+
+  // Delete a batch of rows ({ ids: [...] }) or the whole history ({ all: true }).
+  router.delete(
+    "/:botId/history",
+    requireNotGuest,
+    authorize({ capability: "player.queue", guestFlag: "removeClear" }),
+    (req, res) => {
+      if (!database) {
+        res.status(404).json({ error: "history unavailable" });
+        return;
+      }
+      const body = (req.body ?? {}) as { ids?: unknown; all?: unknown };
+      const hasIds = body.ids !== undefined;
+      const wantsAll = body.all === true;
+
+      // Both at once is ambiguous: reject rather than guess which wins.
+      if (hasIds && wantsAll) {
+        res.status(400).json({ error: "specify either ids or all, not both" });
+        return;
+      }
+
+      if (wantsAll) {
+        const removed = database.clearPlayHistory(req.params.botId as string);
+        res.json({ ok: true, removed });
+        return;
+      }
+
+      if (!Array.isArray(body.ids)) {
+        res.status(400).json({ error: "ids must be an array" });
+        return;
+      }
+      // Reject the whole batch on any bad entry instead of silently dropping it:
+      // a partial delete the caller did not ask for is worse than a 400.
+      if (body.ids.length === 0 || body.ids.length > MAX_HISTORY_DELETE) {
+        res.status(400).json({ error: `ids must contain 1..${MAX_HISTORY_DELETE} entries` });
+        return;
+      }
+      const ids = body.ids.map(parseHistoryRowId);
+      if (ids.some((id) => id === null)) {
+        res.status(400).json({ error: "ids must be positive integers" });
+        return;
+      }
+      const removed = database.deletePlayHistory(
+        req.params.botId as string,
+        ids as number[],
+      );
+      res.json({ ok: true, removed });
+    }
+  );
 
   return router;
 }
