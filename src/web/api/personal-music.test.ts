@@ -123,4 +123,72 @@ describe("web FM uses the caller's linked NetEase account (#164)", () => {
     const { bot, qq } = await startFm({ linked: true, platform: "qq" });
     expect(bot.startFm.mock.calls[0][0]).toBe(qq);
   });
+
+  it("still uses the own account when the shared-login preference is on", async () => {
+    // FM is "my taste" — the account-pool preference must not silently turn it
+    // into the bot's taste. personalCookieFor ignores preferShared on purpose.
+    const db = createDatabase(":memory:");
+    db.db
+      .prepare("INSERT INTO users (id, username, passwordHash, createdAt, updatedAt, role) VALUES (?,?,?,?,?,?)")
+      .run("u1", "alice", "x", 0, 0, "member");
+    db.setUserMusicCookie("u1", "netease", "MUSIC_U=alice");
+    db.setMusicPref("u1", "netease", true); // chose the shared login for BROWSE
+
+    const personal = { platform: "netease", personal: true };
+    const shared: any = { platform: "netease", pollQrLogin: vi.fn(), withCookie: vi.fn(() => personal) };
+    const bot = {
+      id: "b1",
+      getProviderFor: () => shared,
+      startFm: vi.fn(async (_p: unknown) => "Personal FM started"),
+      runExclusive: (fn: () => unknown) => fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      (req as any).user = {
+        id: "u1", username: "alice", role: "member",
+        capabilities: new Set(["player.control"]), bots: "all", guest: { playMode: true },
+      };
+      next();
+    });
+    app.use("/api/player", createPlayerRouter({ getBot: () => bot } as any, pino({ level: "silent" }), db));
+
+    await request(app).post("/api/player/b1/fm").send({ platform: "netease" });
+
+    expect(shared.withCookie).toHaveBeenCalledWith("MUSIC_U=alice");
+    db.close();
+  });
+
+  it("never uses an admin-assigned pool account for FM", async () => {
+    const db = createDatabase(":memory:");
+    db.db
+      .prepare("INSERT INTO users (id, username, passwordHash, createdAt, updatedAt, role) VALUES (?,?,?,?,?,?)")
+      .run("u1", "alice", "x", 0, 0, "member");
+    const acct = db.createMusicAccount({ platform: "netease", cookie: "MUSIC_U=room" });
+    db.assignMusicAccount("u1", "netease", acct.id, "admin");
+
+    const shared: any = { platform: "netease", pollQrLogin: vi.fn(), withCookie: vi.fn() };
+    const bot = {
+      id: "b1",
+      getProviderFor: () => shared,
+      startFm: vi.fn(async (_p: unknown) => "Personal FM started"),
+      runExclusive: (fn: () => unknown) => fn(),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      (req as any).user = {
+        id: "u1", username: "alice", role: "member",
+        capabilities: new Set(["player.control"]), bots: "all", guest: { playMode: true },
+      };
+      next();
+    });
+    app.use("/api/player", createPlayerRouter({ getBot: () => bot } as any, pino({ level: "silent" }), db));
+
+    await request(app).post("/api/player/b1/fm").send({ platform: "netease" });
+
+    // A room account is not the caller's taste.
+    expect(shared.withCookie).not.toHaveBeenCalled();
+    db.close();
+  });
 });

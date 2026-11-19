@@ -10,6 +10,7 @@ import { requireBotAccess } from "../middleware/requirePermission.js";
 import { requireNotGuest } from "../middleware/requireNotGuest.js";
 import { authorize } from "../middleware/authorize.js";
 import { supportsPersonalLogin } from "./personal-music.js";
+import { personalCookieFor } from "./provider-scope.js";
 
 /** Hard cap on how many tracks one "播放全部" request may queue — a safety net
  *  against a pathological catalogue (and against an upstream paging bug). */
@@ -178,13 +179,14 @@ export function createPlayerRouter(
           ? platform
           : "netease"
       );
-      // A signed-in user who linked their own NetEase account gets FM from
-      // THEIR taste, not the bot's shared login (#164). Songs still resolve
-      // through the shared provider when played.
+      // Personal FM is by definition "my taste": it only ever uses the
+      // caller's OWN linked account. Admin-assigned pool accounts are for room
+      // playback, and the shared-login preference must not silently turn FM
+      // into the bot's taste — `personalCookieFor` encodes exactly that.
       const user = (req as any).user;
-      if (provider.platform === "netease" && user && user.role !== "guest" && database) {
-        const cookie = database.getUserMusicCookie(user.id, "netease");
-        if (cookie && supportsPersonalLogin(provider)) provider = provider.withCookie(cookie);
+      if (provider.platform === "netease" && database && supportsPersonalLogin(provider)) {
+        const cookie = personalCookieFor(database, user, "netease");
+        if (cookie) provider = provider.withCookie(cookie);
       }
       const message = await bot.runExclusive(() =>
         bot.startFm(provider, requesterName(req))
