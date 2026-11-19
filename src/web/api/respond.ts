@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import type { Logger } from "../../logger.js";
 import { UserFacingError } from "../../errors.js";
+import { musicRequestError } from "../../music/request-error.js";
 
 /**
  * Uniform catch-all answerer for route handlers (audit SEC-07).
@@ -18,6 +19,9 @@ export function respondError(logger: Logger, req: Request, res: Response, err: u
     res.status(500).json({ error: err.message });
     return;
   }
-  logger.error({ err, route: `${req.method} ${req.originalUrl}` }, "request failed");
+  // An Axios error's own message can carry the request URL, which carries the
+  // account cookie (music providers pass `?cookie=`). Redact before logging —
+  // this is the single choke point every route funnels through.
+  logger.error({ err: musicRequestError(err), route: `${req.method} ${req.originalUrl}` }, "request failed");
   res.status(500).json({ error: "服务器内部错误，详情请查看服务端日志" });
 }

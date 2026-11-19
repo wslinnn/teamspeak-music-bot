@@ -2,6 +2,31 @@ import { describe, it, expect, vi } from "vitest";
 import { mapKugouSong, mapKugouSongs, mapKugouAlbums, mapKugouPlaylist, mapKugouPlaylists, krcToLrc, KugouProvider } from "./kugou.js";
 import { parseLyrics } from "./netease.js";
 
+describe("KugouProvider.getSongUrl failure diagnostics", () => {
+  const id = "b3a52a7a958bf0aed0efbba2e9a818b7|32100650|966846";
+  const provider = () => {
+    const p = new KugouProvider();
+    p.setCookie("dfid=test-device");
+    return { bot: p, http: p as unknown as { request: (...args: unknown[]) => Promise<unknown> } };
+  };
+
+  it("distinguishes a provider verification response from a missing stream", async () => {
+    const { bot, http } = provider();
+    vi.spyOn(http, "request").mockResolvedValue({ status: 0, errcode: 20028 });
+    await expect(bot.getSongUrl(id)).rejects.toMatchObject({
+      failure: { code: "provider_verification_required", upstream: { code: 20028 } },
+    });
+  });
+
+  it("carries only safe status fields on a failed HTTP request", async () => {
+    const { bot, http } = provider();
+    vi.spyOn(http, "request").mockRejectedValue({ response: { status: 503, data: { hidden: "test-cookie" } } });
+    await expect(bot.getSongUrl(id)).rejects.toMatchObject({
+      failure: { code: "upstream_request_failed", upstream: { httpStatus: 503 } },
+    });
+  });
+});
+
 describe("mapKugouSongs", () => {
   it("maps the mobile-search song shape to a Song with platform 'kugou'", () => {
     // Shape captured live from mobilecdn.kugou.com/api/v3/search/song.
@@ -231,18 +256,17 @@ describe("KugouProvider.getSongUrl — failure classification", () => {
     return p;
   }
 
-  it("throws no_copyright when the id has no hash", async () => {
+  it("returns null when the id has no hash", async () => {
     const p = providerWith(async () => ({}));
-    const err = await p.getSongUrl("").catch((e) => e);
-    expect(err.name).toBe("SongUrlUnavailable");
-    expect(err.failure.code).toBe("no_copyright");
+    // Not a failure of this track — the id simply is not a Kugou id at all.
+    expect(await p.getSongUrl("")).toBeNull();
   });
 
-  it("throws quality_denied when the upstream answers with no url", async () => {
+  it("throws unknown when the upstream answers with no url", async () => {
     const p = providerWith(async () => ({ url: [], backupUrl: [] }));
     const err = await p.getSongUrl("HASH123|32100650|966846", "320").catch((e) => e);
-    expect(err.failure.code).toBe("quality_denied");
-    expect(err.failure.message).toContain("320");
+    expect(err.failure.code).toBe("unknown");
+    expect(err.failure.message).toContain("未返回播放地址");
   });
 
   it("throws upstream_request_failed with the status when the request rejects", async () => {

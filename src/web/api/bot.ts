@@ -130,9 +130,17 @@ export function createBotRouter(
     if (hasIdle) config.idleTimeoutMinutes = idleTimeoutMinutes;
     if (hasAutoPause) config.autoPauseOnEmpty = autoPauseOnEmpty;
     if (hasLocalAudioEnabled) config.localAudioEnabled = localAudioEnabled;
-    // Strict boolean: a truthy string must never flip account isolation on.
-    if (typeof perUserMusicAccounts === "boolean") {
-      config.perUserMusicAccounts = perUserMusicAccounts;
+    // Account isolation is an ADMIN policy, not a bot preference: a member
+    // holding bot.manage must not be able to switch it (it decides whose
+    // library everyone reads). Strict boolean — a truthy string never enables.
+    if (perUserMusicAccounts !== undefined) {
+      if (req.user?.role !== "admin") {
+        res.status(403).json({ error: "只有管理员可以修改音乐账号策略" });
+        return;
+      }
+      if (typeof perUserMusicAccounts === "boolean") {
+        config.perUserMusicAccounts = perUserMusicAccounts;
+      }
     }
 
     // Voice ducking is a partial settings block. Merge only known, strictly

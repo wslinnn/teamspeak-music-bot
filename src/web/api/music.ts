@@ -7,9 +7,11 @@ import { isProviderEnabled, defaultPlatform, saveConfig, type BotConfig } from "
 import { requirePermission } from "../middleware/requirePermission.js";
 import { requireNotGuest } from "../middleware/requireNotGuest.js";
 import { authorize } from "../middleware/authorize.js";
+
+import { musicRequestError } from "../../music/request-error.js";
 import { createRateLimit } from "../middleware/rateLimit.js";
 import type { BotDatabase } from "../../data/database.js";
-import { resolveProviderForRequest } from "./provider-scope.js";
+import { resolveProviderForRequest, scopeForRequest } from "./provider-scope.js";
 
 /**
  * Body cap for a local upload. express.raw buffers the whole body in memory,
@@ -192,16 +194,17 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
       return null;
     }
     if (!database) return { provider: getProvider(target), scope: "" };
-    const resolved = resolveProviderForRequest(
-      {
-        database,
-        perUserMusicAccounts: config?.perUserMusicAccounts === true,
-        shared: getProvider,
-      },
-      req.user,
-      target,
-    );
-    return { provider: resolved.provider, scope: resolved.scope };
+    const shared = getProvider(target);
+    const deps = {
+      database,
+      config: config ? { perUserMusicAccounts: config.perUserMusicAccounts } : undefined,
+    };
+    return {
+      provider: resolveProviderForRequest(req, target, shared, deps),
+      // Route-level caches must key on the account, or one member's search
+      // results are served to another for the cache's lifetime.
+      scope: scopeForRequest(req, target, deps),
+    };
   }
 
   router.post(
@@ -289,7 +292,7 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
       searchCache.set(cacheKey, result);
       res.json(result);
     } catch (err) {
-      logger.error({ err }, "Search failed");
+      logger.error({ err: musicRequestError(err) }, "Search failed");
       respondError(logger, req, res, err);
     }
   });
@@ -359,7 +362,7 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
 
       res.json({ songs, albums, playlists, artists });
     } catch (err) {
-      logger.error({ err }, "Unified search failed");
+      logger.error({ err: musicRequestError(err) }, "Unified search failed");
       respondError(logger, req, res, err);
     }
   });

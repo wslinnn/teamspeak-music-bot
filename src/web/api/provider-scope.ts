@@ -1,194 +1,253 @@
-import type { BotDatabase } from "../../data/database.js";
-import type { MusicProvider, SongUrlResult } from "../../music/provider.js";
+import type { Request } from "express";
+import type { BotDatabase, GrantedMusicAccount } from "../../data/database.js";
+import type { MusicProvider } from "../../music/provider.js";
 import { cacheScopeForCookie } from "../../music/cached-provider.js";
 
 /**
- * Request-scoped provider resolution for per-user music accounts.
+ * Resolves which music provider a WEB request should read from (#164 follow-up).
  *
- * ## Two separate scopes
+ * The bot keeps one shared login per platform (data/cookies/<platform>.json).
+ * Before this module, a web user could only replace the SHARED login's taste for
+ * their own private FM — every search, playlist and playback URL still came from
+ * the admin's account, so members saw the admin's library.
  *
- * 1. **Metadata scope** (browser side): search / playlists / recommendations
- *    read through the caller's own linked account, an admin-assigned account,
- *    or the shared login — in that order of preference (see resolveMusicCookie).
+ * With `perUserMusicAccounts` enabled, the resolution order is:
  *
- * 2. **Room playback scope**: ALWAYS the shared login. Playback happens in the
- *    TeamSpeak channel, so entitlements must be the bot's, not the requesting
- *    member's — otherwise a member without VIP would silently fail to play
- *    tracks the room's account can play, and the play history would be
- *    attributed to whoever happened to click. This is also what the player's
- *    QQ batch playability check relies on.
+ *   1. the caller's OWN linked account  (`user_music_cookies`, scanned by them)
+ *   2. an account an admin ASSIGNED    (`music_account_grants`, admin-owned)
+ *   3. the bot's shared login           (always the fallback)
+ *
+ * Own-beats-assigned is deliberate: someone who linked their own account keeps
+ * it even if an admin later hands them a pool account, and unlinking on the
+ * member side can never revoke an admin's assignment (different table).
+ *
+ * Everything falls back to the shared instance when:
+ *   - the admin left the feature off (the default — zero behaviour change),
+ *   - the caller is a guest (guests share one anonymous identity and cannot link
+ *     an account; /api/me/music already rejects them),
+ *   - the caller has no linked and no assigned account for that platform,
+ *   - the assigned account was disabled by the admin (instant rollback), or
+ *   - the platform has no per-account login implemented (`withCookie` absent).
+ *
+ * The cookie never reaches the browser: it is read from the database here and
+ * only ever lives inside the provider view.
  */
-
-/** Only these platforms have per-account logins today. */
-export const SCOPED_PLATFORMS = ["netease", "qq", "kugou", "bilibili"] as const;
-export type ScopedPlatform = (typeof SCOPED_PLATFORMS)[number];
-
-export interface ProviderScopeDeps {
-  database: BotDatabase;
-  /** BotConfig.perUserMusicAccounts — off means every caller uses the shared login. */
-  perUserMusicAccounts: boolean;
-  /** The bot's shared, cache-wrapped provider per platform. */
-  shared: (platform: string) => MusicProvider | undefined;
+export interface MusicScopeDeps {
+  /** Omitted by unit-test routers → personal accounts are simply unavailable. */
+  database?: BotDatabase;
+  /** Omitted by unit-test routers → treated as "feature off". */
+  config?: { perUserMusicAccounts?: boolean };
 }
 
-export interface ScopedUser {
-  id: string;
-  role: string;
+interface ScopedUser {
+  id?: string;
+  role?: string;
+}
+
+type ScopeRequest = Pick<Request, "user">;
+
+/** Whether per-user music accounts are switched on for this router instance. */
+export function perUserMusicEnabled(deps: MusicScopeDeps): boolean {
+  return deps.config?.perUserMusicAccounts === true;
 }
 
 /**
- * Guests never get an account scope.
- *
- * Every guest maps onto the same anonymous identity, so a cookie linked by one
- * guest would be readable by every other guest. Refusing the scope up front is
- * the only safe answer — `perUserMusicAccounts` is a member-level feature.
+ * The caller, when they may hold a per-user account at all. Guests never
+ * qualify: they all map to one anonymous identity, so a linked or assigned
+ * account would leak across every guest on the instance.
  */
-function scopedUser(user: ScopedUser | undefined | null): ScopedUser | null {
-  if (!user) return null;
-  if (user.role === "guest") return null;
+function scopedUser(req: ScopeRequest | undefined): ScopedUser | null {
+  if (!req) return null;
+  const user = (req as { user?: ScopedUser }).user;
+  if (!user?.id || user.role === "guest") return null;
   return user;
 }
 
 /**
- * Which cookie should drive this request's metadata reads, or null for the
- * shared login.
+ * The caller's own cookie for `platform`, or null when personal accounts do not
+ * apply to this request.
  *
- * Order: explicit preference → own account → admin-assigned account → shared.
- * The explicit preference wins over everything because it is the member saying
- * "my account has no VIP, use the room's".
+ * `alwaysPersonal` keeps the pre-existing #164 behaviour for personal FM: that
+ * feature shipped BEFORE the admin toggle existed, so a linked account must keep
+ * driving someone's private FM even while the toggle is off. Turning the toggle
+ * on only widens the scope to search/playlists/playback URLs.
+ */
+export function personalCookieFor(
+  req: ScopeRequest | undefined,
+  platform: string,
+  deps: MusicScopeDeps,
+  alwaysPersonal = false,
+): string | null {
+  if (!alwaysPersonal && !perUserMusicEnabled(deps)) return null;
+  const user = scopedUser(req);
+  if (!user || !deps.database) return null;
+  const cookie = deps.database.getUserMusicCookie(user.id!, platform);
+  return cookie && cookie.trim() ? cookie : null;
+}
+
+/**
+ * The admin-assigned account for this caller, or null.
+ *
+ * Unlike `personalCookieFor` this has NO `alwaysPersonal` escape hatch: an
+ * assignment only exists because the admin turned the feature on, so turning it
+ * off must hand everyone back to the shared login immediately. Doing otherwise
+ * would leave members reading an admin's account after the admin "disabled"
+ * the feature.
+ */
+export function grantedAccountFor(
+  req: ScopeRequest | undefined,
+  platform: string,
+  deps: MusicScopeDeps,
+): GrantedMusicAccount | null {
+  if (!perUserMusicEnabled(deps)) return null;
+  const user = scopedUser(req);
+  if (!user || !deps.database) return null;
+  return deps.database.getGrantedMusicAccount(user.id!, platform);
+}
+
+/**
+ * Whether the member explicitly asked to play through the shared login.
+ *
+ * This exists for one concrete case: their own account has no membership, the
+ * admin's does, and they would rather hear the paid tracks than their own
+ * recommendations. Choosing it overrides BOTH their own link and any admin
+ * assignment — it is an explicit instruction, not a fallback.
+ */
+export function preferSharedFor(
+  req: ScopeRequest | undefined,
+  platform: string,
+  deps: MusicScopeDeps,
+): boolean {
+  if (!perUserMusicEnabled(deps)) return false;
+  const user = scopedUser(req);
+  if (!user || !deps.database) return false;
+  return deps.database.getUserMusicPreference(user.id!, platform)?.preferShared === true;
+}
+
+/** Where the cookie driving this request came from. */
+export interface ResolvedMusicCookie {
+  source: "personal" | "granted";
+  cookie: string;
+  /** Admin-facing name of an assigned account; undefined for self-linked ones. */
+  label?: string;
+  /** Set for `source: "granted"` so callers can show "由管理员分配". */
+  accountId?: string;
+}
+
+/**
+ * The single place that decides "which login does this request use".
+ * Returns null when the shared login applies.
  */
 export function resolveMusicCookie(
-  database: BotDatabase,
-  user: ScopedUser | undefined | null,
+  req: ScopeRequest | undefined,
   platform: string,
-): string | null {
-  const scoped = scopedUser(user);
-  if (!scoped) return null;
-
-  if (database.getMusicPref(scoped.id, platform)) return null;
-
-  const own = database.getUserMusicCookie(scoped.id, platform);
-  if (own) return own;
-
-  const granted = database.selectGrantedAccount(scoped.id, platform);
-  if (granted?.cookie) return granted.cookie;
-
+  deps: MusicScopeDeps,
+  options: { alwaysPersonal?: boolean } = {},
+): ResolvedMusicCookie | null {
+  // An explicit "use the shared account" outranks everything, including the
+  // `alwaysPersonal` escape hatch: someone who chose membership over their own
+  // recommendations wants the shared login for FM too.
+  if (preferSharedFor(req, platform, deps)) return null;
+  const own = personalCookieFor(req, platform, deps, options.alwaysPersonal);
+  if (own) return { source: "personal", cookie: own };
+  const granted = grantedAccountFor(req, platform, deps);
+  if (granted) {
+    return {
+      source: "granted",
+      cookie: granted.cookie,
+      label: granted.label,
+      accountId: granted.accountId,
+    };
+  }
   return null;
 }
 
 /**
- * The caller's own linked cookie only (ignores admin grants and the shared
- * preference). Used by personal FM, which predates the account pool and must
- * keep working exactly as it did even when the pool feature is off.
- */
-export function personalCookieFor(
-  database: BotDatabase,
-  user: ScopedUser | undefined | null,
-  platform: string,
-): string | null {
-  const scoped = scopedUser(user);
-  if (!scoped) return null;
-  return database.getUserMusicCookie(scoped.id, platform) || null;
-}
-
-/**
- * The member's own OR admin-assigned cookie, ignoring the shared preference.
- * Deliberately has no `alwaysPersonal` escape hatch: once the feature is turned
- * off (or the account disabled), an assignment must stop applying immediately.
- */
-export function grantedCookieFor(
-  database: BotDatabase,
-  user: ScopedUser | undefined | null,
-  platform: string,
-): string | null {
-  const scoped = scopedUser(user);
-  if (!scoped) return null;
-  const own = database.getUserMusicCookie(scoped.id, platform);
-  if (own) return own;
-  return database.selectGrantedAccount(scoped.id, platform)?.cookie || null;
-}
-
-/**
- * Wrap a per-account provider so room playback falls back to the shared login
- * when the member's account cannot serve the track.
+ * Give `view` a single-shot fallback to the shared login when its own playback
+ * attempt comes up empty.
  *
- * Only `getSongUrl` is wrapped: metadata keeps using the member's account (that
- * is the whole point of per-user logins), while playback must not fail just
- * because the member's account lacks an entitlement the room's account has.
+ * The case this exists for: the member's own account is real but has no
+ * membership, so `/song/url/v1` answers `url: null` (or 400 for the paid track)
+ * while the admin's account plays it fine. Without this the member has to go
+ * into settings and switch manually before every such track.
+ *
+ * Only `getSongUrl` is wrapped — search, playlists and FM stay on the member's
+ * own account, which is the whole point of per-user logins. The wrapper keeps
+ * the shared instance untouched, so nothing leaks between callers.
  */
-export function withSharedPlaybackFallback<P extends MusicProvider>(
-  view: P,
-  shared: MusicProvider,
-): P {
+export function withSharedPlaybackFallback(view: MusicProvider, shared: MusicProvider): MusicProvider {
+  // Guard for partial implementations (and for test doubles): without both
+  // sides resolvable there is nothing to fall back to.
+  if (typeof view.getSongUrl !== "function" || typeof shared.getSongUrl !== "function") {
+    return view;
+  }
   const ownResolve = view.getSongUrl.bind(view);
-  view.getSongUrl = async (
-    songId: string,
-    quality?: string,
-    options?: Parameters<MusicProvider["getSongUrl"]>[2],
-  ): Promise<SongUrlResult | null> => {
+  view.getSongUrl = async (songId: string, quality?: string) => {
     try {
-      const own = await ownResolve(songId, quality, options);
-      if (own?.url) return own;
+      const result = await ownResolve(songId, quality);
+      if (result?.url) return result;
     } catch {
-      // fall through — the shared account may still be entitled
+      // A failure on the personal side (no membership, -460, expired cookie)
+      // is not a reason for this track to go grey — try the shared login.
     }
-    return shared.getSongUrl(songId, quality, options);
+    return shared.getSongUrl(songId, quality);
   };
   return view;
 }
 
-export interface ResolvedProvider<T extends MusicProvider = MusicProvider> {
-  provider: T;
-  /** Where the credentials came from — drives the UI's status label. */
-  source: "shared" | "own" | "granted";
-  /**
-   * Cache-key scope for these credentials: `""` for the shared login,
-   * otherwise a short non-reversible hash of the cookie.
-   *
-   * Any route-level cache that stores per-provider results MUST include this,
-   * or one account's results are served to another. Invariant, enforced by
-   * test: `source === "shared"` if and only if `scope === ""`.
-   */
-  scope: string;
+/**
+ * Wrap `shared` in a per-account view when the request carries a usable login;
+ * otherwise return `shared` untouched.
+ *
+ * A provider whose `withCookie` throws (malformed/persisted cookie) degrades to
+ * the shared login rather than failing the request — a bad stored cookie must
+ * not break search/playback for that user.
+ */
+export function resolveProviderForRequest(
+  req: ScopeRequest | undefined,
+  platform: string,
+  shared: MusicProvider,
+  deps: MusicScopeDeps,
+  options: { alwaysPersonal?: boolean; fallbackToShared?: boolean } = {},
+): MusicProvider {
+  const resolved = resolveMusicCookie(req, platform, deps, options);
+  if (!resolved) return shared;
+  if (typeof shared.withCookie !== "function") return shared;
+  let view: MusicProvider;
+  try {
+    view = shared.withCookie(resolved.cookie);
+  } catch {
+    return shared;
+  }
+  // On by default: the common complaint is "my account has no membership, the
+  // admin's does". Set false to keep playback strictly on the member's account.
+  if (options.fallbackToShared === false) return view;
+  return withSharedPlaybackFallback(view, shared);
 }
 
 /**
- * Resolve the provider a browser request should read through.
+ * The cache-key scope for the credentials a request resolved to.
  *
- * Falls back to the shared provider for every case the scope cannot answer:
- * feature disabled, guest, no linked account, no grant, or a platform without
- * per-account login support.
+ * `""` means the shared login, so an unscoped caller's cache keys are
+ * byte-identical to the pre-feature behaviour. A per-account view gets a short
+ * non-reversible hash of its cookie.
+ *
+ * Any route-level cache that stores per-provider results MUST prefix its keys
+ * with this, or one account's results are served to another. Invariant:
+ * a request that resolves to the shared provider has scope "".
  */
-export function resolveProviderForRequest(
-  deps: ProviderScopeDeps,
-  user: ScopedUser | undefined | null,
+export function scopeForRequest(
+  req: ScopeRequest | undefined,
   platform: string,
-): ResolvedProvider {
-  const shared = deps.shared(platform);
-  if (!shared) throw new Error(`unsupported platform: ${platform}`);
-  const asShared: ResolvedProvider = { provider: shared, source: "shared", scope: "" };
-
-  if (!deps.perUserMusicAccounts) return asShared;
-  const scoped = scopedUser(user);
-  if (!scoped) return asShared;
-  if (!(SCOPED_PLATFORMS as readonly string[]).includes(platform)) return asShared;
-
-  const own = deps.database.getUserMusicCookie(scoped.id, platform) || null;
-  const prefShared = deps.database.getMusicPref(scoped.id, platform);
-  if (prefShared) return asShared;
-
-  const cookie = own ?? deps.database.selectGrantedAccount(scoped.id, platform)?.cookie ?? null;
-  if (!cookie) return asShared;
-
-  const base = deps.shared(platform);
-  if (typeof base?.withCookie !== "function") return asShared;
-
-  return {
-    provider: withSharedPlaybackFallback(base.withCookie(cookie), shared),
-    source: own ? "own" : "granted",
-    scope: cacheScopeForCookie(cookie),
-  };
+  deps: MusicScopeDeps,
+  options: { alwaysPersonal?: boolean; fallbackToShared?: boolean } = {},
+): string {
+  const resolved = resolveMusicCookie(req, platform, deps, options);
+  return resolved ? cacheScopeForCookie(resolved.cookie) : "";
 }
+
+/** Platforms with per-account login support (drives the account-pool UI). */
+export const SCOPED_PLATFORMS = ["netease", "qq", "kugou", "bilibili"] as const;
 
 /** Mask a cookie for display: never send the value itself to a client. */
 export function maskCookie(cookie: string): string {
@@ -196,4 +255,20 @@ export function maskCookie(cookie: string): string {
   if (!value) return "";
   if (value.length <= 12) return `${value.slice(0, 2)}…${value.slice(-2)} (${value.length} 字符)`;
   return `${value.slice(0, 6)}…${value.slice(-4)} (${value.length} 字符)`;
+}
+
+/**
+ * The member's own OR admin-assigned cookie, ignoring any shared preference.
+ * Deliberately has no `alwaysPersonal` escape hatch: once the feature is off
+ * (or the account disabled), an assignment must stop applying immediately.
+ */
+export function grantedCookieFor(
+  user: { id?: string; role?: string } | null | undefined,
+  platform: string,
+  deps: MusicScopeDeps,
+): string | null {
+  if (!user?.id || user.role === "guest") return null;
+  const own = deps.database?.getUserMusicCookie(user.id, platform);
+  if (own) return own;
+  return deps.database?.selectGrantedAccount(user.id, platform)?.cookie ?? null;
 }

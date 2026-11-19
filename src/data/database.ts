@@ -110,6 +110,15 @@ export interface MusicAccountGrant {
   grantedAt: string;
 }
 
+/** An admin-assigned account as seen by the provider-scope resolver: the
+ *  credential plus the label the member is allowed to see. Disabled accounts
+ *  never reach this shape — the query filters them out. */
+export interface GrantedMusicAccount {
+  accountId: string;
+  cookie: string;
+  label: string;
+}
+
 export type MusicAccountCapacityReason = "account_exclusive" | "account_full" | "capacity_below_existing_grants";
 
 /** Thrown by the DB layer when a capacity rule would be broken. The route
@@ -254,6 +263,11 @@ export interface BotDatabase {
   listMusicAccountGrants(): MusicAccountGrant[];
   getMusicPref(userId: string, platform: string): boolean;
   setMusicPref(userId: string, platform: string, preferShared: boolean): void;
+  // Aliases matching the shape the shared provider-scope module expects.
+  /** The enabled account assigned to this member, with its admin-facing label. */
+  getGrantedMusicAccount(userId: string, platform: string): GrantedMusicAccount | null;
+  /** The member's explicit "use the shared login" choice, or null when unset. */
+  getUserMusicPreference(userId: string, platform: string): { preferShared: boolean } | null;
   // Saved queues (Feature 1) — upsert by (ownerId, name), capped.
   saveQueue(ownerId: string, name: string, songs: StoredSong[], createdBy?: string): SavedQueue;
   listSavedQueues(ownerId: string, includeShared: boolean): SavedQueueMeta[];
@@ -1197,6 +1211,25 @@ export function createDatabase(dbPath: string): BotDatabase {
 
     setMusicPref(userId, platform, preferShared) {
       upsertPref.run(userId, platform, preferShared ? 1 : 0);
+    },
+
+    getGrantedMusicAccount(userId, platform) {
+      const row = selectGrantedEnabled.get(userId, platform) as any;
+      if (!row) return null;
+      const account = rowToAccount(row);
+      return {
+        accountId: String(account.id),
+        cookie: account.cookie,
+        label: account.label,
+      };
+    },
+
+    getUserMusicPreference(userId, platform) {
+      const row = selectPref.get(userId, platform) as { preferShared: number } | undefined;
+      // null means "never expressed a preference", which is distinct from an
+      // explicit false: the resolver only skips the personal account on true.
+      if (!row) return null;
+      return { preferShared: Number(row.preferShared) === 1 };
     },
 
     saveQueue(ownerId, name, songs, createdBy) {

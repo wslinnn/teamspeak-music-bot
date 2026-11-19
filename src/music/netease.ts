@@ -10,6 +10,7 @@ import type {
   MusicProvider,
   Song,
   SongUrlResult,
+  SongUrlRequestOptions,
   Playlist,
   PlaylistDetail,
   LyricLine,
@@ -137,6 +138,36 @@ export function parseNeteaseTrial(item: any): number | undefined {
   if (!Number.isFinite(end) || end <= start) return undefined;
   const secs = end > 1000 ? (end - start) / 1000 : end - start;
   return Math.round(secs);
+}
+
+/**
+ * The User-Agent a playback request should carry, matched to the account's
+ * client platform.
+ *
+ * NCM API 4.32.0 defaults its cookie profile to PC but sends eapi's UA as
+ * iPhone; the mismatch between "which client the cookie says we are" and
+ * "which client the request looks like" is one of the signals risk control
+ * reacts to. The override is scoped to /song/url/v1 only.
+ */
+function getPlaybackUserAgent(cookie: string): string {
+  let decoded = cookie;
+  try {
+    decoded = decodeURIComponent(cookie);
+  } catch {
+    // A malformed cookie escape must not prevent a playback request.
+  }
+  // The sidecar's cookie parser keeps the last value of a repeated key.
+  const platform = [...decoded.matchAll(/(?:^|;)\s*os\s*=\s*([^;=]*)(?=;|$)/g)].at(-1)?.[1].trim();
+  switch (platform) {
+    case "android":
+      return "NeteaseMusic/9.1.65.240927161425(9001065);Dalvik/2.1.0 (Linux; U; Android 14; 23013RK75C Build/UKQ1.230804.001)";
+    case "iphone":
+      return "NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)";
+    case "linux":
+      return "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/60.0.3112.90 Safari/537.36";
+    default:
+      return "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 NeteaseMusicDesktop/3.0.18.203152";
+  }
 }
 
 // NetEase quality levels: standard(128k) higher(192k) exhigh(320k) lossless(flac) hires(hi-res) jyeffect jymaster
@@ -296,14 +327,32 @@ export class NeteaseProvider implements MusicProvider {
     return { songs, playlists, albums, artists };
   }
 
-  async getSongUrl(songId: string, quality?: string): Promise<SongUrlResult | null> {
+  async getSongUrl(
+    songId: string,
+    quality?: string,
+    options?: SongUrlRequestOptions,
+  ): Promise<SongUrlResult | null> {
     const level = quality ?? this.quality;
     let res;
     try {
       // 默认 eapi 加密的 /song/url/v1 已被网易风控标记（-460「检测到您的网络环境
       // 存在风险」），改用 api 加密可正常取链接；其余接口不受影响，勿全局改。
+      //
+      // `refresh` adds a timestamp so the embedded sidecar (which caches a
+      // successful response for two minutes) re-signs the URL instead of
+      // replaying a possibly-revoked one during stream recovery.
       res = await this.api.get("/song/url/v1", {
-        params: { id: songId, level, crypto: "api", ...this.cookieParams },
+        params: {
+          id: songId,
+          level,
+          crypto: "api",
+          // The sidecar defaults its cookie profile to PC but sends eapi's UA
+          // as iPhone; an inconsistent pair is one of the things risk control
+          // looks at. Scoped to playback only — other endpoints are fine.
+          ua: getPlaybackUserAgent(this.cookie),
+          ...(options?.refresh ? { timestamp: Date.now() } : {}),
+          ...this.cookieParams,
+        },
       });
     } catch (err) {
       // -460 arrives as HTTP 400, and left as-is it looks like "this track is

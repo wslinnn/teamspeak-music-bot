@@ -64,6 +64,10 @@ export function createPlayerRouter(
   neteaseProvider?: MusicProvider,
   qqProvider?: MusicProvider,
   bilibiliProvider?: MusicProvider,
+  /** Per-user music accounts (perUserMusicAccounts). Omitted by unit-test
+   *  routers → the feature reads as off and every request uses the shared
+   *  login, exactly as before the feature existed. */
+  config?: { perUserMusicAccounts?: boolean },
 ): Router {
   const router = Router();
 
@@ -179,13 +183,11 @@ export function createPlayerRouter(
           ? platform
           : "netease"
       );
-      // Personal FM is by definition "my taste": it only ever uses the
-      // caller's OWN linked account. Admin-assigned pool accounts are for room
-      // playback, and the shared-login preference must not silently turn FM
-      // into the bot's taste — `personalCookieFor` encodes exactly that.
-      const user = (req as any).user;
+      // Personal FM is by definition "my taste": it uses the caller's OWN
+      // linked account even while the account pool toggle is off (the feature
+      // predates that toggle). `alwaysPersonal` encodes exactly that.
       if (provider.platform === "netease" && database && supportsPersonalLogin(provider)) {
-        const cookie = personalCookieFor(database, user, "netease");
+        const cookie = personalCookieFor(req, "netease", { database, config }, true);
         if (cookie) provider = provider.withCookie(cookie);
       }
       const message = await bot.runExclusive(() =>
@@ -976,7 +978,7 @@ export function createPlayerRouter(
         res.status(404).json({ error: "history row not found" });
         return;
       }
-      res.json({ ok: true, removed });
+      res.json({ deleted: removed });
     }
   );
 
@@ -1002,7 +1004,7 @@ export function createPlayerRouter(
 
       if (wantsAll) {
         const removed = database.clearPlayHistory(req.params.botId as string);
-        res.json({ ok: true, removed });
+        res.json({ deleted: removed });
         return;
       }
 
@@ -1025,7 +1027,7 @@ export function createPlayerRouter(
         req.params.botId as string,
         ids as number[],
       );
-      res.json({ ok: true, removed });
+      res.json({ deleted: removed });
     }
   );
 

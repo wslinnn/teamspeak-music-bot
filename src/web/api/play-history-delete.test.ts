@@ -69,7 +69,7 @@ describe("play history deletion", () => {
 
     const res = await request(makeApp(db)).delete(`/api/player/b1/history/${rowId}`);
     expect(res.status).toBe(200);
-    expect(res.body.removed).toBe(1);
+    expect(res.body.deleted).toBe(1);
 
     const after = await request(makeApp(db)).get("/api/player/b1/history");
     expect(after.body.history).toHaveLength(1);
@@ -82,14 +82,14 @@ describe("play history deletion", () => {
 
     const res = await request(makeApp(db)).delete("/api/player/b1/history").send({ ids });
     expect(res.status).toBe(200);
-    expect(res.body.removed).toBe(2);
+    expect(res.body.deleted).toBe(2);
   });
 
   it("clears the whole history with { all: true }", async () => {
     seed("b1", ["one", "two", "three"]);
     const res = await request(makeApp(db)).delete("/api/player/b1/history").send({ all: true });
     expect(res.status).toBe(200);
-    expect(res.body.removed).toBe(3);
+    expect(res.body.deleted).toBe(3);
   });
 
   it("cannot delete another bot's rows even with a valid rowId", async () => {

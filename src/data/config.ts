@@ -459,9 +459,13 @@ export function loadConfig(path: string): BotConfig {
     const partialAq = (partial.audioQuality ?? {}) as Partial<AudioQualityConfig>;
     const coerceQuality = (v: unknown, fallback: string): string =>
       typeof v === "string" && v.trim() ? v : fallback;
+    // QQ's two bitrates were saved as bare numbers by an older settings API.
+    // Normalise them to their string form so the provider gate sees a string.
+    const coerceQqQuality = (v: unknown, fallback: string): string =>
+      v === 128 || v === 320 ? String(v) : coerceQuality(v, fallback);
     const audioQuality: AudioQualityConfig = {
       netease: coerceQuality(partialAq.netease, defaults.audioQuality.netease),
-      qq: coerceQuality(partialAq.qq, defaults.audioQuality.qq),
+      qq: coerceQqQuality(partialAq.qq, defaults.audioQuality.qq),
       bilibili: coerceQuality(partialAq.bilibili, defaults.audioQuality.bilibili),
       kugou: coerceQuality(partialAq.kugou, defaults.audioQuality.kugou),
       jellyfin: coerceQuality(partialAq.jellyfin, defaults.audioQuality.jellyfin),

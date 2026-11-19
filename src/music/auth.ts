@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { normalizeCookie } from "./cookie-normalize.js";
+import type { createQqSessionStore } from "./qq-session.js";
 
 /** Platforms with a persisted credential blob. For jellyfin the "cookie" is a
  *  JSON string carrying the access token / userId / deviceId (see jellyfin.ts). */
@@ -21,13 +22,28 @@ function cleanCookie(platform: CookiePlatform, cookie: string): string {
   return storesCookieHeader(platform) ? normalizeCookie(cookie) : cookie;
 }
 
-export function createCookieStore(cookieDir: string): CookieStore {
+/**
+ * When a QQ managed session store is supplied, the qq platform routes through
+ * it instead of the flat `qq.json` file. That store also holds the renewal
+ * material (musickey / refresh keys), which a plain cookie string cannot carry —
+ * writing `qq.json` behind its back would make the next renewal scan overwrite
+ * the user's manual login.
+ */
+export function createCookieStore(
+  cookieDir: string,
+  qqStore?: ReturnType<typeof createQqSessionStore>,
+): CookieStore {
   if (!fs.existsSync(cookieDir)) {
     fs.mkdirSync(cookieDir, { recursive: true });
   }
 
   return {
     save(platform: CookiePlatform, cookie: string): void {
+      if (platform === "qq" && qqStore) {
+        // The session store normalises on its own (see qq-session.ts).
+        qqStore.save({ cookie });
+        return;
+      }
       const filePath = path.join(cookieDir, `${platform}.json`);
       fs.writeFileSync(
         filePath,
@@ -37,6 +53,7 @@ export function createCookieStore(cookieDir: string): CookieStore {
     },
 
     load(platform: CookiePlatform): string {
+      if (platform === "qq" && qqStore) return qqStore.load()?.cookie ?? "";
       const filePath = path.join(cookieDir, `${platform}.json`);
       if (!fs.existsSync(filePath)) return "";
       try {
