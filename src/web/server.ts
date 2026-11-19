@@ -22,6 +22,7 @@ import { createAuditRouter } from "./api/audit.js";
 import { createFavoritesRouter } from "./api/favorites.js";
 import { createSongFavoritesRouter } from "./api/song-favorites.js";
 import { createPersonalMusicRouter } from "./api/personal-music.js";
+import { createMusicAccountsRouter } from "./api/music-accounts.js";
 import { createSavedQueuesRouter } from "./api/saved-queues.js";
 import { createSpotifyRouter } from "./api/spotify.js";
 import { createApiKeysRouter } from "./api/api-keys.js";
@@ -278,6 +279,13 @@ export function createWebServer(options: WebServerOptions): WebServer {
     "/api/me/music",
     requireNotGuest,
     createPersonalMusicRouter(options.database, options.neteaseProvider, logger),
+  );
+  // Admin-owned music account pool. Gated on requireAdmin inside the router —
+  // deliberately NOT on a bot capability, so a member can never see which
+  // account is assigned to whom.
+  app.use(
+    "/api/music-accounts",
+    createMusicAccountsRouter(options.database, logger),
   );
   // Saved queues (Feature 1, #119). Members + admins only (requireNotGuest);
   // the router itself 403s every route unless savedQueuesEnabled is on.
