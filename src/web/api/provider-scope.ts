@@ -1,5 +1,6 @@
 import type { BotDatabase } from "../../data/database.js";
 import type { MusicProvider, SongUrlResult } from "../../music/provider.js";
+import { cacheScopeForCookie } from "../../music/cached-provider.js";
 
 /**
  * Request-scoped provider resolution for per-user music accounts.
@@ -140,6 +141,15 @@ export interface ResolvedProvider<T extends MusicProvider = MusicProvider> {
   provider: T;
   /** Where the credentials came from — drives the UI's status label. */
   source: "shared" | "own" | "granted";
+  /**
+   * Cache-key scope for these credentials: `""` for the shared login,
+   * otherwise a short non-reversible hash of the cookie.
+   *
+   * Any route-level cache that stores per-provider results MUST include this,
+   * or one account's results are served to another. Invariant, enforced by
+   * test: `source === "shared"` if and only if `scope === ""`.
+   */
+  scope: string;
 }
 
 /**
@@ -156,7 +166,7 @@ export function resolveProviderForRequest(
 ): ResolvedProvider {
   const shared = deps.shared(platform);
   if (!shared) throw new Error(`unsupported platform: ${platform}`);
-  const asShared: ResolvedProvider = { provider: shared, source: "shared" };
+  const asShared: ResolvedProvider = { provider: shared, source: "shared", scope: "" };
 
   if (!deps.perUserMusicAccounts) return asShared;
   const scoped = scopedUser(user);
@@ -176,6 +186,7 @@ export function resolveProviderForRequest(
   return {
     provider: withSharedPlaybackFallback(base.withCookie(cookie), shared),
     source: own ? "own" : "granted",
+    scope: cacheScopeForCookie(cookie),
   };
 }
 

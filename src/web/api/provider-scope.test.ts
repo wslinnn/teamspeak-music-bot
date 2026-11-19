@@ -247,6 +247,74 @@ describe("resolveProviderForRequest", () => {
   });
 });
 
+describe("resolveProviderForRequest — cache scope", () => {
+  const deps = (perUser: boolean) => {
+    const base = fakeProvider({ withCookie: vi.fn((c: string) => fakeProvider({ getCookie: () => c })) });
+    return { database: db, perUserMusicAccounts: perUser, shared: () => base, __base: base };
+  };
+
+  it("gives the shared login an empty scope", () => {
+    const d = deps(true);
+    const r = resolveProviderForRequest(d, { id: "u1", role: "member" }, "netease");
+    expect(r.source).toBe("shared");
+    expect(r.scope).toBe("");
+  });
+
+  it("gives a per-account view a non-empty, non-credential scope", () => {
+    db.setUserMusicCookie("u1", "netease", "MUSIC_U=SECRET-COOKIE");
+    const d = deps(true);
+    const r = resolveProviderForRequest(d, { id: "u1", role: "member" }, "netease");
+
+    expect(r.source).toBe("own");
+    expect(r.scope).not.toBe("");
+    expect(r.scope).not.toContain("SECRET-COOKIE");
+    expect(r.scope).toHaveLength(16);
+  });
+
+  it("keeps source and scope in lockstep (the invariant routes rely on)", () => {
+    db.setUserMusicCookie("u1", "netease", "OWN-A");
+    const d = deps(true);
+
+    const sharedCase = resolveProviderForRequest(d, { id: "guest1", role: "guest" }, "netease");
+    expect(sharedCase.source === "shared").toBe(sharedCase.scope === "");
+
+    const ownCase = resolveProviderForRequest(d, { id: "u1", role: "member" }, "netease");
+    expect(ownCase.source === "shared").toBe(ownCase.scope === "");
+
+    // Flipping the preference must flip both together.
+    db.setMusicPref("u1", "netease", true);
+    const prefCase = resolveProviderForRequest(d, { id: "u1", role: "member" }, "netease");
+    expect(prefCase.source).toBe("shared");
+    expect(prefCase.scope).toBe("");
+  });
+
+  it("gives two different accounts different scopes", () => {
+    addUser("u2");
+    db.setUserMusicCookie("u1", "netease", "COOKIE-A");
+    db.setUserMusicCookie("u2", "netease", "COOKIE-B");
+    const d = deps(true);
+    const a = resolveProviderForRequest(d, { id: "u1", role: "member" }, "netease");
+    const b = resolveProviderForRequest(d, { id: "u2", role: "member" }, "netease");
+    expect(a.scope).not.toBe(b.scope);
+  });
+
+  it("uses the same scope for an own account and the same account granted", () => {
+    // The cache only cares about which credential drives the read.
+    const d = deps(true);
+    db.setUserMusicCookie("u1", "netease", "SAME-COOKIE");
+    const own = resolveProviderForRequest(d, { id: "u1", role: "member" }, "netease");
+
+    const acct = db.createMusicAccount({ platform: "netease", cookie: "SAME-COOKIE" });
+    addUser("u2");
+    db.assignMusicAccount("u2", "netease", acct.id, "admin");
+    const granted = resolveProviderForRequest(d, { id: "u2", role: "member" }, "netease");
+
+    expect(own.source).toBe("own");
+    expect(granted.source).toBe("granted");
+    expect(granted.scope).toBe(own.scope);
+  });
+});
+
 describe("maskCookie", () => {
   it("never returns the full credential", () => {
     const cookie = "MUSIC_U=0123456789abcdefghijklmnop";
