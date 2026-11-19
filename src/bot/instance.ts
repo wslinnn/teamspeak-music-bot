@@ -503,7 +503,7 @@ export class BotInstance extends EventEmitter {
     });
 
     this.tsClient.on("pluginCommand", (cmd: TS3PluginCommand) => {
-      this.openProtocol?.handlePluginCommand(cmd).catch((err) => {
+      this.openProtocol.handlePluginCommand(cmd).catch((err) => {
         this.logger.debug({ err }, "OpenProtocol plugin command handler failed");
       });
     });
@@ -515,7 +515,7 @@ export class BotInstance extends EventEmitter {
       // short-circuited on !this.connected, leaving player stuck as "playing".
       this.lifecycleGeneration++;
       this.connected = false;
-      this.openProtocol?.reset();
+      this.openProtocol.reset();
       this._cancelIdleTimer();
       this.unregisterManagedVoiceClient(MANAGED_VOICE_CLIENT_RELEASE_GRACE_MS);
       this.voiceDucking.reset(true);
@@ -576,7 +576,7 @@ export class BotInstance extends EventEmitter {
       this._startJellyfinReportPoller();
       // Tell any user-side plugin on this channel what we are and which
       // commands we accept (OpenProtocol v1 discovery).
-      this.openProtocol?.scheduleAnnounce();
+      this.openProtocol.scheduleAnnounce();
     });
 
     this.tsClient.on("voiceActivity", (activity: TS3VoiceActivity) => {
@@ -608,7 +608,7 @@ export class BotInstance extends EventEmitter {
       // Someone new to this channel may carry a plugin that has not seen us.
       // scheduleAnnounce() is debounced, so a burst of joins costs one broadcast.
       if (info?.channelID !== undefined && info.channelID === this.tsClient.getChannelId()) {
-        this.openProtocol?.scheduleAnnounce();
+        this.openProtocol.scheduleAnnounce();
       }
       this.applyChannelView();
       void this.refreshOccupancy(); // upstream 围栏查询：与事件视图并行校准占用
@@ -633,7 +633,7 @@ export class BotInstance extends EventEmitter {
           this.logger.warn({ err }, "Channel description move update failed");
         });
         // A new channel's plugins have not seen our announce yet.
-        this.openProtocol?.scheduleAnnounce();
+        this.openProtocol.scheduleAnnounce();
       } else {
         this.voiceDucking.removeSpeaker(event.id);
         // Moving INTO the bot's channel is a listener returning just as much

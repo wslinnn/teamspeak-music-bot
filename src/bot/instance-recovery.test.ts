@@ -64,6 +64,9 @@ function makeBot() {
     restoreQueueFromSnapshot: vi.fn(async () => {}), _startJellyfinReportPoller: vi.fn(),
     logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
     emit: vi.fn(), getProviderFor: () => provider,
+    // The real instance builds this in its constructor; this fixture bypasses
+    // it, and the disconnect/connect handlers call into it unconditionally.
+    openProtocol: { reset: vi.fn(), scheduleAnnounce: vi.fn(), handlePluginCommand: vi.fn(async () => {}) },
     playNext: vi.fn(async () => { const next = queue.next(); if (!next) queue.clear(); return !!next; }),
   }) as any;
   bot.setupPlayerEvents();
