@@ -71,9 +71,23 @@ function parseCapacity(value: unknown): number | null {
 export function createMusicAccountsRouter(
   database: BotDatabase,
   logger: Logger,
+  /** BotConfig.perUserMusicAccounts. When off, every route 403s — matching the
+   *  savedQueues convention, so an admin cannot configure a pool that will
+   *  never take effect and wonder why. */
+  getEnabled: () => boolean = () => true,
 ): Router {
   const router = Router();
   router.use(requireAdmin);
+  router.use((_req, res, next) => {
+    if (!getEnabled()) {
+      res.status(403).json({
+        error: "音乐账号池未启用",
+        code: "per_user_accounts_disabled",
+      });
+      return;
+    }
+    next();
+  });
 
   const grantCounts = (): Map<number, number> => {
     const counts = new Map<number, number>();

@@ -10,14 +10,21 @@ import { createMusicAccountsRouter } from "./music-accounts.js";
 let db: BotDatabase;
 let dir: string;
 
-function makeApp(role: "admin" | "member" = "admin") {
+function makeApp(role: "admin" | "member" = "admin", enabled = true) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as any).user = { id: "admin1", role };
     next();
   });
-  app.use("/api/music-accounts", createMusicAccountsRouter(db, { error() {}, warn() {}, info() {} } as any));
+  app.use(
+    "/api/music-accounts",
+    createMusicAccountsRouter(
+      db,
+      { error() {}, warn() {}, info() {} } as any,
+      () => enabled,
+    ),
+  );
   return app;
 }
 
@@ -38,6 +45,34 @@ beforeEach(() => {
 afterEach(() => {
   db.close();
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe("music-accounts router — feature gate", () => {
+  it("403s every route when perUserMusicAccounts is off", async () => {
+    const app = makeApp("admin", false);
+    expect((await request(app).get("/api/music-accounts")).status).toBe(403);
+    expect(
+      (await request(app).post("/api/music-accounts").send({ platform: "netease", cookie: "c" })).status,
+    ).toBe(403);
+    expect((await request(app).delete("/api/music-accounts/1")).status).toBe(403);
+    expect((await request(app).get("/api/music-accounts/platforms")).status).toBe(403);
+  });
+
+  it("names the reason so the UI can explain it", async () => {
+    const res = await request(makeApp("admin", false)).get("/api/music-accounts");
+    expect(res.body.code).toBe("per_user_accounts_disabled");
+  });
+
+  it("still 401s an unauthenticated caller before the gate", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(
+      "/api/music-accounts",
+      createMusicAccountsRouter(db, {} as any, () => false),
+    );
+    // Auth is checked first: an anonymous caller learns nothing about the flag.
+    expect((await request(app).get("/api/music-accounts")).status).toBe(401);
+  });
 });
 
 describe("music-accounts router — access control", () => {

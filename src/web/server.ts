@@ -308,7 +308,11 @@ export function createWebServer(options: WebServerOptions): WebServer {
   // account is assigned to whom.
   app.use(
     "/api/music-accounts",
-    createMusicAccountsRouter(options.database, logger),
+    createMusicAccountsRouter(
+      options.database,
+      logger,
+      () => options.config?.perUserMusicAccounts === true,
+    ),
   );
   // Saved queues (Feature 1, #119). Members + admins only (requireNotGuest);
   // the router itself 403s every route unless savedQueuesEnabled is on.
