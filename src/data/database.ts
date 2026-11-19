@@ -67,6 +67,60 @@ export interface PlayHistoryRecord extends PlayHistoryEntry {
   playedAt: string;
 }
 
+/** One account in the admin-owned pool. `cookie` is a secret: it is returned
+ *  by the DB layer but must never reach a client (see maskCookie). */
+export interface MusicAccount {
+  id: number;
+  platform: string;
+  label: string;
+  cookie: string;
+  /** null = imported from the shared login (nobody's personal account). */
+  ownerId: string | null;
+  /** 0 = unlimited, 1 = exclusive, >1 = at most N grants. */
+  capacity: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewMusicAccount {
+  platform: string;
+  /** Optional display name; the admin UI always sends one, but an import from
+   *  the shared login has nothing meaningful to put here. */
+  label?: string;
+  cookie: string;
+  ownerId?: string | null;
+  capacity?: number;
+  enabled?: boolean;
+}
+
+export interface MusicAccountPatch {
+  label?: string;
+  cookie?: string;
+  capacity?: number;
+  enabled?: boolean;
+}
+
+/** An admin's assignment of a pool account to a member. */
+export interface MusicAccountGrant {
+  userId: string;
+  platform: string;
+  accountId: number;
+  grantedBy: string;
+  grantedAt: string;
+}
+
+export type MusicAccountCapacityReason = "account_exclusive" | "account_full" | "capacity_below_existing_grants";
+
+/** Thrown by the DB layer when a capacity rule would be broken. The route
+ *  layer maps `reason` onto a 409 so the caller learns which rule fired. */
+export class MusicAccountCapacityError extends Error {
+  constructor(readonly reason: MusicAccountCapacityReason) {
+    super(reason);
+    this.name = "MusicAccountCapacityError";
+  }
+}
+
 export interface BotInstance {
   id: string;
   name: string;
@@ -183,6 +237,23 @@ export interface BotDatabase {
   getUserMusicCookie(userId: string, platform: string): string | null;
   setUserMusicCookie(userId: string, platform: string, cookie: string): void;
   deleteUserMusicCookie(userId: string, platform: string): boolean;
+  // Admin-owned music account pool (per-user music accounts).
+  listMusicAccounts(): MusicAccount[];
+  getMusicAccount(id: number): MusicAccount | null;
+  createMusicAccount(entry: NewMusicAccount): MusicAccount;
+  updateMusicAccount(id: number, patch: MusicAccountPatch): MusicAccount | null;
+  deleteMusicAccount(id: number): boolean;
+  /** Grant a pool account to a member. Throws on a capacity breach — see
+   *  `MusicAccountCapacityError`. */
+  assignMusicAccount(userId: string, platform: string, accountId: number, grantedBy: string): void;
+  revokeMusicAccount(userId: string, platform: string): boolean;
+  /** The account an admin assigned to this user (enabled accounts only). */
+  selectGrantedAccount(userId: string, platform: string): MusicAccount | null;
+  /** The account a member is granted, regardless of enabled — for admin views. */
+  getMusicAccountGrant(userId: string, platform: string): MusicAccountGrant | null;
+  listMusicAccountGrants(): MusicAccountGrant[];
+  getMusicPref(userId: string, platform: string): boolean;
+  setMusicPref(userId: string, platform: string, preferShared: boolean): void;
   // Saved queues (Feature 1) — upsert by (ownerId, name), capped.
   saveQueue(ownerId: string, name: string, songs: StoredSong[], createdBy?: string): SavedQueue;
   listSavedQueues(ownerId: string, includeShared: boolean): SavedQueueMeta[];
@@ -482,6 +553,52 @@ function initTables(db: Database.Database): void {
       PRIMARY KEY (userId, platform),
       FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
     );
+
+    -- Admin-owned pool of music-platform accounts (per-user music accounts).
+    -- ownerId NULL = imported from the shared login. capacity: 0 = unlimited,
+    -- 1 = exclusive, >1 = at most N grants. Secret: never sent to clients.
+    CREATE TABLE IF NOT EXISTS music_accounts (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      platform  TEXT NOT NULL,
+      label     TEXT NOT NULL DEFAULT '',
+      cookie    TEXT NOT NULL,
+      ownerId   TEXT,
+      capacity  INTEGER NOT NULL DEFAULT 0,
+      enabled   INTEGER NOT NULL DEFAULT 1,
+      createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+      updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Which pool account an admin assigned to which member. Deliberately a
+    -- separate table from user_music_cookies: a member linking their own
+    -- account must never overwrite an admin's assignment, and a member
+    -- unlinking their own account must never revoke one.
+    CREATE TABLE IF NOT EXISTS music_account_grants (
+      userId    TEXT NOT NULL,
+      platform  TEXT NOT NULL,
+      accountId INTEGER NOT NULL,
+      grantedBy TEXT NOT NULL DEFAULT '',
+      grantedAt TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (userId, platform),
+      FOREIGN KEY (accountId) REFERENCES music_accounts(id) ON DELETE CASCADE,
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    -- A member's explicit "use the shared login instead of mine" choice. Stores
+    -- only a flag, so flipping back restores the original account untouched.
+    CREATE TABLE IF NOT EXISTS user_music_prefs (
+      userId       TEXT NOT NULL,
+      platform     TEXT NOT NULL,
+      preferShared INTEGER NOT NULL DEFAULT 0,
+      updatedAt    TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (userId, platform),
+      FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_music_accounts_platform
+      ON music_accounts (platform, enabled);
+    CREATE INDEX IF NOT EXISTS idx_music_account_grants_account
+      ON music_account_grants (accountId);
   `);
 }
 
@@ -653,6 +770,82 @@ export function createDatabase(dbPath: string): BotDatabase {
   const deleteUserMusicCookieStmt = db.prepare(
     `DELETE FROM user_music_cookies WHERE userId = ? AND platform = ?`,
   );
+
+  // --- Music account pool ---------------------------------------------------
+  const selectAccounts = db.prepare(
+    `SELECT * FROM music_accounts ORDER BY platform, id`,
+  );
+  const selectAccountById = db.prepare(`SELECT * FROM music_accounts WHERE id = ?`);
+  const insertAccount = db.prepare(`
+    INSERT INTO music_accounts (platform, label, cookie, ownerId, capacity, enabled)
+    VALUES (@platform, @label, @cookie, @ownerId, @capacity, @enabled)
+  `);
+  const updateAccountStmt = db.prepare(`
+    UPDATE music_accounts SET
+      label = COALESCE(@label, label),
+      cookie = COALESCE(@cookie, cookie),
+      capacity = COALESCE(@capacity, capacity),
+      enabled = COALESCE(@enabled, enabled),
+      updatedAt = datetime('now')
+    WHERE id = @id
+      -- Refuse to shrink capacity below the number of grants already handed out.
+      AND (@capacity IS NULL OR @capacity = 0 OR @capacity >=
+        (SELECT COUNT(*) FROM music_account_grants WHERE accountId = @id))
+  `);
+  const deleteAccountStmt = db.prepare(`DELETE FROM music_accounts WHERE id = ?`);
+  const countGrantsForAccount = db.prepare(
+    `SELECT COUNT(*) AS n FROM music_account_grants WHERE accountId = ?`,
+  );
+  const selectAccountForGrant = db.prepare(
+    `SELECT * FROM music_accounts WHERE id = ? AND enabled = 1`,
+  );
+  const upsertGrant = db.prepare(`
+    INSERT INTO music_account_grants (userId, platform, accountId, grantedBy)
+    VALUES (@userId, @platform, @accountId, @grantedBy)
+    ON CONFLICT(userId, platform) DO UPDATE SET
+      accountId = excluded.accountId,
+      grantedBy = excluded.grantedBy,
+      grantedAt = datetime('now')
+  `);
+  const deleteGrantStmt = db.prepare(
+    `DELETE FROM music_account_grants WHERE userId = ? AND platform = ?`,
+  );
+  // enabled = 1 here: disabling an account is an immediate, reversible revoke.
+  const selectGrantedEnabled = db.prepare(`
+    SELECT a.* FROM music_account_grants g
+      JOIN music_accounts a ON a.id = g.accountId
+    WHERE g.userId = ? AND g.platform = ? AND a.enabled = 1
+  `);
+  const selectAnyGrant = db.prepare(`
+    SELECT g.*, a.platform AS accountPlatform FROM music_account_grants g
+      JOIN music_accounts a ON a.id = g.accountId
+    WHERE g.userId = ? AND g.platform = ?
+  `);
+  const selectAllGrants = db.prepare(
+    `SELECT * FROM music_account_grants ORDER BY userId, platform`,
+  );
+  const selectPref = db.prepare(
+    `SELECT preferShared FROM user_music_prefs WHERE userId = ? AND platform = ?`,
+  );
+  const upsertPref = db.prepare(`
+    INSERT INTO user_music_prefs (userId, platform, preferShared)
+    VALUES (?, ?, ?)
+    ON CONFLICT(userId, platform) DO UPDATE SET
+      preferShared = excluded.preferShared,
+      updatedAt = datetime('now')
+  `);
+
+  const rowToAccount = (row: any): MusicAccount => ({
+    id: Number(row.id),
+    platform: String(row.platform),
+    label: String(row.label ?? ""),
+    cookie: String(row.cookie ?? ""),
+    ownerId: row.ownerId ?? null,
+    capacity: Number(row.capacity ?? 0),
+    enabled: Number(row.enabled ?? 1) === 1,
+    createdAt: String(row.createdAt ?? ""),
+    updatedAt: String(row.updatedAt ?? ""),
+  });
 
   // A corrupt/hand-edited songs blob must never throw into a route or the
   // restore path — degrade to an empty list instead.
@@ -893,6 +1086,117 @@ export function createDatabase(dbPath: string): BotDatabase {
 
     deleteUserMusicCookie(userId, platform) {
       return deleteUserMusicCookieStmt.run(userId, platform).changes > 0;
+    },
+
+    listMusicAccounts() {
+      return (selectAccounts.all() as any[]).map(rowToAccount);
+    },
+
+    getMusicAccount(id) {
+      const row = selectAccountById.get(id) as any;
+      return row ? rowToAccount(row) : null;
+    },
+
+    createMusicAccount(entry) {
+      const info = insertAccount.run({
+        platform: entry.platform,
+        label: entry.label ?? "",
+        cookie: entry.cookie,
+        ownerId: entry.ownerId ?? null,
+        capacity: Math.max(0, Math.trunc(entry.capacity ?? 0)),
+        enabled: entry.enabled === false ? 0 : 1,
+      });
+      return rowToAccount(selectAccountById.get(Number(info.lastInsertRowid)) as any);
+    },
+
+    updateMusicAccount(id, patch) {
+      // `changes = 0` means the capacity guard rejected the update; distinguish
+      // "row missing" from "capacity below grants" by reading it back.
+      const result = updateAccountStmt.run({
+        id,
+        label: patch.label ?? null,
+        cookie: patch.cookie ?? null,
+        capacity: patch.capacity === undefined ? null : Math.max(0, Math.trunc(patch.capacity)),
+        enabled: patch.enabled === undefined ? null : patch.enabled ? 1 : 0,
+      });
+      const row = selectAccountById.get(id) as any;
+      if (!row) return null;
+      if (result.changes === 0) {
+        throw new MusicAccountCapacityError("capacity_below_existing_grants");
+      }
+      return rowToAccount(row);
+    },
+
+    deleteMusicAccount(id) {
+      return deleteAccountStmt.run(id).changes > 0;
+    },
+
+    assignMusicAccount(userId, platform, accountId, grantedBy) {
+      // Capacity check and grant write share one transaction: two concurrent
+      // clicks must not hand out an exclusive account twice.
+      const run = db.transaction(() => {
+        const account = selectAccountForGrant.get(accountId) as any;
+        if (!account) throw new MusicAccountCapacityError("account_full");
+
+        const capacity = Number(account.capacity ?? 0);
+        if (capacity !== 0) {
+          // Re-assigning the same user to the same account is not a new grant.
+          const existing = selectAnyGrant.get(userId, platform) as any;
+          const alreadyMine = existing && Number(existing.accountId) === accountId;
+          if (!alreadyMine) {
+            const used = Number((countGrantsForAccount.get(accountId) as any).n ?? 0);
+            if (capacity === 1 && used >= 1) {
+              throw new MusicAccountCapacityError("account_exclusive");
+            }
+            if (capacity > 1 && used >= capacity) {
+              throw new MusicAccountCapacityError("account_full");
+            }
+          }
+        }
+
+        upsertGrant.run({ userId, platform, accountId, grantedBy });
+      });
+      run();
+    },
+
+    revokeMusicAccount(userId, platform) {
+      return deleteGrantStmt.run(userId, platform).changes > 0;
+    },
+
+    selectGrantedAccount(userId, platform) {
+      const row = selectGrantedEnabled.get(userId, platform) as any;
+      return row ? rowToAccount(row) : null;
+    },
+
+    getMusicAccountGrant(userId, platform) {
+      const row = selectAnyGrant.get(userId, platform) as any;
+      if (!row) return null;
+      return {
+        userId: String(row.userId),
+        platform: String(row.platform),
+        accountId: Number(row.accountId),
+        grantedBy: String(row.grantedBy ?? ""),
+        grantedAt: String(row.grantedAt ?? ""),
+      };
+    },
+
+    listMusicAccountGrants() {
+      return (selectAllGrants.all() as any[]).map((row) => ({
+        userId: String(row.userId),
+        platform: String(row.platform),
+        accountId: Number(row.accountId),
+        grantedBy: String(row.grantedBy ?? ""),
+        grantedAt: String(row.grantedAt ?? ""),
+      }));
+    },
+
+    getMusicPref(userId, platform) {
+      const row = selectPref.get(userId, platform) as { preferShared: number } | undefined;
+      return Number(row?.preferShared ?? 0) === 1;
+    },
+
+    setMusicPref(userId, platform, preferShared) {
+      upsertPref.run(userId, platform, preferShared ? 1 : 0);
     },
 
     saveQueue(ownerId, name, songs, createdBy) {
