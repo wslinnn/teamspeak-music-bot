@@ -1500,6 +1500,66 @@ describe("BotInstance — restores persisted player settings on construction (#1
   });
 });
 
+describe("BotInstance._resumeIfReturning — channel fence", () => {
+  type ResumeCtx = {
+    connected: boolean;
+    autoPaused: boolean;
+    player: { getState: () => string };
+    tsClient: { getChannelId: () => bigint | null };
+    handleOccupancy: (...args: unknown[]) => void;
+  };
+  const resumeIfReturning = (BotInstance.prototype as any)._resumeIfReturning;
+
+  function makeCtx(overrides: Partial<ResumeCtx> = {}): ResumeCtx {
+    return {
+      connected: true,
+      autoPaused: true,
+      player: { getState: () => "paused" },
+      tsClient: { getChannelId: () => 7n },
+      handleOccupancy: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it("resumes when a client enters the bot's own channel", () => {
+    const ctx = makeCtx();
+    resumeIfReturning.call(ctx, "clientEnter", 7n);
+    expect(ctx.handleOccupancy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT resume when a client enters another channel", () => {
+    const ctx = makeCtx();
+    resumeIfReturning.call(ctx, "clientEnter", 9n);
+    expect(ctx.handleOccupancy).not.toHaveBeenCalled();
+  });
+
+  it("resumes when the event carries no channel (voiceActivity fallback)", () => {
+    // This fork deliberately keeps the channel-less path: some servers deliver
+    // leave but never enter, and voice packets are the only reliable trigger.
+    const ctx = makeCtx();
+    resumeIfReturning.call(ctx, "voiceActivity");
+    expect(ctx.handleOccupancy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails open when the bot's own channel is unknown", () => {
+    const ctx = makeCtx({ tsClient: { getChannelId: () => null } });
+    resumeIfReturning.call(ctx, "clientEnter", 9n);
+    expect(ctx.handleOccupancy).toHaveBeenCalledTimes(1);
+  });
+
+  it("still requires autoPaused + paused", () => {
+    const ctx = makeCtx({ autoPaused: false });
+    resumeIfReturning.call(ctx, "clientEnter", 7n);
+    expect(ctx.handleOccupancy).not.toHaveBeenCalled();
+  });
+
+  it("does nothing while disconnected", () => {
+    const ctx = makeCtx({ connected: false });
+    resumeIfReturning.call(ctx, "clientEnter", 7n);
+    expect(ctx.handleOccupancy).not.toHaveBeenCalled();
+  });
+});
+
 describe("BotInstance.handleTextMessage — response chunking (#116)", () => {
   it("splits a long command response into multiple sends, each under the byte cap", async () => {
     const ctx = makeGateCtx({ adminGroups: [] });

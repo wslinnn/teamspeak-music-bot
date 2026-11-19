@@ -581,7 +581,8 @@ export class BotInstance extends EventEmitter {
     this.tsClient.on("clientEnter", (info: { id: number; channelID: bigint }) => {
       // info 可缺省：合并后该事件也承担上游「触发占用对账」的角色，允许无载荷触发
       if (info) this.channelView.onEnter(info);
-      this._resumeIfReturning("clientEnter");
+      // A client landing in another channel is not a listener returning.
+      this._resumeIfReturning("clientEnter", info?.channelID);
       this.applyChannelView();
       void this.refreshOccupancy(); // upstream 围栏查询：与事件视图并行校准占用
     });
@@ -606,6 +607,10 @@ export class BotInstance extends EventEmitter {
         });
       } else {
         this.voiceDucking.removeSpeaker(event.id);
+        // Moving INTO the bot's channel is a listener returning just as much
+        // as entering it is (upstream d130652); the channel filter inside
+        // _resumeIfReturning makes moves to other channels a no-op.
+        this._resumeIfReturning("clientEnter", event.targetChannelID);
       }
       this.applyChannelView();
       void this.refreshOccupancy();
@@ -662,11 +667,26 @@ export class BotInstance extends EventEmitter {
    * idle-disconnect timer. This path NEVER pauses — userCount is always > 0 —
    * so a spurious or unrelated enter can only (harmlessly) resume, never stop
    * playback.
+   *
+   * `channelId` is the channel the returning client landed in. Pass it when the
+   * event carries it (clientEnter / clientMoved): a client entering some OTHER
+   * channel on the same server is not "a listener came back to the bot", and
+   * resuming for it would un-pause while the room is still empty. The
+   * voiceActivity path deliberately omits it — that event has no channel, and
+   * this fork relies on it precisely for environments where the enter
+   * notification never arrives.
    */
   private _resumeIfReturning(
     source: "clientEnter" | "voiceActivity" = "clientEnter",
+    channelId?: bigint,
   ): void {
     if (!this.connected) return;
+    if (channelId !== undefined) {
+      const selfChannel = this.tsClient.getChannelId();
+      // An unknown self channel means we cannot judge; fail open (the pre-fix
+      // behaviour) rather than dropping a legitimate resume.
+      if (selfChannel !== null && channelId !== selfChannel) return;
+    }
     if (shouldResumeOnReturn(this.autoPaused, this.player.getState())) {
       this.handleOccupancy(1, source);
     }
@@ -1014,6 +1034,14 @@ export class BotInstance extends EventEmitter {
   }
 
   private async handleTextMessage(msg: TS3TextMessage): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    // TS numeric invoker ids belong to ONE connection. A permission check can
+    // await a live server-group query (the longest window in this path), and a
+    // reconnect during it would make every later reply address a client id that
+    // now belongs to someone else. A generation mismatch is the only signal
+    // that matters here — `connected` is checked separately by each reply path.
+    const isCurrent = () => this.lifecycleGeneration === generation;
+
     const parsed = parseCommand(
       msg.message,
       this.config.commandPrefix,
@@ -1022,6 +1050,7 @@ export class BotInstance extends EventEmitter {
     if (!parsed) return;
 
     if (!(await this.isCommandAllowed(parsed.name, msg))) {
+      if (!isCurrent()) return;
       this.logger.info(
         { command: parsed.name, invoker: msg.invokerName },
         "Command denied: invoker not in adminGroups"
@@ -1034,6 +1063,8 @@ export class BotInstance extends EventEmitter {
       return;
     }
 
+    if (!isCurrent()) return;
+
     this.logger.info(
       { command: parsed.name, args: parsed.args, invoker: msg.invokerName },
       "Command received"
@@ -1045,11 +1076,13 @@ export class BotInstance extends EventEmitter {
         // A single long reply (e.g. full lyrics) would exceed TeamSpeak's
         // per-message byte cap, so split it and send the chunks in order.
         for (const chunk of splitTextIntoChunks(response)) {
+          if (!isCurrent()) return;
           await this.tsClient.sendTextMessage(chunk);
         }
       }
     } catch (err) {
       this.logger.error({ err, command: parsed.name }, "Command execution error");
+      if (!isCurrent()) return;
       try {
         await this.tsClient.sendTextMessage(
           `Error: ${(err as Error).message}`
