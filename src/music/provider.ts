@@ -283,6 +283,16 @@ export interface MusicProvider {
   setCookie(cookie: string): void;
   getCookie(): string;
   getAuthStatus(): Promise<AuthStatus>;
+  /**
+   * A view of this same provider logged in as another account, without
+   * disturbing the shared instance. Implemented by the sources that support
+   * per-account logins; the rest omit it and the web layer falls back to the
+   * shared login.
+   *
+   * Note for cache wrappers: the returned view must NOT share an unscoped
+   * content cache with the shared instance — see cached-provider.ts.
+   */
+  withCookie?(cookie: string): MusicProvider;
   getPersonalFm?(): Promise<Song[]>;
   getDailyRecommendSongs?(): Promise<Song[]>;
   getUserPlaylists?(): Promise<Playlist[]>;

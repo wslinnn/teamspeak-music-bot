@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { withContentCache } from "./cached-provider.js";
+import { withContentCache, cacheScopeForCookie } from "./cached-provider.js";
 import { TtlLruCache } from "./cache.js";
 import type { LyricLine, MusicProvider, Playlist, SearchResult, Song } from "./provider.js";
 
@@ -106,5 +106,101 @@ describe("withContentCache", () => {
     vi.advanceTimersByTime(30 * 60 * 1000);
     await wrapped.getPlaylistSongs("full-list"); // 1h TTL 未到 → 命中
     expect(provider.getPlaylistSongs).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("withContentCache — account isolation", () => {
+  it("never shares cache entries between different scopes", async () => {
+    const cache = new TtlLruCache(50);
+    const provA = fakeProvider();
+    const provB = fakeProvider();
+    const a = withContentCache(provA, cache, "accountA");
+    const b = withContentCache(provB, cache, "accountB");
+
+    await a.getLyrics("s1");
+    await b.getLyrics("s1");
+
+    // Same underlying cache object, different accounts → each hits upstream
+    // exactly once and neither read satisfies the other.
+    expect(provA.getLyrics).toHaveBeenCalledTimes(1);
+    expect(provB.getLyrics).toHaveBeenCalledTimes(1);
+  });
+
+  it("keys a scoped call differently from an unscoped one on the same cache", async () => {
+    const cache = new TtlLruCache(50);
+    const plain = fakeProvider();
+    const scoped = fakeProvider();
+    const a = withContentCache(plain, cache);
+    const b = withContentCache(scoped, cache, "acct");
+
+    await a.getLyrics("s1");
+    await b.getLyrics("s1");
+    // A shared-login read must not satisfy a personal-account read.
+    expect(plain.getLyrics).toHaveBeenCalledTimes(1);
+    expect(scoped.getLyrics).toHaveBeenCalledTimes(1);
+  });
+
+  it("still collapses repeats WITHIN one scope", async () => {
+    const cache = new TtlLruCache(50);
+    const p = fakeProvider();
+    const w = withContentCache(p, cache, "acct");
+    await w.getLyrics("s1");
+    await w.getLyrics("s1");
+    expect(p.getLyrics).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives a withCookie view its own cache instead of bypassing caching", async () => {
+    const cache = new TtlLruCache(50);
+    const view = fakeProvider();
+    const base = {
+      ...fakeProvider(),
+      withCookie: vi.fn(() => view),
+    } as unknown as MusicProvider;
+
+    const w = withContentCache(base, new TtlLruCache(50), "", () => new TtlLruCache(50));
+    const v = w.withCookie!("MUSIC_U=personal");
+
+    await v.getLyrics("s1");
+    await v.getLyrics("s1");
+    // The view must be cached too — a bare bind would call through twice.
+    expect(view.getLyrics).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let the shared instance serve a withCookie view's lyrics", async () => {
+    const cache = new TtlLruCache(50);
+    const view = fakeProvider();
+    const base = {
+      ...fakeProvider(),
+      withCookie: vi.fn(() => view),
+    } as unknown as MusicProvider;
+
+    const w = withContentCache(base, cache, "", () => new TtlLruCache(50));
+    await w.getLyrics("s1");
+    const v = w.withCookie!("MUSIC_U=personal");
+    await v.getLyrics("s1");
+
+    expect(base.getLyrics).toHaveBeenCalledTimes(1);
+    expect(view.getLyrics).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("cacheScopeForCookie", () => {
+  it("returns no prefix for the shared (empty) login", () => {
+    expect(cacheScopeForCookie("")).toBe("");
+    expect(cacheScopeForCookie("   ")).toBe("");
+  });
+
+  it("is stable for the same cookie", () => {
+    expect(cacheScopeForCookie("MUSIC_U=abc")).toBe(cacheScopeForCookie("MUSIC_U=abc"));
+  });
+
+  it("differs per account", () => {
+    expect(cacheScopeForCookie("MUSIC_U=abc")).not.toBe(cacheScopeForCookie("MUSIC_U=xyz"));
+  });
+
+  it("does not leak the credential into the key", () => {
+    const scope = cacheScopeForCookie("MUSIC_U=SUPER-SECRET");
+    expect(scope).not.toContain("SUPER-SECRET");
+    expect(scope).toHaveLength(16);
   });
 });

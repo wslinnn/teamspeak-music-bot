@@ -73,15 +73,19 @@ async function main() {
   const contentCache = () => new TtlLruCache(600);
   const neteaseProvider = withContentCache(
     new NeteaseProvider(apiServer.getNeteaseBaseUrl()),
-    contentCache()
+    contentCache(),
+    "",
+    contentCache
   );
   const qqProvider = withContentCache(
     new QQMusicProvider(apiServer.getQQMusicBaseUrl()),
-    contentCache()
+    contentCache(),
+    "",
+    contentCache
   );
   const bilibiliProvider = new BiliBiliProvider();
   const localProvider = new LocalMusicProvider(LOCAL_AUDIO_DIR);
-  const kugouProvider = withContentCache(new KugouProvider(), contentCache());
+  const kugouProvider = withContentCache(new KugouProvider(), contentCache(), "", contentCache);
   const spotifyProvider = new SpotifyProvider();
   // Safety gate (spec §7): the source is inert unless EXPLICITLY enabled.
   // Only feed credentials when enabled — otherwise the provider has no creds,
