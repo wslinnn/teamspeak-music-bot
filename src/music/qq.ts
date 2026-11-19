@@ -1,4 +1,5 @@
 import axios, { type AxiosInstance } from "axios";
+import { normalizeCookie } from "./cookie-normalize.js";
 import type {
   MusicProvider,
   Song,
@@ -818,7 +819,8 @@ export class QQMusicProvider implements MusicProvider {
   }
 
   setCookie(cookie: string): void {
-    this.cookie = cookie;
+    // A pasted Set-Cookie line would otherwise send Max-Age/Path upstream.
+    this.cookie = normalizeCookie(cookie);
     // Reset radar pagination so a re-login (different account) starts from the
     // first page rather than inheriting the previous account's cursor.
     this.radarPage = 1;

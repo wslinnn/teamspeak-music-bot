@@ -19,6 +19,7 @@ import axios, { type AxiosInstance } from "axios";
 import crypto from "node:crypto";
 import zlib from "node:zlib";
 import { parseLyrics } from "./netease.js";
+import { normalizeCookie } from "./cookie-normalize.js";
 import type {
   Album,
   AuthStatus,
@@ -442,7 +443,9 @@ export class KugouProvider implements MusicProvider {
   // --- Cookie persistence (CookieStore stores a flat "k=v; k=v" string) ------
   setCookie(cookie: string): void {
     const map: CookieMap = {};
-    for (const part of (cookie || "").split(";")) {
+    // Normalised first: otherwise Max-Age/Expires/Path become map keys and get
+    // sent upstream as if they were credentials.
+    for (const part of normalizeCookie(cookie).split(";")) {
       const eq = part.indexOf("=");
       if (eq < 0) continue;
       const k = part.slice(0, eq).trim();
