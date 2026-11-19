@@ -3,9 +3,11 @@ import {
   TS3Client,
   type TS3ClientOptions,
   type TS3TextMessage,
+  type TS3PluginCommand,
   type TS3VoiceActivity,
   type TS3VoiceSendFailure,
 } from "../ts-protocol/client.js";
+import { OpenProtocolManager } from "../ts-protocol/open-protocol.js";
 import { AudioPlayer } from "../audio/player.js";
 import { PlayQueue, PlayMode, type QueuedSong } from "../audio/queue.js";
 import { UserFacingError } from "../errors.js";
@@ -182,6 +184,8 @@ export class BotInstance extends EventEmitter {
   name: string;
 
   private tsClient: TS3Client;
+  /** OpenProtocol v1 discovery over TeamSpeak plugin commands. */
+  private openProtocol: OpenProtocolManager;
   private player: AudioPlayer;
   private voiceDucking: VoiceDuckingController;
   private managedVoiceClients: ManagedVoiceClientRegistry;
@@ -274,6 +278,14 @@ export class BotInstance extends EventEmitter {
     this.avatarStore = options.avatarStore;
 
     this.tsClient = new TS3Client(options.tsOptions, this.logger);
+    this.openProtocol = new OpenProtocolManager({
+      transport: this.tsClient,
+      getConfig: () => ({
+        locale: this.config.locale,
+        commandPrefix: this.config.commandPrefix,
+      }),
+      logger: this.logger,
+    });
     this.player = new AudioPlayer(this.logger);
     this.voiceDucking = new VoiceDuckingController(
       this.player,
@@ -490,6 +502,12 @@ export class BotInstance extends EventEmitter {
       });
     });
 
+    this.tsClient.on("pluginCommand", (cmd: TS3PluginCommand) => {
+      this.openProtocol?.handlePluginCommand(cmd).catch((err) => {
+        this.logger.debug({ err }, "OpenProtocol plugin command handler failed");
+      });
+    });
+
     this.tsClient.on("disconnected", () => {
       // Always reset local state — covers the case where connect() never
       // completed (hanging handshake → 60s library idle timeout) and
@@ -497,6 +515,7 @@ export class BotInstance extends EventEmitter {
       // short-circuited on !this.connected, leaving player stuck as "playing".
       this.lifecycleGeneration++;
       this.connected = false;
+      this.openProtocol?.reset();
       this._cancelIdleTimer();
       this.unregisterManagedVoiceClient(MANAGED_VOICE_CLIENT_RELEASE_GRACE_MS);
       this.voiceDucking.reset(true);
@@ -555,6 +574,9 @@ export class BotInstance extends EventEmitter {
       this.applyChannelView();
       this._startIdlePoller();
       this._startJellyfinReportPoller();
+      // Tell any user-side plugin on this channel what we are and which
+      // commands we accept (OpenProtocol v1 discovery).
+      this.openProtocol?.scheduleAnnounce();
     });
 
     this.tsClient.on("voiceActivity", (activity: TS3VoiceActivity) => {
@@ -583,6 +605,11 @@ export class BotInstance extends EventEmitter {
       if (info) this.channelView.onEnter(info);
       // A client landing in another channel is not a listener returning.
       this._resumeIfReturning("clientEnter", info?.channelID);
+      // Someone new to this channel may carry a plugin that has not seen us.
+      // scheduleAnnounce() is debounced, so a burst of joins costs one broadcast.
+      if (info?.channelID !== undefined && info.channelID === this.tsClient.getChannelId()) {
+        this.openProtocol?.scheduleAnnounce();
+      }
       this.applyChannelView();
       void this.refreshOccupancy(); // upstream 围栏查询：与事件视图并行校准占用
     });
@@ -605,6 +632,8 @@ export class BotInstance extends EventEmitter {
         this.profileManager.onChannelMoved(event.targetChannelID).catch((err) => {
           this.logger.warn({ err }, "Channel description move update failed");
         });
+        // A new channel's plugins have not seen our announce yet.
+        this.openProtocol?.scheduleAnnounce();
       } else {
         this.voiceDucking.removeSpeaker(event.id);
         // Moving INTO the bot's channel is a listener returning just as much

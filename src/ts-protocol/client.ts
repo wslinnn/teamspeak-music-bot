@@ -11,6 +11,7 @@ import {
   listClients,
   moveClient,
   sendChannelMessage,
+  sendPluginCommand,
   sendPrivateMessage,
   type Channel,
   type ChannelID,
@@ -19,6 +20,8 @@ import {
   type ClientLeaveEvent,
   type ClientMovedEvent,
   type ClientID,
+  type PluginCommandEvent,
+  type PluginCommandTarget,
   type TextMessageEvent,
   type VoiceDataEvent,
   type FileUploadInfo,
@@ -93,6 +96,19 @@ export interface TS3VoiceActivity {
   /** Stable TeamSpeak identity when the sender is present in the client view. */
   clientUid?: string;
 }
+
+/** A plugin command delivered to this client (the OpenProtocol channel). */
+export interface TS3PluginCommand {
+  name: string;
+  data: string;
+  invokerId: number;
+  invokerUid: string;
+  invokerName: string;
+}
+
+/** Where a plugin command goes: the current channel, the whole server, or one
+ *  specific client. */
+export type TS3PluginTarget = "channel" | "server" | number;
 
 /** Send acceptance only: an accepted UDP call does not confirm delivery. */
 export interface TS3VoiceSendFailure {
@@ -363,6 +379,19 @@ export class TS3Client extends EventEmitter {
       this.emit("voiceActivity", activity);
     });
 
+    sdkClient.on("pluginCommand", (ev: PluginCommandEvent) => {
+      if (!isCurrent()) return;
+      const invokerId = Number(ev.invokerID);
+      if (invokerId === this.clientId) return;
+      this.emit("pluginCommand", {
+        name: ev.name,
+        data: ev.data,
+        invokerId,
+        invokerUid: ev.invokerUID ?? "",
+        invokerName: ev.invokerName,
+      } satisfies TS3PluginCommand);
+    });
+
     sdkClient.on("disconnected", (err: unknown) => {
       if (!isCurrent()) return;
       const code = safeSocketErrorCode(err);
@@ -537,6 +566,21 @@ export class TS3Client extends EventEmitter {
       return;
     }
     await sendChannelMessage(this.client, message);
+  }
+
+  /**
+   * Send a named plugin command. `target` is the current channel, the whole
+   * server, or one client id — the OpenProtocol link to user-side plugins.
+   */
+  async sendPluginCommand(
+    name: string,
+    data: string,
+    target: TS3PluginTarget = "channel",
+  ): Promise<void> {
+    if (!this.client) throw new Error("Not connected");
+    const resolved: PluginCommandTarget =
+      typeof target === "number" ? { clientID: asClientID(target) } : target;
+    await sendPluginCommand(this.client, name, data, resolved);
   }
 
   async getClientsInChannel(): Promise<ClientEntry[]> {
