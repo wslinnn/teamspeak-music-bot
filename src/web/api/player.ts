@@ -2,7 +2,7 @@ import { Router } from "express";
 import { respondError } from "./respond.js";
 import type { BotManager } from "../../bot/manager.js";
 import type { BotDatabase } from "../../data/database.js";
-import type { MusicProvider, Song, ArtistSongPage } from "../../music/provider.js";
+import type { MusicProvider, Song, ArtistSongPage, PlayFailure } from "../../music/provider.js";
 import type { Logger } from "../../logger.js";
 import { parseCommand } from "../../bot/commands.js";
 import { sanitizeJellyfinCoverUrl } from "../../music/jellyfin.js";
@@ -458,7 +458,7 @@ export function createPlayerRouter(
           // the sequential retry path, which still has a chance.
         }
         if (queueable.length === 0) {
-          return { body: { ok: false, message: `歌单 ${totalCount} 首歌曲均无版权可播放（区域/版权限制）` } };
+          return { body: { ok: false, message: `歌单 ${totalCount} 首歌曲均不可播放（无版权或需会员）` } };
         }
 
         const queue = bot.getQueueManager();
@@ -493,7 +493,7 @@ export function createPlayerRouter(
 
         const playing = queue.current();
         const loadedMsg = queueable.length < totalCount
-          ? `已加载 ${queueable.length}/${totalCount} 首（其余区域/版权限制）`
+          ? `已加载 ${queueable.length}/${totalCount} 首（其余不可播放）`
           : `已加载 ${queueable.length} 首`;
         if (started && playing) {
           return { body: { ok: true, message: `${loadedMsg}，正在播放：${playing.name}` } };
@@ -549,7 +549,7 @@ export function createPlayerRouter(
           }
         }
         if (queueable.length === 0) {
-          return { body: { ok: false, message: `专辑 ${totalCount} 首歌曲均无版权可播放（区域/版权限制）` } };
+          return { body: { ok: false, message: `专辑 ${totalCount} 首歌曲均不可播放（无版权或需会员）` } };
         }
 
         const queue = bot.getQueueManager();
@@ -576,7 +576,7 @@ export function createPlayerRouter(
 
         const playing = queue.current();
         const loadedMsg = queueable.length < totalCount
-          ? `已加载 ${queueable.length}/${totalCount} 首（其余区域/版权限制）`
+          ? `已加载 ${queueable.length}/${totalCount} 首（其余不可播放）`
           : `已加载 ${queueable.length} 首`;
         if (started && playing) {
           return { body: { ok: true, message: `${loadedMsg}，正在播放：${playing.name}` } };
@@ -639,7 +639,7 @@ export function createPlayerRouter(
         }
       }
       if (queueable.length === 0) {
-        res.json({ ok: false, message: `歌手 ${totalCount} 首歌曲均无版权可播放（区域/版权限制）` });
+        res.json({ ok: false, message: `歌手 ${totalCount} 首歌曲均不可播放（无版权或需会员）` });
         return;
       }
 
@@ -670,7 +670,7 @@ export function createPlayerRouter(
 
         const playing = queue.current();
         const loadedMsg = queueable.length < totalCount
-          ? `已加载 ${queueable.length}/${totalCount} 首（其余区域/版权限制）`
+          ? `已加载 ${queueable.length}/${totalCount} 首（其余不可播放）`
           : `已加载 ${queueable.length} 首`;
         return started && playing
           ? { ok: true, message: `${loadedMsg}，正在播放：${playing.name}` }
@@ -704,10 +704,11 @@ export function createPlayerRouter(
       // clear branch — do NOT also call it here, or it would delete retained
       // local uploads in keep-queue mode.
       const body = await bot.runExclusive(async () => {
-        const ok = await bot.playSingleSong({ ...song }, requesterName(req));
+        let reason: string | undefined;
+        const ok = await bot.playSingleSong({ ...song }, requesterName(req), (f: PlayFailure) => { reason = f.message; });
         return ok
           ? { ok: true, message: `正在播放：${song.name || 'Unknown'} - ${song.artist || 'Unknown'}` }
-          : { ok: false, message: `无法播放「${song.name || song.id}」（区域/版权限制）` };
+          : { ok: false, message: `无法播放「${song.name || song.id}」${reason ? `：${reason}` : ""}` };
       });
       res.json(body);
     } catch (err) {
@@ -747,9 +748,13 @@ export function createPlayerRouter(
           // Promote the just-added song to current and start it.
           queue.playAt(insertedAt);
           bot.getPlayer().resetFailures();
-          const ok = await bot.resolveAndPlay(queue.current()!);
+          let reason: string | undefined;
+          const ok = await bot.resolveAndPlay(queue.current()!, (f: PlayFailure) => { reason = f.message; });
           if (!ok) {
-            return { ok: false, message: `无法播放「${song.name || song.id}」（区域/版权限制）` };
+            return {
+              ok: false,
+              message: `无法播放「${song.name || song.id}」${reason ? `：${reason}` : ""}`,
+            };
           }
           return { ok: true, message: `正在播放：${song.name || 'Unknown'} - ${song.artist || 'Unknown'}` };
         }
@@ -786,9 +791,13 @@ export function createPlayerRouter(
         queue.addNext({ ...song, requestedBy: requesterName(req) });
         queue.playAt(insertedAt);
         bot.getPlayer().resetFailures();
-        const ok = await bot.resolveAndPlay(queue.current()!);
+        let reason: string | undefined;
+        const ok = await bot.resolveAndPlay(queue.current()!, (f: PlayFailure) => { reason = f.message; });
         if (!ok) {
-          return { ok: false, message: `无法播放「${song.name || song.id}」（区域/版权限制）` };
+          return {
+            ok: false,
+            message: `无法播放「${song.name || song.id}」${reason ? `：${reason}` : ""}`,
+          };
         }
         return { ok: true, message: `正在播放：${song.name || "Unknown"} - ${song.artist || "Unknown"}` };
       });

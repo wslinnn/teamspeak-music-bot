@@ -9,7 +9,8 @@ import {
 import { AudioPlayer } from "../audio/player.js";
 import { PlayQueue, PlayMode, type QueuedSong } from "../audio/queue.js";
 import { UserFacingError } from "../errors.js";
-import type { MusicProvider, Platform, Song } from "../music/provider.js";
+import type { MusicProvider, Platform, Song, PlayFailure } from "../music/provider.js";
+import { toPlayFailure } from "../music/provider.js";
 import {
   parseCommand,
   canRunCommand,
@@ -1254,14 +1255,25 @@ export class BotInstance extends EventEmitter {
     return requestedBy ? { ...song, requestedBy } : { ...song };
   }
 
-  /** Resolve URL for a song and start playing it. Skips to next if URL fails. */
-  async resolveAndPlay(song: QueuedSong): Promise<boolean> {
+  /** Resolve URL for a song and start playing it. Skips to next if URL fails.
+   *
+   *  `onFailure` receives the classified cause when a track could not start.
+   *  It is an optional callback rather than a second return value because ~20
+   *  call sites and the boolean contract are locked in by existing tests. */
+  async resolveAndPlay(
+    song: QueuedSong,
+    onFailure?: (failure: PlayFailure) => void,
+  ): Promise<boolean> {
+    const fail = (code: PlayFailure["code"], message: string, upstream?: Record<string, unknown>) =>
+      onFailure?.({ platform: song.platform, songId: song.id, code, message, upstream });
     if (!this.connected) {
       this.logger.warn({ songId: song.id, name: song.name }, "resolveAndPlay called on disconnected bot — skipping");
+      fail("unknown", "机器人未连接");
       return false;
     }
     if (song.platform === "local" && !this.isLocalAudioEnabled()) {
       this.logger.warn({ songId: song.id, name: song.name }, "Local audio playback disabled — refusing track");
+      fail("unknown", "本地音频播放已禁用");
       return false;
     }
     // Clear any accumulated skip votes — every fresh track starts with a
@@ -1281,6 +1293,7 @@ export class BotInstance extends EventEmitter {
       const result = await provider.getSongUrl(song.id);
       if (!result?.url) {
         this.logger.warn({ songId: song.id, name: song.name }, "No URL available, skipping");
+        fail("unknown", "没有拿到播放地址");
         return false;
       }
       // Scheme allowlist (review S5): http(s) URLs, the spotify: sentinel, and
@@ -1450,7 +1463,15 @@ export class BotInstance extends EventEmitter {
       this.emit("stateChange");
       return true;
     } catch (err) {
-      this.logger.error({ err, songId: song.id }, "Failed to resolve URL");
+      // A provider that knows why (SongUrlUnavailable / RiskControlError) gets
+      // to say so; anything else stays a generic resolve failure. Excluding the
+      // axios config is deliberate — it carries the account cookie.
+      const failure = toPlayFailure(song.platform, song.id, err);
+      this.logger.error(
+        { err, songId: song.id, platform: song.platform, code: failure.code, upstream: failure.upstream },
+        "Failed to resolve URL",
+      );
+      onFailure?.(failure);
       return false;
     }
   }
@@ -1704,7 +1725,11 @@ export class BotInstance extends EventEmitter {
    * Shared by chat !play and the web /play-song route so the toggle decision
    * lives in exactly one place (#119). Returns true if a track started playing.
    */
-  async playSingleSong(song: QueuedSong, requesterName?: string): Promise<boolean> {
+  async playSingleSong(
+    song: QueuedSong,
+    requesterName?: string,
+    onFailure?: (failure: PlayFailure) => void,
+  ): Promise<boolean> {
     const s = this.withRequester(song, requesterName);
     if (this.config.playKeepsQueue && !this.queue.isEmpty()) {
       const insertedAt =
@@ -1717,7 +1742,7 @@ export class BotInstance extends EventEmitter {
       this.queue.playAt(insertedAt);
       this.player.resetFailures();
       // No sweep here: the queue is kept, so no local uploads were released.
-      return this.resolveAndPlay(this.queue.current()!);
+      return this.resolveAndPlay(this.queue.current()!, onFailure);
     }
     // Legacy replace behavior (default).
     const previous = this.queue.current();
@@ -1731,7 +1756,7 @@ export class BotInstance extends EventEmitter {
 
     // Reset failure counter on user-initiated play
     this.player.resetFailures();
-    const ok = await this.resolveAndPlay(this.queue.current()!);
+    const ok = await this.resolveAndPlay(this.queue.current()!, onFailure);
     // Sweep AFTER the new song is queued+resolved: the replaced songs are no
     // longer referenced (and get deleted), but the song — if it is the same
     // local upload that was already playing — stays referenced and is preserved.
