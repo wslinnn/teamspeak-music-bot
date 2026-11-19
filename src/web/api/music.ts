@@ -173,15 +173,35 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
    * A disabled platform gets a friendly 400 and null back — the handler must
    * return immediately. Without a config (unit-test routers), everything
    * stays enabled.
+   *
+   * Per-user music accounts: with a `database` and the feature on, the caller's
+   * own or admin-assigned account drives the read, and `scope` becomes the
+   * cache key prefix for that account. Without a database (unit tests) or with
+   * the feature off, every request reads the shared login and `scope` is "" —
+   * byte-identical to the pre-feature behaviour.
    */
-  function resolveProvider(platform: unknown, res: Response): MusicProvider | null {
+  function resolveProvider(
+    platform: unknown,
+    req: Request,
+    res: Response,
+  ): { provider: MusicProvider; scope: string } | null {
     const requested = typeof platform === "string" && platform ? platform : undefined;
     const target = requested ?? (config ? defaultPlatform(config) : "netease");
     if (config && !isProviderEnabled(config, target)) {
       res.status(400).json({ error: `音源未启用：${target} (provider disabled)` });
       return null;
     }
-    return getProvider(target);
+    if (!database) return { provider: getProvider(target), scope: "" };
+    const resolved = resolveProviderForRequest(
+      {
+        database,
+        perUserMusicAccounts: config?.perUserMusicAccounts === true,
+        shared: getProvider,
+      },
+      req.user,
+      target,
+    );
+    return { provider: resolved.provider, scope: resolved.scope };
   }
 
   router.post(
@@ -246,12 +266,16 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
         res.json({ songs: [], playlists: [], albums: [] });
         return;
       }
-      const provider = resolveProvider(platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       // Server-side pagination: offset lets the web load past the first page.
       // Clamp to >= 0 so a bad/negative value falls back to the first page.
       const parsedOffset = Math.max(0, parseInt(offset as string) || 0);
-      const cacheKey = `${typeof platform === "string" ? platform : ""}|${parsedOffset}|${parseInt(limit as string) || 20}|${q}`;
+      // `scope` is "" for the shared login and a per-account hash otherwise.
+      // Dropping it here would serve one account's results to another for the
+      // 30s TTL — this is the leak the account pool gate exists to prevent.
+      const cacheKey = `${resolved.scope}|${typeof platform === "string" ? platform : ""}|${parsedOffset}|${parseInt(limit as string) || 20}|${q}`;
       const cached = searchCache.get(cacheKey);
       if (cached) {
         res.json(cached);
@@ -292,13 +316,20 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
       // enabled — a self-hosted library match is almost always the wanted one.
       const enabled = (p: string) => !config || isProviderEnabled(config, p);
       const none: SearchResult = { songs: [], albums: [], playlists: [] };
+      // Each source resolves through the caller's account scope independently:
+      // a member may have a NetEase login but not a QQ one. Missing a source
+      // here would mix the admin's library into a member's results.
+      const scoped = (p: string): MusicProvider => {
+        const r = resolveProvider(p, req, res);
+        return r ? r.provider : getProvider(p);
+      };
       const [jellyfinResult, neteaseResult, qqResult, bilibiliResult, localResult, kugouResult] = await Promise.allSettled([
-        jellyfinProvider && enabled("jellyfin") ? jellyfinProvider.search(q as string, parsedLimit) : Promise.resolve(none),
-        enabled("netease") ? neteaseProvider.search(q as string, parsedLimit) : Promise.resolve(none),
-        enabled("qq") ? qqProvider.search(q as string, parsedLimit) : Promise.resolve(none),
-        enabled("bilibili") ? bilibiliProvider.search(q as string, parsedLimit) : Promise.resolve(none),
+        jellyfinProvider && enabled("jellyfin") ? scoped("jellyfin").search(q as string, parsedLimit) : Promise.resolve(none),
+        enabled("netease") ? scoped("netease").search(q as string, parsedLimit) : Promise.resolve(none),
+        enabled("qq") ? scoped("qq").search(q as string, parsedLimit) : Promise.resolve(none),
+        enabled("bilibili") ? scoped("bilibili").search(q as string, parsedLimit) : Promise.resolve(none),
         localProvider && isLocalAudioEnabled() ? localProvider.search(q as string, parsedLimit) : Promise.resolve(none),
-        kugouProvider && enabled("kugou") ? kugouProvider.search(q as string, parsedLimit) : Promise.resolve(none),
+        kugouProvider && enabled("kugou") ? scoped("kugou").search(q as string, parsedLimit) : Promise.resolve(none),
       ]);
 
       const songs = [
@@ -339,8 +370,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
         res.status(403).json({ error: "本地音频播放已关闭" });
         return;
       }
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       const song = await provider.getSongDetail(req.params.id);
       if (!song) {
         res.status(404).json({ error: "Song not found" });
@@ -356,8 +388,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
   // a tight loop would hammer upstreams / probe arbitrary hosts.
   router.get("/playlist/:id", createRateLimit({ capacity: 10, refillPerSec: 0.5 }), async (req: Request<{ id: string }>, res: Response) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       const songs = await provider.getPlaylistSongs(req.params.id);
       res.json({ songs });
     } catch (err) {
@@ -371,8 +404,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
 
   router.get("/recommend/playlists", async (req, res) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       const playlists = await provider.getRecommendPlaylists();
       res.json({ playlists });
     } catch (err) {
@@ -382,8 +416,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
 
   router.get("/album/:id", async (req, res) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       const songs = await provider.getAlbumSongs(req.params.id);
       res.json({ songs });
     } catch (err) {
@@ -395,8 +430,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
   // 路由级限流兜底（对齐 search/playlist 的配置量级）。
   router.get("/lyrics/:id", createRateLimit({ capacity: 20, refillPerSec: 0.5 }), async (req: Request<{ id: string }>, res: Response) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       const lyrics = await provider.getLyrics(req.params.id);
       res.json({ lyrics });
     } catch (err) {
@@ -406,8 +442,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
 
   router.get("/artist/:id", async (req, res) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       if (!provider.getArtistDetail) {
         res.status(501).json({ error: "Not supported by this provider" });
         return;
@@ -436,8 +473,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
 
   router.get("/recommend/songs", requireNotGuest, async (req, res) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       if (!provider.getDailyRecommendSongs) {
         res.status(501).json({ error: "Not supported by this provider" });
         return;
@@ -452,8 +490,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
 
   router.get("/personal/fm", requireNotGuest, async (req, res) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       if (!provider.getPersonalFm) {
         res.status(501).json({ error: "Not supported by this provider" });
         return;
@@ -468,8 +507,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
 
   router.get("/user/playlists", requireNotGuest, async (req, res) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       if (!provider.getUserPlaylists) {
         res.status(501).json({ error: "Not supported by this provider" });
         return;
@@ -484,8 +524,9 @@ export function createMusicRouter(options: MusicRouterOptions): Router {
 
   router.get("/playlist/:id/detail", async (req, res) => {
     try {
-      const provider = resolveProvider(req.query.platform, res);
-      if (!provider) return;
+      const resolved = resolveProvider(req.query.platform, req, res);
+      if (!resolved) return;
+      const provider = resolved.provider;
       if (!provider.getPlaylistDetail) {
         res.status(501).json({ error: "Not supported by this provider" });
         return;
