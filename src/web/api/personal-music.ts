@@ -22,28 +22,46 @@ export function supportsPersonalLogin(
 }
 
 /**
- * The caller's own NetEase account, used for their personal FM instead of the
- * bot's shared login (#164). Every route acts on req.user only; the cookie is
- * stored server-side and never sent back to the browser.
+ * The caller's own music account, linked without touching the bot's shared
+ * login (#164).
+ *
+ * Routes are per-platform (`/netease/...`, `/qq/...`, …) because each source
+ * logs in differently: NetEase and Bilibili scan a QR from their own app, QQ
+ * and Kugou return a token through the sidecar. `pollQrLogin` is the shared
+ * shape — it returns the cookie WITHOUT writing it to the shared provider.
+ *
+ * Every route acts on req.user only; the cookie is stored server-side and
+ * never sent back to the browser.
  */
 export function createPersonalMusicRouter(
   database: BotDatabase,
-  neteaseProvider: MusicProvider,
+  providers: Partial<Record<string, MusicProvider>>,
   logger: Logger,
 ): Router {
   const router = Router();
-  const platform = "netease";
 
-  router.use((_req, res, next) => {
-    if (!supportsPersonalLogin(neteaseProvider)) {
-      res.status(501).json({ error: "Personal login not supported" });
-      return;
+  /** The provider for a path platform, or null when it cannot self-login. */
+  function providerFor(platform: string): (MusicProvider & PersonalLoginProvider) | null {
+    const candidate = providers[platform];
+    if (!candidate || !supportsPersonalLogin(candidate)) return null;
+    return candidate as MusicProvider & PersonalLoginProvider;
+  }
+
+  /** Resolve the platform from the route prefix, or 501. */
+  function requireProvider(platform: string, res: import("express").Response) {
+    const provider = providerFor(platform);
+    if (!provider) {
+      res.status(501).json({ error: `Personal login not supported for ${platform}` });
+      return null;
     }
-    next();
-  });
-  const provider = neteaseProvider as MusicProvider & PersonalLoginProvider;
+    return provider;
+  }
 
-  router.get("/netease/status", async (req, res) => {
+  router.get("/:platform/status", async (req, res) => {
+    const platform = req.params.platform;
+    const provider = requireProvider(platform, res);
+    if (!provider) return;
+
     const cookie = database.getUserMusicCookie(req.user!.id, platform);
     if (!cookie) {
       res.json({ linked: false, loggedIn: false });
@@ -53,21 +71,28 @@ export function createPersonalMusicRouter(
       const status = await provider.withCookie(cookie).getAuthStatus();
       res.json({ linked: true, ...status });
     } catch (err) {
-      logger.warn({ err }, "Personal NetEase status check failed");
+      logger.warn({ err, platform }, "Personal music status check failed");
       res.json({ linked: true, loggedIn: false });
     }
   });
 
-  router.post("/netease/qrcode", async (_req, res) => {
+  router.post("/:platform/qrcode", async (req, res) => {
+    const platform = req.params.platform;
+    const provider = requireProvider(platform, res);
+    if (!provider) return;
     try {
       res.json(await provider.getQrCode());
     } catch (err) {
-      logger.error({ err }, "Personal NetEase QR generation failed");
+      logger.error({ err, platform }, "Personal music QR generation failed");
       res.status(500).json({ error: (err as Error).message });
     }
   });
 
-  router.get("/netease/qrcode/status", async (req, res) => {
+  router.get("/:platform/qrcode/status", async (req, res) => {
+    const platform = req.params.platform;
+    const provider = requireProvider(platform, res);
+    if (!provider) return;
+
     const key = req.query.key;
     if (typeof key !== "string" || !key) {
       res.status(400).json({ error: "key is required" });
@@ -81,12 +106,16 @@ export function createPersonalMusicRouter(
       }
       res.json({ status });
     } catch (err) {
-      logger.error({ err }, "Personal NetEase QR status check failed");
+      logger.error({ err, platform }, "Personal music QR status check failed");
       res.status(500).json({ error: (err as Error).message });
     }
   });
 
-  router.delete("/netease", (req, res) => {
+  router.delete("/:platform", (req, res) => {
+    const platform = req.params.platform;
+    const provider = requireProvider(platform, res);
+    if (!provider) return;
+
     database.deleteUserMusicCookie(req.user!.id, platform);
     logger.info({ userId: req.user!.id, platform }, "Personal music account unlinked");
     res.json({ ok: true });

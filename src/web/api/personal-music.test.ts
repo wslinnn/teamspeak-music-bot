@@ -27,7 +27,10 @@ function mount() {
     (req as any).user = { id: "u1", username: "alice", role: "member" };
     next();
   });
-  app.use("/api/me/music", createPersonalMusicRouter(db, provider, pino({ level: "silent" })));
+  app.use(
+    "/api/me/music",
+    createPersonalMusicRouter(db, { netease: provider }, pino({ level: "silent" })),
+  );
   return { app, db, provider, personalView };
 }
 
@@ -189,6 +192,77 @@ describe("web FM uses the caller's linked NetEase account (#164)", () => {
 
     // A room account is not the caller's taste.
     expect(shared.withCookie).not.toHaveBeenCalled();
+    db.close();
+  });
+});
+
+describe("personal music account router — multi-platform", () => {
+  function mountMulti(providers: Record<string, any>) {
+    const db = createDatabase(":memory:");
+    db.db
+      .prepare("INSERT INTO users (id, username, passwordHash, createdAt, updatedAt, role) VALUES (?,?,?,?,?,?)")
+      .run("u1", "alice", "x", 0, 0, "member");
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      (req as any).user = { id: "u1", username: "alice", role: "member" };
+      next();
+    });
+    app.use("/api/me/music", createPersonalMusicRouter(db, providers, pino({ level: "silent" })));
+    return { app, db };
+  }
+  const qrProvider = (platform: string) => ({
+    platform,
+    getQrCode: vi.fn(async () => ({ qrUrl: "u", qrImg: "data:img", key: `${platform}-k` })),
+    pollQrLogin: vi.fn(async () => ({ status: "waiting" as const })),
+    withCookie: vi.fn(() => ({ getAuthStatus: async () => ({ loggedIn: true }) })),
+  });
+
+  it.each(["netease", "qq", "bilibili", "kugou"])("serves %s status and QR", async (platform) => {
+    const provider = qrProvider(platform);
+    const { app, db } = mountMulti({ [platform]: provider });
+    expect((await request(app).get(`/api/me/music/${platform}/status`)).status).toBe(200);
+    const qr = await request(app).post(`/api/me/music/${platform}/qrcode`);
+    expect(qr.status).toBe(200);
+    expect(qr.body.key).toBe(`${platform}-k`);
+    db.close();
+  });
+
+  it("links the cookie under the right platform, not always netease", async () => {
+    const qq = qrProvider("qq");
+    (qq.pollQrLogin as any).mockResolvedValue({ status: "confirmed", cookie: "uin=1; qm_keyst=x" });
+    const { app, db } = mountMulti({ qq });
+
+    await request(app).get("/api/me/music/qq/qrcode/status?key=k").expect(200);
+
+    expect(db.getUserMusicCookie("u1", "qq")).toBe("uin=1; qm_keyst=x");
+    expect(db.getUserMusicCookie("u1", "netease")).toBeNull();
+    db.close();
+  });
+
+  it("501s a platform whose provider cannot self-login", async () => {
+    const { app, db } = mountMulti({});
+    expect((await request(app).get("/api/me/music/qq/status")).status).toBe(501);
+    expect((await request(app).post("/api/me/music/qq/qrcode")).status).toBe(501);
+    db.close();
+  });
+
+  it("501s a provider that has no pollQrLogin (shared-login only)", async () => {
+    // jellyfin has no per-user login at all.
+    const { app, db } = mountMulti({ jellyfin: { platform: "jellyfin" } });
+    expect((await request(app).get("/api/me/music/jellyfin/status")).status).toBe(501);
+    db.close();
+  });
+
+  it("unlinks one platform without touching the other", async () => {
+    const { app, db } = mountMulti({ netease: qrProvider("netease"), qq: qrProvider("qq") });
+    db.setUserMusicCookie("u1", "netease", "MUSIC_U=a");
+    db.setUserMusicCookie("u1", "qq", "uin=1");
+
+    await request(app).delete("/api/me/music/netease").expect(200);
+
+    expect(db.getUserMusicCookie("u1", "netease")).toBeNull();
+    expect(db.getUserMusicCookie("u1", "qq")).toBe("uin=1");
     db.close();
   });
 });

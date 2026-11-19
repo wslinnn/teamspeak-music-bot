@@ -253,3 +253,37 @@ describe("pickStableAudioUrl (#161 long streams dying mid-play)", () => {
     });
   });
 });
+
+describe("BiliBiliProvider.pollQrLogin — per-user link without touching the shared login", () => {
+  it("returns the cookie but leaves the shared instance untouched", async () => {
+    const base = new BiliBiliProvider();
+    base.setCookie("SESSDATA=shared");
+
+    // The probe instance is what actually talks to Bilibili; stub its poll.
+    const original = BiliBiliProvider.prototype.checkQrCodeStatus;
+    BiliBiliProvider.prototype.checkQrCodeStatus = vi.fn(async function (this: BiliBiliProvider) {
+      this.setCookie("SESSDATA=personal; bili_jct=token");
+      return "confirmed" as const;
+    });
+    try {
+      const result = await base.pollQrLogin("k");
+      expect(result.status).toBe("confirmed");
+      expect(result.cookie).toContain("SESSDATA=personal");
+      // The shared login must survive a member linking their own account.
+      expect(base.getCookie()).toBe("SESSDATA=shared");
+    } finally {
+      BiliBiliProvider.prototype.checkQrCodeStatus = original;
+    }
+  });
+
+  it("passes through non-confirmed statuses without a cookie", async () => {
+    const base = new BiliBiliProvider();
+    const original = BiliBiliProvider.prototype.checkQrCodeStatus;
+    BiliBiliProvider.prototype.checkQrCodeStatus = vi.fn(async () => "waiting" as const);
+    try {
+      expect(await base.pollQrLogin("k")).toEqual({ status: "waiting" });
+    } finally {
+      BiliBiliProvider.prototype.checkQrCodeStatus = original;
+    }
+  });
+});

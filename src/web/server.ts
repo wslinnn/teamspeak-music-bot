@@ -290,7 +290,16 @@ export function createWebServer(options: WebServerOptions): WebServer {
   app.use(
     "/api/me/music",
     requireNotGuest,
-    createPersonalMusicRouter(options.database, options.neteaseProvider, logger),
+    createPersonalMusicRouter(
+      options.database,
+      {
+        netease: options.neteaseProvider,
+        qq: options.qqProvider,
+        bilibili: options.bilibiliProvider,
+        kugou: options.kugouProvider,
+      },
+      logger,
+    ),
   );
   // Member-facing view of their own account scope (per-user music accounts).
   // Reads config live so flipping the flag needs no restart.

@@ -221,6 +221,7 @@ function computeGtk(pSkey: string): number {
 export class QQMusicProvider implements MusicProvider {
   readonly platform = "qq" as const;
   private readonly sidecar: AxiosInstance;
+  private readonly baseUrl: string;
   private legacyCookie = "";
   private quality = "exhigh";
   private radarPage = 1;
@@ -230,6 +231,7 @@ export class QQMusicProvider implements MusicProvider {
     readonly managedSession?: QQManagedSession,
     private readonly assertSidecarPort?: () => void,
   ) {
+    this.baseUrl = baseUrl;
     this.sidecar = axios.create({
       baseURL: baseUrl,
       timeout: 10000,
@@ -920,6 +922,27 @@ export class QQMusicProvider implements MusicProvider {
     if (typeof body?.message === "string" && body.message.includes("未扫描"))
       return "waiting";
     return "waiting";
+  }
+
+  /**
+   * Poll a QR login and hand back the resulting cookie WITHOUT storing it on
+   * this instance.
+   *
+   * `checkQrCodeStatus` calls `setCookie`, which writes the bot's managed
+   * session — correct for the bot's own login, wrong for a web user linking
+   * their own account, which must never replace the shared one. Running the
+   * poll on a throwaway instance keeps the two apart.
+   */
+  async pollQrLogin(
+    key: string,
+  ): Promise<{ status: "waiting" | "scanned" | "confirmed" | "expired"; cookie?: string }> {
+    const probe = new QQMusicProvider(this.baseUrl, undefined, this.assertSidecarPort);
+    const status = await probe.checkQrCodeStatus(key);
+    if (status === "confirmed") {
+      const cookie = probe.getCookie();
+      return cookie ? { status, cookie } : { status };
+    }
+    return { status };
   }
 
   setCookie(cookie: string): void {

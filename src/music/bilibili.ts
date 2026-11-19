@@ -467,6 +467,27 @@ export class BiliBiliProvider implements MusicProvider {
 
   // --- Auth Status ---
 
+  /**
+   * Poll a QR login and hand back the resulting cookie WITHOUT storing it on
+   * this instance.
+   *
+   * `checkQrCodeStatus` writes into `this.cookie` — correct for the bot's own
+   * login, wrong for a web user linking their own account (#164), which must
+   * never replace the shared one. Running the poll on a throwaway instance
+   * keeps the two apart with no duplicated protocol logic.
+   */
+  async pollQrLogin(
+    key: string,
+  ): Promise<{ status: "waiting" | "scanned" | "confirmed" | "expired"; cookie?: string }> {
+    const probe = new BiliBiliProvider();
+    const status = await probe.checkQrCodeStatus(key);
+    if (status === "confirmed") {
+      const cookie = probe.getCookie();
+      return cookie ? { status, cookie } : { status };
+    }
+    return { status };
+  }
+
   async getAuthStatus(): Promise<AuthStatus> {
     if (!this.cookie) return { loggedIn: false };
     try {

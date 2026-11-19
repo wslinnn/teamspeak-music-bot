@@ -786,3 +786,35 @@ describe("QQMusicProvider.getSongUrl — failure classification", () => {
     await expect(p.getSongUrl("mid1")).resolves.toMatchObject({ url: "http://cdn/y.mp3" });
   });
 });
+
+describe("QQMusicProvider.pollQrLogin — per-user link without touching the shared login", () => {
+  it("returns the cookie but leaves the shared instance untouched", async () => {
+    const base = new QQMusicProvider("http://127.0.0.1:3200");
+    base.setCookie("uin=shared; qm_keyst=shared");
+
+    const original = QQMusicProvider.prototype.checkQrCodeStatus;
+    QQMusicProvider.prototype.checkQrCodeStatus = vi.fn(async function (this: QQMusicProvider) {
+      this.setCookie("uin=personal; qm_keyst=personal");
+      return "confirmed" as const;
+    });
+    try {
+      const result = await base.pollQrLogin("k");
+      expect(result.status).toBe("confirmed");
+      expect(result.cookie).toContain("uin=personal");
+      expect(base.getCookie()).toContain("uin=shared");
+    } finally {
+      QQMusicProvider.prototype.checkQrCodeStatus = original;
+    }
+  });
+
+  it("passes through non-confirmed statuses without a cookie", async () => {
+    const base = new QQMusicProvider("http://127.0.0.1:3200");
+    const original = QQMusicProvider.prototype.checkQrCodeStatus;
+    QQMusicProvider.prototype.checkQrCodeStatus = vi.fn(async () => "scanned" as const);
+    try {
+      expect(await base.pollQrLogin("k")).toEqual({ status: "scanned" });
+    } finally {
+      QQMusicProvider.prototype.checkQrCodeStatus = original;
+    }
+  });
+});

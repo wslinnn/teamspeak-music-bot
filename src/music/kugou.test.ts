@@ -285,3 +285,35 @@ describe("KugouProvider.getSongUrl — failure classification", () => {
     });
   });
 });
+
+describe("KugouProvider.pollQrLogin — per-user link without touching the shared login", () => {
+  it("returns the cookie but leaves the shared instance untouched", async () => {
+    const base = new KugouProvider();
+    base.setCookie("token=shared; userid=1");
+
+    const original = KugouProvider.prototype.checkQrCodeStatus;
+    KugouProvider.prototype.checkQrCodeStatus = vi.fn(async function (this: KugouProvider) {
+      this.setCookie("token=personal; userid=2; nickname=alice");
+      return "confirmed" as const;
+    });
+    try {
+      const result = await base.pollQrLogin("k");
+      expect(result.status).toBe("confirmed");
+      expect(result.cookie).toContain("token=personal");
+      expect(base.getCookie()).toContain("token=shared");
+    } finally {
+      KugouProvider.prototype.checkQrCodeStatus = original;
+    }
+  });
+
+  it("passes through non-confirmed statuses without a cookie", async () => {
+    const base = new KugouProvider();
+    const original = KugouProvider.prototype.checkQrCodeStatus;
+    KugouProvider.prototype.checkQrCodeStatus = vi.fn(async () => "expired" as const);
+    try {
+      expect(await base.pollQrLogin("k")).toEqual({ status: "expired" });
+    } finally {
+      KugouProvider.prototype.checkQrCodeStatus = original;
+    }
+  });
+});

@@ -13,7 +13,7 @@
 
         <SettingsAccount v-if="activeTab === 'general'" class="mt-6" />
 
-        <SettingsNeteaseAccount v-if="activeTab === 'general'" class="mt-6" />
+        <SettingsMyMusicAccount v-if="activeTab === 'general'" class="mt-6" />
 
         <!-- 成员视角的账号范围选择；管理员另见「权限」页的账号池管理 -->
         <SettingsMusicAccountScope v-if="activeTab === 'general'" class="mt-6" />
@@ -206,7 +206,7 @@ import { useAuthStore } from '../stores/auth';
 import SettingsLayout, { type TabDef } from '../components/settings/SettingsLayout.vue';
 import SettingsTheme from '../components/settings/SettingsTheme.vue';
 import SettingsAccount from '../components/settings/SettingsAccount.vue';
-import SettingsNeteaseAccount from '../components/settings/SettingsNeteaseAccount.vue';
+import SettingsMyMusicAccount from '../components/settings/SettingsMyMusicAccount.vue';
 import SettingsMusicAccountScope from '../components/settings/SettingsMusicAccountScope.vue';
 import SettingsMusicAccounts from '../components/settings/SettingsMusicAccounts.vue';
 import SettingsApiKeys from '../components/settings/SettingsApiKeys.vue';
