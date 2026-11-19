@@ -38,6 +38,14 @@
       <button v-if="showAdd" class="text-lg p-1 rounded-[var(--radius-sm)] opacity-70 transition-opacity hover:opacity-100" @click.stop="$emit('add')" title="添加到队列">
         <Icon icon="mdi:playlist-plus" />
       </button>
+      <button
+        v-if="showRemove"
+        class="text-lg p-1 rounded-[var(--radius-sm)] opacity-70 transition-opacity hover:opacity-100 hover:text-danger"
+        @click.stop="$emit('remove')"
+        title="删除此记录"
+      >
+        <Icon icon="mdi:delete-outline" />
+      </button>
     </div>
   </div>
 </template>
@@ -52,16 +60,20 @@ import { formatDuration } from '../utils/format';
 import { getPlatformLabel, getPlatformTailwindClass } from '../utils/platform';
 import { useAuthStore } from '../stores/auth';
 
-defineProps<{
+const props = defineProps<{
   song: Song;
   index: number;
   active?: boolean;
+  /** Show a per-row delete action (play-history rows only). The caller owns
+   *  the permission gate — this prop just renders the affordance. */
+  removable?: boolean;
 }>();
 
 defineEmits<{
   play: [];
   playnext: [];
   add: [];
+  remove: [];
 }>();
 
 // 操作按钮显隐（D14）：无权限的按钮直接不渲染，避免点击后 403
@@ -69,5 +81,8 @@ const auth = useAuthStore();
 const showPlay = computed(() => auth.can('player.control') || auth.guestCan('playNow'));
 const showPlayNext = computed(() => auth.can('player.control') || auth.guestCan('playNext'));
 const showAdd = computed(() => auth.can('player.queue') || auth.guestCan('addToQueue'));
+const showRemove = computed(
+  () => props.removable && (auth.can('player.queue') || auth.guestCan('removeClear')),
+);
 
 </script>
